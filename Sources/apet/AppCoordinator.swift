@@ -28,6 +28,7 @@ final class AppCoordinator {
     private var watchSource: DispatchSourceFileSystemObject?
     private var watchFd: Int32 = -1
     private var reapTimer: DispatchSourceTimer?
+    private var isStopped = false
 
     // MARK: - Init
 
@@ -62,7 +63,7 @@ final class AppCoordinator {
 
         // 3. Register change handler: log every store mutation
         store.addChangeHandler { [weak self] changes, isReplay in
-            guard let self else { return }
+            guard let self, let store = self.store else { return }
             let summary = store.summary()
             let line = "[change] \(changes) replay=\(isReplay) summary=\(summary)\n"
             self.appendToLog(line)
@@ -98,6 +99,7 @@ final class AppCoordinator {
     }
 
     func stop() {
+        isStopped = true
         watchSource?.cancel()
         watchSource = nil
         if watchFd >= 0 {
@@ -111,6 +113,7 @@ final class AppCoordinator {
     // MARK: - Private: file watch
 
     private func openWatchSource() {
+        guard !isStopped else { return }
         guard let ingestor else { return }
 
         let fd = Darwin.open(eventsPath, O_RDONLY | O_NONBLOCK)
@@ -164,6 +167,23 @@ final class AppCoordinator {
 
         source.resume()
         watchSource = source
+
+        // Eager drain: read any lines written between replay-end and source-resume
+        DispatchQueue.main.async { [weak self] in
+            guard let self, !self.isStopped, let ingestor = self.ingestor else { return }
+            let now = Date().timeIntervalSince1970
+            do {
+                let result = try self.reader.readNewLines(path: self.eventsPath, from: self.checkpoint)
+                for line in result.lines {
+                    ingestor.ingest(line: Substring(line), now: now, replay: false)
+                }
+                if !result.lines.isEmpty {
+                    self.checkpoint = result.next
+                }
+            } catch {
+                self.appendToLog("[error] eager drain: \(error)\n")
+            }
+        }
     }
 
     // MARK: - Private: logging
