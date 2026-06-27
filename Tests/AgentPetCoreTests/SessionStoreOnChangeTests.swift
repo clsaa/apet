@@ -59,6 +59,44 @@ final class SessionStoreOnChangeTests: XCTestCase {
         XCTAssertEqual(capturedReplay, false)
     }
 
+    // MARK: - H3 新增：markStale onChange + I1 replay→stale
+
+    /// markStale 超时 → onChange 触发（反向：未超时 → 不触发）
+    func test_markStale_triggers_onChange() {
+        // Forward: timeout exceeded → handler called
+        let store1 = SessionStore()
+        let key = SessionKey(agent: "a", root: "r", sessionId: "S")
+        _ = store1.apply(AgentEvent(v: 1, eventId: "E1", agent: "a", kind: .sessionStart,
+                        sessionId: "S", root: "r", ts: "t"), seq: 1, now: 0, replay: false)
+        var captured: [StoreChange] = []
+        store1.addChangeHandler { changes, _ in captured = changes }
+        _ = store1.markStale(now: 9999, timeout: 600)
+        XCTAssertEqual(captured, [.upserted(key)])
+
+        // Reverse: within timeout → handler not called
+        let store2 = SessionStore()
+        var callCount = 0
+        store2.addChangeHandler { _, _ in callCount += 1 }
+        _ = store2.apply(AgentEvent(v: 1, eventId: "E2", agent: "a", kind: .sessionStart,
+                        sessionId: "S", root: "r", ts: "t"), seq: 1, now: 0, replay: false)
+        callCount = 0
+        _ = store2.markStale(now: 100, timeout: 600)   // 100-0=100, not > 600
+        XCTAssertEqual(callCount, 0)
+    }
+
+    /// I1: 已存在会话 + replay=true → 状态降为 .stale（非 running 幽灵）
+    func test_existing_session_replay_becomes_stale() {
+        let store = SessionStore()
+        let key = SessionKey(agent: "a", root: "r", sessionId: "S")
+        _ = store.apply(AgentEvent(v: 1, eventId: "E1", agent: "a", kind: .sessionStart,
+                        sessionId: "S", root: "r", ts: "t"), seq: 1, now: 0, replay: false)
+        XCTAssertEqual(store.sessions[key]?.state, .running)
+
+        _ = store.apply(AgentEvent(v: 1, eventId: "E2", agent: "a", kind: .sessionStart,
+                        sessionId: "S", root: "r", ts: "t"), seq: 2, now: 1, replay: true)
+        XCTAssertEqual(store.sessions[key]?.state, .stale)
+    }
+
     /// 注册 2 个 handler，一次有状态变化的 apply → 两个都被调用
     func test_multiple_handlers_all_fire() {
         let store = SessionStore()

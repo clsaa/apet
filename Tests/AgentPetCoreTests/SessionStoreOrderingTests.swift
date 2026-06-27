@@ -83,6 +83,26 @@ final class SessionStoreOrderingTests: XCTestCase {
         XCTAssertEqual(s.sessions.values.first?.state, .running)
     }
 
+    // MARK: - H3 新增：stale 排序位置
+
+    /// attention + running + stale → activeSessions 顺序 = [attention, running, stale]
+    func test_stale_sorts_after_running() {
+        let s = SessionStore()
+        // A: waiting(.attention) → rank 0
+        _ = s.apply(AgentEvent(v: 1, eventId: "E1", agent: "a", kind: .attention,
+                    sessionId: "A", root: "r", ts: "t"), seq: 1, now: 0, replay: false)
+        // C: will become stale (starts early, now=0)
+        _ = s.apply(AgentEvent(v: 1, eventId: "E2", agent: "a", kind: .sessionStart,
+                    sessionId: "C", root: "r", ts: "t"), seq: 2, now: 0, replay: false)
+        // markStale: C (running, lastActiveAt=0) times out; A (waiting) unaffected
+        _ = s.markStale(now: 9999, timeout: 600)
+        // B: running, added after markStale → not stale
+        _ = s.apply(AgentEvent(v: 1, eventId: "E3", agent: "a", kind: .sessionStart,
+                    sessionId: "B", root: "r", ts: "t"), seq: 3, now: 9998, replay: false)
+        let ids = s.activeSessions().map { $0.key.sessionId }
+        XCTAssertEqual(ids, ["A", "B", "C"])
+    }
+
     /// waiting → busy 触发广播（状态变化）
     func test_waiting_to_running_broadcasts() {
         let s = SessionStore()

@@ -61,6 +61,20 @@ final class SessionStoreReapTests: XCTestCase {
         XCTAssertNotNil(store.sessions[key])
     }
 
+    // MARK: - ENDED 驱逐（M2）
+
+    /// ended 会话 → reap 无论时间参数多大均立即驱逐
+    func test_ended_session_is_always_reaped() {
+        let (store, key) = makeStore(state: .sessionStart)
+        _ = store.apply(AgentEvent(v: 1, eventId: "E2", agent: "a", kind: .sessionEnd,
+                        sessionId: "S", root: "r", ts: "t"), seq: 2, now: 0, replay: false)
+        XCTAssertEqual(store.sessions[key]?.state, .ended)
+
+        let removed = store.reap(now: 0, endedAfter: 999_999, waitingEndedAfter: 999_999)
+        XCTAssertEqual(removed, [.removed(key)])
+        XCTAssertNil(store.sessions[key])
+    }
+
     // MARK: - changeHandler 收到 .removed
 
     func test_reap_emits_removed_to_handler() {

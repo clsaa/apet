@@ -81,6 +81,43 @@ final class NotificationDeciderTests: XCTestCase {
         XCTAssertFalse(dUnknown.shouldNotify)
     }
 
+    // MARK: - H3 新增：title 回退 / passive×everyStop / alert body / pluginError 空 message
+
+    /// title 三级回退：event.title=nil → session.title → event.agent
+    func test_title_three_level_fallback() {
+        // Level 2: event.title=nil, session.title="Proj" → "Proj"
+        let d1 = NotificationDecider.decide(event: ev(.attention, title: nil), session: sess,
+                                             mode: .attentionOnly, replay: false)
+        XCTAssertEqual(d1.content?.title, "Proj")
+
+        // Level 3: event.title=nil, session=nil → event.agent == "a"
+        let d2 = NotificationDecider.decide(event: ev(.attention, title: nil), session: nil,
+                                             mode: .attentionOnly, replay: false)
+        XCTAssertEqual(d2.content?.title, "a")
+    }
+
+    /// .passive + stop + .everyStop → shouldNotify==true（passive 走默认分类逻辑）
+    func test_passive_stop_rings_in_everyStop() {
+        let d = NotificationDecider.decide(event: ev(.stop, notify: .passive), session: sess,
+                                            mode: .everyStop, replay: false)
+        XCTAssertTrue(d.shouldNotify)
+    }
+
+    /// .alert + event.title="X" → body 含 "需要你关注"（H3: alert 走固定 fallback，不等于 title）
+    func test_alert_body_contains_fixed_fallback_not_title() {
+        let d = NotificationDecider.decide(event: ev(.stop, notify: .alert, title: "X"),
+                                            session: nil, mode: .attentionOnly, replay: false)
+        XCTAssertTrue(d.content?.body.contains("需要你关注") == true)
+    }
+
+    /// M1: .pluginError + message="" → body 含 "插件错误"（空串触发守卫，不退化为空）
+    func test_pluginError_empty_message_falls_back_to_default() {
+        let d = NotificationDecider.decide(event: ev(.pluginError, message: ""),
+                                            session: nil, mode: .attentionOnly, replay: false)
+        XCTAssertTrue(d.content?.body.contains("插件错误") == true,
+                      "empty message should fall back to '插件错误', got: \(d.content?.body ?? "nil")")
+    }
+
     // MARK: - H3-5: 通知带项目身份
 
     func test_body_prefixed_with_project_tag_when_cwd_set() {

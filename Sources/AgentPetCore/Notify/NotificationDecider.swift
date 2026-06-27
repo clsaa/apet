@@ -34,7 +34,7 @@ public enum NotificationDecider {
         case .stop:
             return mode == .everyStop ? ring(event, session, "本轮已完成") : NotificationDecision(shouldNotify: false)
         case .pluginError:
-            return ring(event, session, event.message ?? "插件错误")
+            return ring(event, session, event.message?.isEmpty == false ? event.message! : "插件错误")
         case .sessionStart, .busy, .sessionEnd, .unknown:
             return NotificationDecision(shouldNotify: false)
         }

@@ -7,8 +7,9 @@ final class ITerm2LocatorTests: XCTestCase {
         let ref = TerminalRef(kind: .iterm2, itermSessionId: "w0t1p0:ABCD-1234")
         let inv = try loc.focusInvocation(for: ref)
         XCTAssertEqual(inv.executable, "/usr/bin/osascript")
-        // 脚本本体 + "-" + 分隔 + id 作为独立 argv（参数化，未内插）
-        XCTAssertTrue(inv.arguments.contains("w0t1p0:ABCD-1234"))
+        // id 必须在 argv[1]，不是泛 contains（P0 精确断言）
+        XCTAssertEqual(inv.arguments.count, 2)
+        XCTAssertEqual(inv.arguments[1], "w0t1p0:ABCD-1234")
         // 脚本本体里不得出现被内插的 id
         let script = inv.arguments.first ?? ""
         XCTAssertFalse(script.contains("w0t1p0:ABCD-1234"))
@@ -44,6 +45,15 @@ final class ITerm2LocatorTests: XCTestCase {
         let script = inv.arguments[0]
         XCTAssertTrue(script.contains("error"), "script must contain 'error' keyword")
         XCTAssertTrue(script.contains("session not found"), "script must contain 'session not found' message")
+    }
+
+    /// H3: 空串 itermSessionId → invalidRef（存在但非法，非 missingRef）
+    func test_empty_id_throws_invalidRef() {
+        let loc = ITerm2Locator()
+        let ref = TerminalRef(kind: .iterm2, itermSessionId: "")
+        XCTAssertThrowsError(try loc.focusInvocation(for: ref)) { err in
+            XCTAssertEqual(err as? LocatorError, .invalidRef)
+        }
     }
 
     func test_id_validator_rejects_quotes_spaces_newlines() {

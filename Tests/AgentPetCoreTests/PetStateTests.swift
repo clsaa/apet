@@ -106,6 +106,42 @@ final class PetStateTests: XCTestCase {
         XCTAssertEqual(sum.badgeCount, 2)
     }
 
+    // MARK: - H3 新增：summary 空/全 ended + 仅 attention
+
+    /// 空 store → summary 全 0、state==.idle、badgeCount==0
+    func test_summary_empty_all_zeros() {
+        let s = SessionStore()
+        let sum = s.summary()
+        XCTAssertEqual(sum.state, .idle)
+        XCTAssertEqual(sum.runningCount, 0)
+        XCTAssertEqual(sum.waitingCount, 0)
+        XCTAssertEqual(sum.attentionCount, 0)
+        XCTAssertEqual(sum.staleCount, 0)
+        XCTAssertEqual(sum.badgeCount, 0)
+    }
+
+    /// 全 ended（建会话→sessionEnd）→ summary 全 0、state==.idle、badgeCount==0
+    func test_summary_all_ended_all_zeros() {
+        let s = SessionStore()
+        push(s, "E1", .sessionStart, sid: "A", seq: 1)
+        push(s, "E2", .sessionEnd, sid: "A", seq: 2)
+        let sum = s.summary()
+        XCTAssertEqual(sum.state, .idle)
+        XCTAssertEqual(sum.runningCount, 0)
+        XCTAssertEqual(sum.waitingCount, 0)
+        XCTAssertEqual(sum.badgeCount, 0)
+    }
+
+    /// 1 个 waiting(.attention) → attentionCount==1, waitingCount==1, badgeCount==1
+    func test_summary_only_attention() {
+        let s = SessionStore()
+        push(s, "E1", .attention, sid: "A", seq: 1)
+        let sum = s.summary()
+        XCTAssertEqual(sum.attentionCount, 1)
+        XCTAssertEqual(sum.waitingCount, 1)
+        XCTAssertEqual(sum.badgeCount, 1)
+    }
+
     /// stale 会话出现在 activeSessions（未被 ended 过滤）
     func test_stale_remains_in_activeSessions() {
         let s = SessionStore()
