@@ -145,19 +145,37 @@ final class PetWindowController: NSObject {
 
     // MARK: - Private: position persistence
 
+    /// Compute the default bottom-right origin, clamped to the visible area.
+    ///
+    /// Uses `NSScreen.main ?? NSScreen.screens.first` so the result is valid
+    /// even when `NSScreen.main` is temporarily nil during early app launch.
     private func defaultOrigin() -> NSPoint {
-        let screen = NSScreen.main?.visibleFrame ?? NSRect(x: 0, y: 0, width: 1440, height: 900)
-        return NSPoint(
-            x: screen.maxX - windowSize.width - 20,
-            y: screen.minY + 20
-        )
+        let visibleFrame = (NSScreen.main ?? NSScreen.screens.first)?.visibleFrame
+            ?? NSRect(x: 0, y: 0, width: 1440, height: 900)
+        // Bottom-right with 20 pt margin (macOS: y=0 is bottom)
+        let x = visibleFrame.maxX - windowSize.width - 20
+        let y = visibleFrame.minY + 20
+        return NSPoint(x: x, y: y)
     }
 
+    /// Load the persisted position, clamped inside the union of all visible
+    /// screen rects so a stale position from a disconnected monitor never
+    /// places the window off-screen.
     private func savedPosition() -> NSPoint? {
         guard let data = UserDefaults.standard.data(forKey: Self.positionKey),
               let saved = try? JSONDecoder().decode(CGPoint.self, from: data)
         else { return nil }
-        return NSPoint(x: saved.x, y: saved.y)
+
+        // Build union of all visible frames so multi-monitor positions are respected.
+        let allVisible = NSScreen.screens.reduce(NSRect.null) { $0.union($1.visibleFrame) }
+        guard !allVisible.isNull else { return NSPoint(x: saved.x, y: saved.y) }
+
+        // Clamp so the window is at least partially visible (uses window size for bounds).
+        let clampedX = max(allVisible.minX,
+                           min(saved.x, allVisible.maxX - windowSize.width))
+        let clampedY = max(allVisible.minY,
+                           min(saved.y, allVisible.maxY - windowSize.height))
+        return NSPoint(x: clampedX, y: clampedY)
     }
 
     private func savePosition() {
