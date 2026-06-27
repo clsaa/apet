@@ -135,6 +135,32 @@ public struct HookInstaller {
         try writeSettings(root, to: settingsURL)
     }
 
+    // MARK: - Hook command builder
+
+    /// Builds the full shell command string written into `settings.json` as the hook `command`.
+    ///
+    /// The resulting string has the form:
+    /// ```
+    /// env AGENTPET_OUT=<eventsPath> AGENTPET_ROOT=<rootPath> <scriptPath>
+    /// ```
+    ///
+    /// Paths that contain spaces are wrapped in double-quotes.
+    ///
+    /// ### Why `env`?
+    /// Claude Code invokes hooks as bare shell commands.  Using `env VAR=val cmd`
+    /// injects the required environment variables without relying on the user's
+    /// shell config or a wrapper script.
+    ///
+    /// - Parameters:
+    ///   - scriptPath: Absolute path to `apet-emit-event.sh`.
+    ///   - eventsPath: Absolute path to the events NDJSON file (no `~`, use ``AppPaths/eventsFile``).
+    ///   - rootPath:   Absolute path to the data root (the Claude profile directory).
+    /// - Returns: A shell command string safe to embed in `settings.json`.
+    public static func hookCommand(scriptPath: String, eventsPath: String, rootPath: String) -> String {
+        func q(_ s: String) -> String { s.contains(" ") ? "\"\(s)\"" : s }
+        return "env AGENTPET_OUT=\(q(eventsPath)) AGENTPET_ROOT=\(q(rootPath)) \(q(scriptPath))"
+    }
+
     // MARK: - Private helpers
 
     /// Reads and deserialises the JSON file at `url` as a top-level dictionary.

@@ -115,16 +115,31 @@ private struct HookRowView: View {
 
     private func refreshStatus() {
         let installer = HookInstaller()
-        isInstalled = (try? installer.isInstalled(settingsURL: settingsURL, marker: hookMarker)) ?? false
         errorText = nil
+        do {
+            isInstalled = try installer.isInstalled(settingsURL: settingsURL, marker: hookMarker)
+        } catch HookInstallError.malformedSettings {
+            isInstalled = false
+            errorText = "settings.json 解析失败"
+        } catch {
+            isInstalled = false
+            errorText = error.localizedDescription
+        }
     }
 
     /// ⛔ Only called after explicit user confirmation in the dialog above.
     private func performInstall() {
         errorText = nil
         let installer = HookInstaller()
+        // Build the full env-prefixed command so the hook script receives
+        // AGENTPET_OUT and AGENTPET_ROOT even when running in Claude's env.
+        let command = HookInstaller.hookCommand(
+            scriptPath: runnerPath,
+            eventsPath: AppPaths.eventsFile,
+            rootPath: root.path
+        )
         do {
-            try installer.install(into: settingsURL, runnerPath: runnerPath, marker: hookMarker)
+            try installer.install(into: settingsURL, runnerPath: command, marker: hookMarker)
             isInstalled = true
         } catch {
             errorText = "安装失败：\(error.localizedDescription)"

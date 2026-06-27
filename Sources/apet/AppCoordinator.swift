@@ -50,8 +50,7 @@ final class AppCoordinator {
         let env = ProcessInfo.processInfo.environment
         let appSupport = (NSHomeDirectory() as NSString)
             .appendingPathComponent("Library/Application Support/AgentPet")
-        self.eventsPath = env["AGENTPET_EVENTS"]
-            ?? (appSupport as NSString).appendingPathComponent("events.ndjson")
+        self.eventsPath = env["AGENTPET_EVENTS"] ?? AppPaths.eventsFile
         self.logPath = env["AGENTPET_LOG"]
             ?? (appSupport as NSString).appendingPathComponent("apet.log")
 
@@ -93,7 +92,7 @@ final class AppCoordinator {
         // 2c. Create MenuBarController + PetWindowController for real GUI app (skip in headless mode)
         if !headless {
             let mb = MenuBarController(focusService: focusService)
-            let pw = PetWindowController(focusService: focusService)
+            let pw = PetWindowController(focusService: focusService, pet: config.selectedPet)
             mb.petVisibilityProvider = { [weak pw] in pw?.isVisible ?? false }
             mb.onTogglePet = { [weak pw] in
                 guard let pw else { return }
@@ -216,9 +215,9 @@ final class AppCoordinator {
             if shouldShow != pw.isVisible {
                 pw.setVisible(shouldShow)
             }
+            // Apply selected pet sprite immediately (Fix I-2).
+            pw.applyPet(newConfig.selectedPet)
         }
-        // selectedPet, dataRoots: take effect next time relevant code reads config.
-        // (pet sprite reload and hook install paths are lazy / user-initiated.)
     }
 
     // MARK: - Private: file watch

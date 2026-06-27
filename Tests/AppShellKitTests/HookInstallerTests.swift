@@ -267,4 +267,82 @@ final class HookInstallerTests: XCTestCase {
         XCTAssertEqual(innerHooks.first?["type"] as? String, "command")
         XCTAssertEqual(innerHooks.first?["command"] as? String, runner)
     }
+
+    // MARK: - Test 10: hookCommand injects AGENTPET_OUT and AGENTPET_ROOT (Fix I-1)
+
+    func testHookCommandContainsEnvVarsAndScriptPath() {
+        let script = "/usr/local/bin/apet-emit-event.sh"
+        let events = "/Users/alice/Library/Application Support/AgentPet/events.ndjson"
+        let root   = "/Users/alice/.claude"
+
+        let cmd = HookInstaller.hookCommand(scriptPath: script, eventsPath: events, rootPath: root)
+
+        XCTAssertTrue(cmd.hasPrefix("env "), "Command must start with 'env'")
+        XCTAssertTrue(cmd.contains("AGENTPET_OUT="), "Command must set AGENTPET_OUT")
+        XCTAssertTrue(cmd.contains("AGENTPET_ROOT="), "Command must set AGENTPET_ROOT")
+        XCTAssertTrue(cmd.contains(script), "Command must include script path")
+        XCTAssertTrue(cmd.contains(events), "Command must include events path")
+        XCTAssertTrue(cmd.contains(root), "Command must include root path")
+        // No literal tilde — home must be expanded
+        XCTAssertFalse(cmd.hasPrefix("~"), "Command must not contain a literal ~")
+    }
+
+    // MARK: - Test 11: hookCommand quotes paths containing spaces (Fix I-1)
+
+    func testHookCommandQuotesPathsWithSpaces() {
+        let script = "/path with spaces/apet-emit-event.sh"
+        let events = "/Library/Application Support/AgentPet/events.ndjson"
+        let root   = "/Users/alice my home/.claude"
+
+        let cmd = HookInstaller.hookCommand(scriptPath: script, eventsPath: events, rootPath: root)
+
+        XCTAssertTrue(cmd.contains("\"\(script)\""), "Script path with spaces must be quoted")
+        XCTAssertTrue(cmd.contains("\"\(events)\""), "Events path with spaces must be quoted")
+        XCTAssertTrue(cmd.contains("\"\(root)\""), "Root path with spaces must be quoted")
+    }
+
+    // MARK: - Test 12: hookCommand does NOT quote paths without spaces
+
+    func testHookCommandDoesNotQuotePathsWithoutSpaces() {
+        let script = "/usr/local/bin/apet-emit-event.sh"
+        let events = "/Users/alice/Library/Application Support/AgentPet/events.ndjson"
+        let root   = "/Users/alice/.claude"
+
+        let cmd = HookInstaller.hookCommand(scriptPath: script, eventsPath: events, rootPath: root)
+
+        // Script path has no spaces → must appear unquoted
+        XCTAssertFalse(cmd.contains("\"\(script)\""), "Script path without spaces must NOT be quoted")
+        // Root path has no spaces → must appear unquoted
+        XCTAssertFalse(cmd.contains("\"\(root)\""), "Root path without spaces must NOT be quoted")
+    }
+
+    // MARK: - Test 13: hookCommand result embeds correctly into settings.json (end-to-end, Fix I-1)
+
+    func testInstalledCommandContainsEnvVarsWhenUsingHookCommand() throws {
+        let url = makeTempURL()
+        defer { try? FileManager.default.removeItem(at: url) }
+
+        let installer = HookInstaller()
+        let marker   = "apet-env-test-\(UUID().uuidString)"
+        let script   = "/Applications/AgentPet.app/Contents/Resources/apet-emit-event.sh"
+        let events   = "/Users/alice/Library/Application Support/AgentPet/events.ndjson"
+        let root     = "/Users/alice/.claude"
+
+        let command = HookInstaller.hookCommand(scriptPath: script, eventsPath: events, rootPath: root)
+        try installer.install(into: url, runnerPath: command, marker: marker)
+
+        // Read the written command back from the JSON file
+        let hooksDict = try readHooksDict(at: url)
+        let stopEntries = hooksDict["Stop"] as? [[String: Any]] ?? []
+        let apetGroup = stopEntries.first { ($0["__apet"] as? String) == marker }
+        let innerHooks = apetGroup?["hooks"] as? [[String: Any]] ?? []
+        let writtenCommand = innerHooks.first?["command"] as? String ?? ""
+
+        XCTAssertTrue(writtenCommand.contains("AGENTPET_OUT="),
+                      "Written command must contain AGENTPET_OUT=")
+        XCTAssertTrue(writtenCommand.contains("AGENTPET_ROOT="),
+                      "Written command must contain AGENTPET_ROOT=")
+        XCTAssertTrue(writtenCommand.contains(script),
+                      "Written command must contain script path")
+    }
 }

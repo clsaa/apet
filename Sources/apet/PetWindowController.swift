@@ -18,7 +18,6 @@ final class PetWindowController: NSObject {
     // MARK: - Constants
 
     private static let positionKey = "com.clsaa.apet.PetWindowPosition"
-    private let pet = "shiba"
     private let windowSize = NSSize(width: 140, height: 160)
 
     // MARK: - State
@@ -28,6 +27,8 @@ final class PetWindowController: NSObject {
     private var popover: NSPopover?
     private var currentPresentation: PetPresentation
     private var currentSessions: [Session] = []
+    /// Currently rendered pet sprite name ("shiba" | "bichon").
+    private var currentPet: String
 
     // MARK: - Dependencies
 
@@ -35,8 +36,12 @@ final class PetWindowController: NSObject {
 
     // MARK: - Init
 
-    init(focusService: TerminalFocusService) {
+    /// - Parameters:
+    ///   - focusService: Service used to jump to the terminal that owns a session.
+    ///   - pet: Initial pet sprite ("shiba" or "bichon").  Defaults to "shiba".
+    init(focusService: TerminalFocusService, pet: String = "shiba") {
         self.focusService = focusService
+        self.currentPet = pet
         self.currentPresentation = PetPresenter.make(
             from: PetSummary(
                 state: .idle,
@@ -57,7 +62,7 @@ final class PetWindowController: NSObject {
         let presentation = PetPresenter.make(from: summary)
         currentPresentation = presentation
         currentSessions = sessions
-        hostingView?.rootView = PetView(presentation: presentation, pet: pet)
+        hostingView?.rootView = PetView(presentation: presentation, pet: currentPet)
 
         // Update popover session list in-place when visible
         if let popover, popover.isShown,
@@ -81,6 +86,16 @@ final class PetWindowController: NSObject {
     }
 
     var isVisible: Bool { window?.isVisible ?? false }
+
+    /// Switch the displayed pet sprite.
+    ///
+    /// Call from ``AppCoordinator/applyConfig(_:)`` whenever `selectedPet` changes.
+    /// The swap is live — the hosting view is updated immediately.
+    func applyPet(_ pet: String) {
+        guard pet != currentPet else { return }
+        currentPet = pet
+        hostingView?.rootView = PetView(presentation: currentPresentation, pet: currentPet)
+    }
 
     // MARK: - Private: session tap (mirrors MenuBarController.handleSessionTap)
 
@@ -119,7 +134,7 @@ final class PetWindowController: NSObject {
         w.isExcludedFromWindowsMenu = true
 
         // Hosting view for SwiftUI content
-        let hv = NSHostingView(rootView: PetView(presentation: currentPresentation, pet: pet))
+        let hv = NSHostingView(rootView: PetView(presentation: currentPresentation, pet: currentPet))
         hv.frame = NSRect(origin: .zero, size: windowSize)
         hostingView = hv
 
