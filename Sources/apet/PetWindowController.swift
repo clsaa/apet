@@ -1,0 +1,256 @@
+import AppKit
+import SwiftUI
+import AgentPetCore
+import AppShellKit
+
+// MARK: - PetWindowController
+
+/// Manages the transparent borderless always-on-top floating pet window.
+///
+/// Responsibilities:
+/// - Shows ``PetView`` driven by ``PetPresentation`` from ``PetPresenter``
+/// - Supports drag-to-reposition (position persisted in UserDefaults)
+/// - Click toggles a popover ``SessionPanel``
+/// - `update(summary:sessions:)` refreshes view and open popover in-place
+@MainActor
+final class PetWindowController: NSObject {
+
+    // MARK: - Constants
+
+    private static let positionKey = "com.clsaa.apet.PetWindowPosition"
+    private let pet = "shiba"
+    private let windowSize = NSSize(width: 140, height: 160)
+
+    // MARK: - State
+
+    private var window: NSWindow?
+    private var hostingView: NSHostingView<PetView>?
+    private var popover: NSPopover?
+    private var currentPresentation: PetPresentation
+    private var currentSessions: [Session] = []
+
+    // MARK: - Init
+
+    override init() {
+        self.currentPresentation = PetPresenter.make(
+            from: PetSummary(
+                state: .idle,
+                runningCount: 0,
+                waitingCount: 0,
+                attentionCount: 0,
+                staleCount: 0
+            )
+        )
+        super.init()
+        setupWindow()
+    }
+
+    // MARK: - Public API
+
+    /// Refresh the pet image and update the open popover (if any).
+    func update(summary: PetSummary, sessions: [Session]) {
+        let presentation = PetPresenter.make(from: summary)
+        currentPresentation = presentation
+        currentSessions = sessions
+        hostingView?.rootView = PetView(presentation: presentation, pet: pet)
+
+        // Update popover session list in-place when visible
+        if let popover, popover.isShown,
+           let panelVC = popover.contentViewController as? SessionPanelHostController {
+            panelVC.update(rows: sessions.map(SessionRowMapper.make))
+        }
+    }
+
+    /// Show or hide the window.
+    func setVisible(_ visible: Bool) {
+        if visible {
+            window?.makeKeyAndOrderFront(nil)
+        } else {
+            window?.orderOut(nil)
+            popover?.performClose(nil)
+        }
+    }
+
+    var isVisible: Bool { window?.isVisible ?? false }
+
+    // MARK: - Private: window setup
+
+    private func setupWindow() {
+        let origin = savedPosition() ?? defaultOrigin()
+        let contentRect = NSRect(origin: origin, size: windowSize)
+
+        let w = NSWindow(
+            contentRect: contentRect,
+            styleMask: .borderless,
+            backing: .buffered,
+            defer: false
+        )
+        w.level = .floating
+        w.backgroundColor = .clear
+        w.isOpaque = false
+        w.hasShadow = false
+        w.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary]
+        w.isMovableByWindowBackground = false  // DragDetectorView handles movement
+        w.hidesOnDeactivate = false
+        w.isExcludedFromWindowsMenu = true
+
+        // Hosting view for SwiftUI content
+        let hv = NSHostingView(rootView: PetView(presentation: currentPresentation, pet: pet))
+        hv.frame = NSRect(origin: .zero, size: windowSize)
+        hostingView = hv
+
+        // Drag/click overlay (transparent, sits on top of the hosting view)
+        let overlay = DragDetectorView(frame: NSRect(origin: .zero, size: windowSize))
+        overlay.onClicked = { [weak self] in
+            self?.togglePopover()
+        }
+        overlay.onDragEnded = { [weak self] in
+            self?.savePosition()
+        }
+
+        // Container holds both subviews
+        let container = NSView(frame: NSRect(origin: .zero, size: windowSize))
+        container.addSubview(hv)
+        container.addSubview(overlay)  // overlay is topmost (event capturing)
+        w.contentView = container
+
+        self.window = w
+        w.makeKeyAndOrderFront(nil)
+    }
+
+    // MARK: - Private: position persistence
+
+    private func defaultOrigin() -> NSPoint {
+        let screen = NSScreen.main?.visibleFrame ?? NSRect(x: 0, y: 0, width: 1440, height: 900)
+        return NSPoint(
+            x: screen.maxX - windowSize.width - 20,
+            y: screen.minY + 20
+        )
+    }
+
+    private func savedPosition() -> NSPoint? {
+        guard let data = UserDefaults.standard.data(forKey: Self.positionKey),
+              let saved = try? JSONDecoder().decode(CGPoint.self, from: data)
+        else { return nil }
+        return NSPoint(x: saved.x, y: saved.y)
+    }
+
+    private func savePosition() {
+        guard let w = window else { return }
+        let origin = CGPoint(x: w.frame.origin.x, y: w.frame.origin.y)
+        if let data = try? JSONEncoder().encode(origin) {
+            UserDefaults.standard.set(data, forKey: Self.positionKey)
+        }
+    }
+
+    // MARK: - Private: popover
+
+    private func togglePopover() {
+        guard let w = window, let contentView = w.contentView else { return }
+
+        if let popover, popover.isShown {
+            popover.performClose(nil)
+            return
+        }
+
+        let rows = currentSessions.map(SessionRowMapper.make)
+        let panelVC = SessionPanelHostController(rows: rows)
+        let p = NSPopover()
+        p.contentViewController = panelVC
+        p.behavior = .transient
+        p.contentSize = NSSize(width: 320, height: 400)
+        self.popover = p
+
+        // Anchor to center of content view; let NSPopover pick the best edge
+        let anchor = NSRect(
+            x: contentView.bounds.midX,
+            y: contentView.bounds.midY,
+            width: 1,
+            height: 1
+        )
+        p.show(relativeTo: anchor, of: contentView, preferredEdge: .maxY)
+    }
+}
+
+// MARK: - DragDetectorView
+
+/// Transparent overlay that captures mouse events for drag-to-move and click-to-open.
+/// Rendering is handled by the SwiftUI ``NSHostingView`` beneath it.
+private final class DragDetectorView: NSView {
+
+    var onClicked: (() -> Void)?
+    var onDragEnded: (() -> Void)?
+
+    private var dragStartLocation: NSPoint = .zero
+    private var windowOriginAtDragStart: NSPoint = .zero
+    private var hasDragged = false
+    private let dragThreshold: CGFloat = 4
+
+    override init(frame: NSRect) {
+        super.init(frame: frame)
+    }
+
+    required init?(coder: NSCoder) { fatalError("init(coder:) not supported") }
+
+    override func mouseDown(with event: NSEvent) {
+        dragStartLocation = NSEvent.mouseLocation
+        windowOriginAtDragStart = window?.frame.origin ?? .zero
+        hasDragged = false
+    }
+
+    override func mouseDragged(with event: NSEvent) {
+        let current = NSEvent.mouseLocation
+        let dx = current.x - dragStartLocation.x
+        let dy = current.y - dragStartLocation.y
+        if abs(dx) >= dragThreshold || abs(dy) >= dragThreshold {
+            hasDragged = true
+        }
+        window?.setFrameOrigin(NSPoint(
+            x: windowOriginAtDragStart.x + dx,
+            y: windowOriginAtDragStart.y + dy
+        ))
+    }
+
+    override func mouseUp(with event: NSEvent) {
+        if hasDragged {
+            onDragEnded?()
+        } else {
+            onClicked?()
+        }
+    }
+
+    // Capture all hit-test queries so events don't fall through to SwiftUI
+    override func hitTest(_ point: NSPoint) -> NSView? {
+        return bounds.contains(point) ? self : nil
+    }
+}
+
+// MARK: - SessionPanelHostController
+
+/// Minimal NSViewController that wraps ``SessionPanel`` in a popover.
+private final class SessionPanelHostController: NSViewController {
+
+    private var rows: [SessionRowModel]
+    private var hostingController: NSHostingController<SessionPanel>?
+
+    init(rows: [SessionRowModel]) {
+        self.rows = rows
+        super.init(nibName: nil, bundle: nil)
+    }
+
+    required init?(coder: NSCoder) { fatalError("init(coder:) not supported") }
+
+    override func loadView() {
+        let panel = SessionPanel(rows: rows, onTap: { _ in })
+        let hc = NSHostingController(rootView: panel)
+        hc.view.frame = NSRect(x: 0, y: 0, width: 320, height: 400)
+        self.view = hc.view
+        addChild(hc)
+        hostingController = hc
+    }
+
+    func update(rows: [SessionRowModel]) {
+        self.rows = rows
+        hostingController?.rootView = SessionPanel(rows: rows, onTap: { _ in })
+    }
+}

@@ -8,13 +8,27 @@ import AppShellKit
 /// Wraps ``SessionPanel`` with a "退出" footer.  Private to this file.
 private struct PanelRootView: View {
     let rows: [SessionRowModel]
+    let petVisible: Bool
     let onTap: (String) -> Void
+    let onTogglePet: () -> Void
     let onQuit: () -> Void
 
     var body: some View {
         VStack(spacing: 0) {
             SessionPanel(rows: rows, onTap: onTap)
             Divider()
+            Button {
+                onTogglePet()
+            } label: {
+                Text(petVisible ? "隐藏宠物" : "显示宠物")
+                    .frame(maxWidth: .infinity)
+                    .padding(.vertical, 3)
+            }
+            .buttonStyle(.plain)
+            .foregroundStyle(.secondary)
+            .padding(.horizontal, 10)
+            .padding(.top, 6)
+            .padding(.bottom, 2)
             Button {
                 onQuit()
             } label: {
@@ -25,7 +39,8 @@ private struct PanelRootView: View {
             .buttonStyle(.plain)
             .foregroundStyle(.secondary)
             .padding(.horizontal, 10)
-            .padding(.vertical, 6)
+            .padding(.top, 2)
+            .padding(.bottom, 6)
         }
         .frame(width: 320)
     }
@@ -44,6 +59,11 @@ final class MenuBarController: NSObject {
 
     private let statusItem: NSStatusItem
     private let focusService: TerminalFocusService
+
+    /// Returns whether the floating pet window is currently visible.
+    var petVisibilityProvider: (() -> Bool)?
+    /// Invoked when the user taps 隐藏/显示宠物; AppCoordinator toggles the pet window.
+    var onTogglePet: (() -> Void)?
 
     // MARK: - State
 
@@ -115,7 +135,15 @@ final class MenuBarController: NSObject {
         let rows = currentSessions.map(SessionRowMapper.make)
         return PanelRootView(
             rows: rows,
+            petVisible: petVisibilityProvider?() ?? false,
             onTap: { [weak self] id in self?.handleSessionTap(id: id) },
+            onTogglePet: { [weak self] in
+                self?.onTogglePet?()
+                // Re-render the panel so the button label flips immediately.
+                self?.panelHosting?.rootView = self?.makePanelRootView() ?? PanelRootView(
+                    rows: [], petVisible: false, onTap: { _ in }, onTogglePet: {}, onQuit: {}
+                )
+            },
             onQuit: { NSApplication.shared.terminate(nil) }
         )
     }

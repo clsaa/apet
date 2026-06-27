@@ -50,4 +50,9 @@ if [ -f "$REPO_ROOT/Resources/apet-emit-event.sh" ]; then
     cp "$REPO_ROOT/Resources/apet-emit-event.sh" "$APP_DIR/Contents/Resources/"
 fi
 
+# Copy pet assets
+if [ -d "$REPO_ROOT/Resources/pets" ]; then
+    cp -r "$REPO_ROOT/Resources/pets" "$APP_DIR/Contents/Resources/"
+fi
+
 echo "Done: $APP_DIR"

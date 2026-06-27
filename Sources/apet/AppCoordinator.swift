@@ -27,6 +27,7 @@ final class AppCoordinator {
 
     private var notificationService: NotificationService?
     private var menuBar: MenuBarController?
+    private var petWindow: PetWindowController?
 
     private var watchSource: DispatchSourceFileSystemObject?
     private var watchFd: Int32 = -1
@@ -73,9 +74,17 @@ final class AppCoordinator {
         notificationService = ns
         ns.start()
 
-        // 2c. Create MenuBarController when running as a real GUI app (skip in headless mode)
+        // 2c. Create MenuBarController + PetWindowController for real GUI app (skip in headless mode)
         if !headless {
-            menuBar = MenuBarController(focusService: focusService)
+            let mb = MenuBarController(focusService: focusService)
+            let pw = PetWindowController()
+            mb.petVisibilityProvider = { [weak pw] in pw?.isVisible ?? false }
+            mb.onTogglePet = { [weak pw] in
+                guard let pw else { return }
+                pw.setVisible(!pw.isVisible)
+            }
+            menuBar = mb
+            petWindow = pw
         }
 
         // 3. Register change handler: log every store mutation + refresh menu bar
@@ -84,7 +93,9 @@ final class AppCoordinator {
             let summary = store.summary()
             let line = "[change] \(changes) replay=\(isReplay) summary=\(summary)\n"
             self.appendToLog(line)
-            self.menuBar?.update(summary: summary, sessions: store.activeSessions())
+            let sessions = store.activeSessions()
+            self.menuBar?.update(summary: summary, sessions: sessions)
+            self.petWindow?.update(summary: summary, sessions: sessions)
         }
 
         // 4. Replay existing file content (replay: true)
@@ -117,7 +128,9 @@ final class AppCoordinator {
             let now = Date().timeIntervalSince1970
             _ = store.markStale(now: now, timeout: self.staleAfter)
             store.reap(now: now, endedAfter: self.endedAfter, waitingEndedAfter: self.waitingEndedAfter)
-            self.menuBar?.update(summary: store.summary(), sessions: store.activeSessions())
+            let timerSessions = store.activeSessions()
+            self.menuBar?.update(summary: store.summary(), sessions: timerSessions)
+            self.petWindow?.update(summary: store.summary(), sessions: timerSessions)
         }
         timer.resume()
         reapTimer = timer
