@@ -8,6 +8,8 @@ public struct PetSummary: Equatable {
     public let attentionCount: Int
     public let staleCount: Int
     public var hasWaiting: Bool { waitingCount > 0 }
+    /// 角标计数：优先 attention（紧急），否则 waiting。语义="最需要用户关注的数量"。
+    public var badgeCount: Int { attentionCount > 0 ? attentionCount : waitingCount }
     public init(state: PetState, runningCount: Int, waitingCount: Int,
                 attentionCount: Int, staleCount: Int) {
         self.state = state; self.runningCount = runningCount; self.waitingCount = waitingCount

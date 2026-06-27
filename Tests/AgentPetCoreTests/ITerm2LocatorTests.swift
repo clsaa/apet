@@ -36,6 +36,16 @@ final class ITerm2LocatorTests: XCTestCase {
         XCTAssertEqual(ITerm2Locator().kind, .iterm2)
     }
 
+    /// H3-4: 脚本遍历完无 return 时触发 error，使 osascript 以非零退出（面板 H3-4）
+    func test_script_contains_session_not_found_error() throws {
+        let loc = ITerm2Locator()
+        let ref = TerminalRef(kind: .iterm2, itermSessionId: "w0t1p0:ABCD-1234")
+        let inv = try loc.focusInvocation(for: ref)
+        let script = inv.arguments[0]
+        XCTAssertTrue(script.contains("error"), "script must contain 'error' keyword")
+        XCTAssertTrue(script.contains("session not found"), "script must contain 'session not found' message")
+    }
+
     func test_id_validator_rejects_quotes_spaces_newlines() {
         XCTAssertTrue(ITermSessionId.isValid("w0t1p0:ABCD-1234"))
         XCTAssertTrue(ITermSessionId.isValid("w0t1p0"))

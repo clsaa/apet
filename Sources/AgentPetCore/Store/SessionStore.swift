@@ -1,6 +1,6 @@
 import Foundation
 
-public enum StoreChange: Equatable { case upserted(SessionKey) }
+public enum StoreChange: Equatable { case upserted(SessionKey); case removed(SessionKey) }
 
 /// 会话单一事实源。
 /// ⚠️ **非线程安全**：所有访问（apply / markStale / 读 sessions）必须由 owner 串行化。
@@ -9,14 +9,21 @@ public final class SessionStore {
     public private(set) var sessions: [SessionKey: Session] = [:]
     private var seenEventIds: Set<String> = []
 
-    /// 有状态变化时回调（onChange 在 apply/markStale 返回前、结果非空时触发）。
-    public var onChange: (([StoreChange]) -> Void)?
+    private var changeHandlers: [([StoreChange], Bool) -> Void] = []
+    /// 注册变更订阅者（可多个，扇出）。Bool = isReplay（回放时为 true，供 NotifyCenter 静默）。
+    public func addChangeHandler(_ handler: @escaping ([StoreChange], Bool) -> Void) {
+        changeHandlers.append(handler)
+    }
+    private func emit(_ changes: [StoreChange], replay: Bool) {
+        guard !changes.isEmpty else { return }
+        for h in changeHandlers { h(changes, replay) }
+    }
 
     public init() {}
 
     public func apply(_ event: AgentEvent, seq: Int, now: Double, replay: Bool) -> [StoreChange] {
         let changes = applyInner(event, seq: seq, now: now, replay: replay)
-        if !changes.isEmpty { onChange?(changes) }
+        emit(changes, replay: replay)
         return changes
     }
 
@@ -30,14 +37,18 @@ public final class SessionStore {
             // 首事件即 session_end：按 spec §6 忽略，不建会话（面板 B3）
             if case .sessionEnd = event.kind { return [] }
             // 新会话
-            let s = Session(key: key, state: initialState(event), cwd: event.cwd,
+            let initialSt = initialState(event)
+            // 回放历史时，被 kill 的会话只有 session_start/busy 无 session_end，会重建成 RUNNING 绿点幽灵。
+            // 回放下把 RUNNING 直接落 STALE：用户一打开就是灰"?"而非误导的绿点（面板 H3-1 / AI Finding 4）。
+            let finalInitialSt: SessionState = (replay && initialSt == .running) ? .stale : initialSt
+            let s = Session(key: key, state: finalInitialSt, cwd: event.cwd,
                             title: event.title, terminal: event.terminal,
                             lastSeq: seq, lastActiveAt: now)
             sessions[key] = s
             return [.upserted(key)]
         }
 
-        // 2) 终态不可回退
+        // 2) 终態不可回退
         if session.state == .ended { return [] }
 
         // 3) seq 落后则忽略（按 ingest 单调序排序，不用 ts）
@@ -49,9 +60,13 @@ public final class SessionStore {
         if let terminal = event.terminal { session.terminal = terminal }
 
         let newState = nextState(from: session.state, event: event)
-        let stateChanged = newState != session.state
+        // 回放历史时，被 kill 的会话只有 session_start/busy 无 session_end，会重建成 RUNNING 绿点幽灵。
+        // 回放下把 RUNNING 直接落 STALE：用户一打开就是灰"?"而非误导的绿点（面板 H3-1 / AI Finding 4）。
+        var newState2 = newState
+        if replay && newState2 == .running { newState2 = .stale }
+        let stateChanged = newState2 != session.state
 
-        session.state = newState
+        session.state = newState2
         session.lastSeq = seq
         session.lastActiveAt = now
         sessions[key] = session
@@ -77,6 +92,7 @@ public final class SessionStore {
 }
 
 extension SessionStore {
+    /// 推荐用 summary()（含 hasWaiting/attentionCount/badgeCount）。本方法等价 summary().state。
     public func aggregateState() -> PetState {
         var hasRunning = false, hasWaiting = false
         for s in sessions.values {
@@ -115,7 +131,7 @@ extension SessionStore {
     /// WAITING 是"轮到用户"，本就无活动事件，不因超时降级（面板 B2）。
     public func markStale(now: Double, timeout: Double) -> [StoreChange] {
         let changes = markStaleInner(now: now, timeout: timeout)
-        if !changes.isEmpty { onChange?(changes) }
+        emit(changes, replay: false)
         return changes
     }
 
@@ -134,6 +150,29 @@ extension SessionStore {
             }
         }
         return changes
+    }
+
+    /// 回收：STALE 超过 endedAfter / WAITING 超过 waitingEndedAfter 的会话转 ENDED，并从 sessions 驱逐。
+    /// 返回被移除会话的 .removed 变更。纯计时，不依赖 hook（面板 H3-3）。
+    @discardableResult
+    public func reap(now: Double, endedAfter: Double, waitingEndedAfter: Double) -> [StoreChange] {
+        var removed: [StoreChange] = []
+        for (key, session) in sessions {
+            let idle = now - session.lastActiveAt
+            let shouldEnd: Bool
+            switch session.state {
+            case .stale:   shouldEnd = idle > endedAfter
+            case .waiting: shouldEnd = idle > waitingEndedAfter
+            case .ended:   shouldEnd = true   // 已 ended 直接驱逐
+            case .running: shouldEnd = false
+            }
+            if shouldEnd {
+                sessions.removeValue(forKey: key)
+                removed.append(.removed(key))
+            }
+        }
+        emit(removed, replay: false)
+        return removed
     }
 
     public func summary() -> PetSummary {

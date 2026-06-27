@@ -12,7 +12,8 @@ public final class NDJSONIngestor {
 
     @discardableResult
     public func ingest(line: Substring, now: Double, replay: Bool) -> [StoreChange] {
-        guard let event = AgentEvent.decode(line: line) else { return [] } // 坏行：不占 seq
+        let clean = line.hasSuffix("\r") ? line.dropLast() : line
+        guard let event = AgentEvent.decode(line: clean) else { return [] } // 坏行：不占 seq
         seq += 1
         return store.apply(event, seq: seq, now: now, replay: replay)
     }

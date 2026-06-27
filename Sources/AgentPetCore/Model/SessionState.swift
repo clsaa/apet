@@ -19,4 +19,12 @@ public struct Session: Equatable {
         self.key = key; self.state = state; self.cwd = cwd; self.title = title
         self.terminal = terminal; self.lastSeq = lastSeq; self.lastActiveAt = lastActiveAt
     }
+
+    /// 多 profile 区分标签：从 root 派生。`~/.claude-profiles/work` → "work"；普通 `~/.claude` → nil。
+    public var profileLabel: String? {
+        let marker = ".claude-profiles/"
+        guard let r = key.root.range(of: marker) else { return nil }
+        let tail = key.root[r.upperBound...]
+        return tail.split(separator: "/").first.map(String.init)
+    }
 }

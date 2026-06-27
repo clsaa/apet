@@ -18,4 +18,18 @@ final class SessionTypesTests: XCTestCase {
     func test_waiting_states_carry_reason() {
         XCTAssertNotEqual(SessionState.waiting(.stop), SessionState.waiting(.attention))
     }
+
+    // MARK: - H3-6: Session.profileLabel
+
+    func test_profileLabel_from_claude_profiles_root() {
+        let key = SessionKey(agent: "a", root: "~/.claude-profiles/work", sessionId: "S")
+        let session = Session(key: key, state: .running, lastSeq: 0, lastActiveAt: 0)
+        XCTAssertEqual(session.profileLabel, "work")
+    }
+
+    func test_profileLabel_nil_for_standard_claude_root() {
+        let key = SessionKey(agent: "a", root: "~/.claude", sessionId: "S")
+        let session = Session(key: key, state: .running, lastSeq: 0, lastActiveAt: 0)
+        XCTAssertNil(session.profileLabel)
+    }
 }

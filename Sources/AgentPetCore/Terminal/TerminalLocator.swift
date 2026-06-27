@@ -52,6 +52,7 @@ public struct ITerm2Locator: TerminalLocator {
                     end repeat
                 end repeat
             end repeat
+            error "apet: session not found" number -1
         end tell
     end run
     """

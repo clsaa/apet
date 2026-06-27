@@ -23,7 +23,7 @@ public enum NotificationDecider {
         if let n = event.notify {
             switch n {
             case .none:    return NotificationDecision(shouldNotify: false)
-            case .alert:   return ring(event, session, "")
+            case .alert:   return ring(event, session, "需要你关注")
             case .passive: break  // passive 走默认分类逻辑
             }
         }
@@ -40,9 +40,14 @@ public enum NotificationDecider {
         }
     }
 
+    private static func projectTag(_ session: Session?) -> String {
+        guard let cwd = session?.cwd, let last = cwd.split(separator: "/").last else { return "" }
+        return "[\(last)] "
+    }
+
     private static func ring(_ event: AgentEvent, _ session: Session?, _ defaultBody: String) -> NotificationDecision {
         let title = event.title ?? session?.title ?? event.agent
-        let body = defaultBody.isEmpty ? (event.title ?? "需要你关注") : defaultBody
+        let body = projectTag(session) + defaultBody
         return NotificationDecision(shouldNotify: true,
                                     content: NotificationContent(title: title, body: body))
     }

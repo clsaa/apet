@@ -82,6 +82,30 @@ final class PetStateTests: XCTestCase {
         XCTAssertEqual(s.aggregateState(), .calling)
     }
 
+    // MARK: - H3-7: PetSummary.badgeCount
+
+    /// 1 running + 1 waiting(.attention) → badgeCount == attentionCount == 1
+    func test_badgeCount_prefers_attention_over_waiting() {
+        let s = SessionStore()
+        push(s, "E1", .sessionStart, sid: "A", seq: 1)   // running
+        push(s, "E2", .stop,         sid: "B", seq: 2)   // waiting(.stop)
+        push(s, "E3", .attention,    sid: "C", seq: 3)   // waiting(.attention)
+        let sum = s.summary()
+        XCTAssertEqual(sum.attentionCount, 1)
+        XCTAssertEqual(sum.badgeCount, 1)
+    }
+
+    /// 1 running + 2 waiting(.stop) → badgeCount == waitingCount == 2（无 attention）
+    func test_badgeCount_falls_back_to_waitingCount_when_no_attention() {
+        let s = SessionStore()
+        push(s, "E1", .sessionStart, sid: "A", seq: 1)
+        push(s, "E2", .stop,         sid: "B", seq: 2)
+        push(s, "E3", .stop,         sid: "C", seq: 3)
+        let sum = s.summary()
+        XCTAssertEqual(sum.attentionCount, 0)
+        XCTAssertEqual(sum.badgeCount, 2)
+    }
+
     /// stale 会话出现在 activeSessions（未被 ended 过滤）
     func test_stale_remains_in_activeSessions() {
         let s = SessionStore()

@@ -41,4 +41,14 @@ final class NDJSONIngestorTests: XCTestCase {
         XCTAssertEqual(again, [])  // 同 eventId 去重
         XCTAssertEqual(store.sessions.values.first?.state, .running)
     }
+
+    /// H3-9: 含 \r\n 行尾的合法 NDJSON 行正常解码（CRLF 健壮性）
+    func test_crlf_line_ending_is_handled_gracefully() {
+        let store = SessionStore()
+        let ing = NDJSONIngestor(store: store)
+        let crlfLine = Substring(line("E1", "session_start") + "\r")
+        let changes = ing.ingest(line: crlfLine, now: 0, replay: false)
+        XCTAssertFalse(changes.isEmpty, "CRLF 行应正常解码并产生变更")
+        XCTAssertEqual(store.sessions.values.first?.state, .running)
+    }
 }

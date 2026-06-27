@@ -80,4 +80,24 @@ final class NotificationDeciderTests: XCTestCase {
         let dUnknown = NotificationDecider.decide(event: ev(.unknown("x")), session: sess, mode: .attentionOnly, replay: false)
         XCTAssertFalse(dUnknown.shouldNotify)
     }
+
+    // MARK: - H3-5: 通知带项目身份
+
+    func test_body_prefixed_with_project_tag_when_cwd_set() {
+        let sessWithCwd = Session(key: SessionKey(agent: "a", root: "r", sessionId: "S"),
+                                  state: .waiting(.attention), cwd: "/x/proj-a",
+                                  lastSeq: 1, lastActiveAt: 0)
+        let d = NotificationDecider.decide(event: ev(.attention), session: sessWithCwd,
+                                           mode: .attentionOnly, replay: false)
+        XCTAssertTrue(d.content?.body.hasPrefix("[proj-a] ") == true,
+                      "body should start with '[proj-a] ', got: \(d.content?.body ?? "nil")")
+    }
+
+    func test_body_has_no_bracket_prefix_when_session_nil() {
+        let d = NotificationDecider.decide(event: ev(.attention), session: nil,
+                                           mode: .attentionOnly, replay: false)
+        XCTAssertTrue(d.shouldNotify)
+        XCTAssertFalse(d.content?.body.hasPrefix("[") == true,
+                       "body should not have '[' prefix when session is nil")
+    }
 }
