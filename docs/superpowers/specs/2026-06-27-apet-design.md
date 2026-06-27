@@ -111,7 +111,10 @@
 
  "hookInstall":{                                 // state/terminal=hook 时
    "dialect":"claude-code",                      // 声明目标配置方言，不假设
-   "events":["SessionStart","Stop","Notification"],
+   "events":["SessionStart","Stop","Notification","PreToolUse","PostToolUse","SubagentStop"],
+   // PreToolUse→attention(等授权)/busy；PostToolUse→busy(心跳，缓解长任务 STALE 误判)；
+   // ⚠️ attention 风险：Claude Code 工具授权走终端 readline、不一定走 hook —— attention 触发源
+   //    必须在 M1 接真实 hook 时验证；若 hook 档拿不到，回退 logscan stateRules 或进程探测（Plan B）。
    "runner":"builtin:emit-event",               // 只能引用 App 自带可信脚本(参数化)，禁任意 shell
    "marker":"agentpet"},                          // 标记包裹，便于干净卸载
 
