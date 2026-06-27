@@ -29,6 +29,11 @@ public final class SessionStore {
         // 3) seq 落后则忽略（按 ingest 单调序排序，不用 ts）
         if seq <= session.lastSeq { return [] }
 
+        // 字段级合并：非空才覆盖（terminal 一旦精确不被空值降级）。设计 §4 红队 M1。
+        if let cwd = event.cwd { session.cwd = cwd }
+        if let title = event.title { session.title = title }
+        if let terminal = event.terminal { session.terminal = terminal }
+
         let newState = nextState(from: session.state, event: event)
         let stateChanged = newState != session.state
 
