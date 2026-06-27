@@ -61,3 +61,25 @@ public final class SessionStore {
         }
     }
 }
+
+extension SessionStore {
+    public func aggregateState() -> PetState {
+        var hasRunning = false, hasWaiting = false
+        for s in sessions.values {
+            switch s.state {
+            case .running: hasRunning = true
+            case .waiting: hasWaiting = true
+            case .ended, .stale: break
+            }
+        }
+        if hasRunning { return .busy }
+        if hasWaiting { return .calling }
+        return .idle
+    }
+
+    public func activeSessions() -> [Session] {
+        sessions.values
+            .filter { $0.state != .ended }
+            .sorted { $0.lastSeq > $1.lastSeq }
+    }
+}
