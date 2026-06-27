@@ -82,4 +82,22 @@ extension SessionStore {
             .filter { $0.state != .ended }
             .sorted { $0.lastSeq > $1.lastSeq }
     }
+
+    /// 把超过 timeout 秒没有事件的 running/waiting 会话标记为 stale（可复活；ended 不动）。
+    public func markStale(now: Double, timeout: Double) -> [StoreChange] {
+        var changes: [StoreChange] = []
+        for (key, var session) in sessions {
+            switch session.state {
+            case .running, .waiting:
+                if now - session.lastActiveAt > timeout {
+                    session.state = .stale
+                    sessions[key] = session
+                    changes.append(.upserted(key))
+                }
+            case .ended, .stale:
+                break
+            }
+        }
+        return changes
+    }
 }
