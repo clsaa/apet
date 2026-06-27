@@ -64,8 +64,10 @@ final class AppCoordinator {
         self.store = store
         self.ingestor = ingestor
 
-        // 2b. Create and start NotificationService (safe to call before replay)
-        let ns = NotificationService(sessionLookup: { [weak self] key in
+        // 2b. Create and start NotificationService (safe to call before replay).
+        // Single shared TerminalFocusService instance injected into both consumers (Fix M-3).
+        let focusService = TerminalFocusService()
+        let ns = NotificationService(focusService: focusService, sessionLookup: { [weak self] key in
             self?.store?.sessions[key]
         })
         notificationService = ns
@@ -73,7 +75,7 @@ final class AppCoordinator {
 
         // 2c. Create MenuBarController when running as a real GUI app (skip in headless mode)
         if !headless {
-            menuBar = MenuBarController()
+            menuBar = MenuBarController(focusService: focusService)
         }
 
         // 3. Register change handler: log every store mutation + refresh menu bar
@@ -174,12 +176,14 @@ final class AppCoordinator {
             do {
                 let result = try self.reader.readNewLines(path: self.eventsPath, from: self.checkpoint)
                 for line in result.lines {
-                    ingestor.ingest(line: Substring(line), now: now, replay: false)
-                    if let event = AgentEvent.decode(line: Substring(line)),
-                       let ns = self.notificationService {
-                        let key = SessionKey(event: event)
-                        ns.consider(event: event, session: self.store?.sessions[key],
-                                    mode: .attentionOnly, replay: false)
+                    // Decode once: ingest(event:) avoids a second decode for notification dispatch.
+                    if let event = AgentEvent.decode(line: Substring(line)) {
+                        ingestor.ingest(event: event, now: now, replay: false)
+                        if let ns = self.notificationService {
+                            let key = SessionKey(event: event)
+                            ns.consider(event: event, session: self.store?.sessions[key],
+                                        mode: .attentionOnly, replay: false)
+                        }
                     }
                 }
                 if !result.lines.isEmpty {
@@ -204,12 +208,14 @@ final class AppCoordinator {
             do {
                 let result = try self.reader.readNewLines(path: self.eventsPath, from: self.checkpoint)
                 for line in result.lines {
-                    ingestor.ingest(line: Substring(line), now: now, replay: false)
-                    if let event = AgentEvent.decode(line: Substring(line)),
-                       let ns = self.notificationService {
-                        let key = SessionKey(event: event)
-                        ns.consider(event: event, session: self.store?.sessions[key],
-                                    mode: .attentionOnly, replay: false)
+                    // Decode once: reuse the same event for ingest + notification.
+                    if let event = AgentEvent.decode(line: Substring(line)) {
+                        ingestor.ingest(event: event, now: now, replay: false)
+                        if let ns = self.notificationService {
+                            let key = SessionKey(event: event)
+                            ns.consider(event: event, session: self.store?.sessions[key],
+                                        mode: .attentionOnly, replay: false)
+                        }
                     }
                 }
                 if !result.lines.isEmpty {

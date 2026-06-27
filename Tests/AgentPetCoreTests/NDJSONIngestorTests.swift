@@ -100,6 +100,49 @@ final class NDJSONIngestorTests: XCTestCase {
         XCTAssertEqual(ing.consumedSeq, 0)
     }
 
+    // MARK: - ingest(event:) overload (M-1 avoid double decode)
+
+    /// ingest(event:) 分配单调序列号，两次调用得到 seq 1 和 2。
+    func test_ingest_event_assigns_monotonic_seq() {
+        // TC-INGEST-FUNC-10
+        // Given: 空 store，两个不同 eventId 的 session_start 事件
+        let store = SessionStore()
+        let ing = NDJSONIngestor(store: store)
+        let e1 = AgentEvent(v: 1, eventId: "EV-1", agent: "a", kind: .sessionStart,
+                            sessionId: "S1", root: "r", ts: "t")
+        let e2 = AgentEvent(v: 1, eventId: "EV-2", agent: "a", kind: .stop,
+                            sessionId: "S1", root: "r", ts: "t")
+
+        // When: 两次 ingest(event:)
+        let c1 = ing.ingest(event: e1, now: 0, replay: false)
+        let c2 = ing.ingest(event: e2, now: 0, replay: false)
+
+        // Then: seq 递增为 1、2；store 状态为 stop
+        XCTAssertFalse(c1.isEmpty, "第一个事件应产生变更")
+        XCTAssertFalse(c2.isEmpty, "第二个事件应产生变更")
+        XCTAssertEqual(ing.consumedSeq, 2)
+        let key = SessionKey(agent: "a", root: "r", sessionId: "S1")
+        XCTAssertEqual(store.sessions[key]?.lastSeq, 2)
+        XCTAssertEqual(store.sessions[key]?.state, .waiting(.stop))
+    }
+
+    /// ingest(event:) 与 ingest(line:) 共享同一 seq 计数器。
+    func test_ingest_event_and_line_share_seq_counter() {
+        // TC-INGEST-FUNC-11
+        // Given: 先用 ingest(line:) 产生 seq=1，再用 ingest(event:) 产生 seq=2
+        let store = SessionStore()
+        let ing = NDJSONIngestor(store: store)
+        _ = ing.ingest(line: Substring(line("EL1", "session_start")), now: 0, replay: false)
+        XCTAssertEqual(ing.consumedSeq, 1)
+
+        let e2 = AgentEvent(v: 1, eventId: "EE2", agent: "a", kind: .stop,
+                            sessionId: "S", root: "r", ts: "t")
+        _ = ing.ingest(event: e2, now: 0, replay: false)
+
+        // Then: seq 连续增长到 2
+        XCTAssertEqual(ing.consumedSeq, 2)
+    }
+
     /// H3-9: 含 \r\n 行尾的合法 NDJSON 行正常解码（CRLF 健壮性）
     func test_crlf_line_ending_is_handled_gracefully() {
         let store = SessionStore()

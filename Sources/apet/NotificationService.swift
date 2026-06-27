@@ -29,7 +29,7 @@ final class NotificationService: NSObject {
 
     init(
         cooldown: Double = 60.0,
-        focusService: TerminalFocusService = TerminalFocusService(),
+        focusService: TerminalFocusService,
         sessionLookup: @escaping (SessionKey) -> Session?
     ) {
         self.gate = NotificationGate(cooldown: cooldown)
@@ -128,10 +128,14 @@ extension NotificationService: UNUserNotificationCenterDelegate {
         }
         let key = SessionKey(agent: agent, root: root, sessionId: sessionId)
 
-        // Hop to MainActor to access @MainActor-isolated state, then call completionHandler.
+        // Hop to MainActor to access @MainActor-isolated state, then hop OFF for the blocking
+        // osascript call so we never stall the main thread (Fix I-1).
         Task { @MainActor in
-            let session = self.sessionLookup(key)
-            self.focusService.focus(session?.terminal)
+            let terminal = self.sessionLookup(key)?.terminal
+            let fs = self.focusService
+            Task.detached {
+                _ = fs.focus(terminal)
+            }
             completionHandler()
         }
     }

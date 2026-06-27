@@ -22,11 +22,12 @@ final class MenuBarController: NSObject {
     // MARK: - Dependencies
 
     private let statusItem: NSStatusItem
-    private let focusService = TerminalFocusService()
+    private let focusService: TerminalFocusService
 
     // MARK: - Init
 
-    override init() {
+    init(focusService: TerminalFocusService) {
+        self.focusService = focusService
         statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
         super.init()
     }
@@ -136,7 +137,13 @@ final class MenuBarController: NSObject {
         let box = sender.representedObject as? SessionBox
         Task { @MainActor [weak self] in
             guard let self, let box else { return }
-            self.focusService.focus(box.terminal)
+            // Resolve the terminal ref on the main actor (state access), then hop off for the
+            // blocking osascript call so we never stall the main thread (Fix I-1).
+            let terminal = box.terminal
+            let fs = self.focusService
+            Task.detached {
+                _ = fs.focus(terminal)
+            }
         }
     }
 }
