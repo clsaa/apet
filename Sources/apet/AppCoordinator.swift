@@ -1,4 +1,5 @@
 import Foundation
+import AppKit
 import AgentPetCore
 import AppShellKit
 
@@ -77,7 +78,7 @@ final class AppCoordinator {
         // 2c. Create MenuBarController + PetWindowController for real GUI app (skip in headless mode)
         if !headless {
             let mb = MenuBarController(focusService: focusService)
-            let pw = PetWindowController()
+            let pw = PetWindowController(focusService: focusService)
             mb.petVisibilityProvider = { [weak pw] in pw?.isVisible ?? false }
             mb.onTogglePet = { [weak pw] in
                 guard let pw else { return }
@@ -85,6 +86,13 @@ final class AppCoordinator {
             }
             menuBar = mb
             petWindow = pw
+
+            // Show pet window on startup (default DisplayMode = visible).
+            // `orderFrontRegardless()` inside setVisible() ensures the borderless
+            // window appears in an LSUIElement (accessory) app.
+            pw.setVisible(true)
+            // Activate the app once so AppKit delivers window-order events properly.
+            NSApp.activate(ignoringOtherApps: true)
         }
 
         // 3. Register change handler: log every store mutation + refresh menu bar

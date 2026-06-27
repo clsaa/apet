@@ -29,9 +29,14 @@ final class PetWindowController: NSObject {
     private var currentPresentation: PetPresentation
     private var currentSessions: [Session] = []
 
+    // MARK: - Dependencies
+
+    private let focusService: TerminalFocusService
+
     // MARK: - Init
 
-    override init() {
+    init(focusService: TerminalFocusService) {
+        self.focusService = focusService
         self.currentPresentation = PetPresenter.make(
             from: PetSummary(
                 state: .idle,
@@ -64,7 +69,11 @@ final class PetWindowController: NSObject {
     /// Show or hide the window.
     func setVisible(_ visible: Bool) {
         if visible {
+            // `orderFrontRegardless()` is required for borderless LSUIElement (accessory) apps:
+            // `makeKeyAndOrderFront` is silently ignored when the app has no dock icon /
+            // cannot become the key app. orderFrontRegardless() bypasses that check.
             window?.makeKeyAndOrderFront(nil)
+            window?.orderFrontRegardless()
         } else {
             window?.orderOut(nil)
             popover?.performClose(nil)
@@ -73,13 +82,28 @@ final class PetWindowController: NSObject {
 
     var isVisible: Bool { window?.isVisible ?? false }
 
+    // MARK: - Private: session tap (mirrors MenuBarController.handleSessionTap)
+
+    private func handleSessionTap(id: String) {
+        guard let session = currentSessions.first(where: {
+            "\($0.key.agent)|\($0.key.root)|\($0.key.sessionId)" == id
+        }) else { return }
+        let terminal = session.terminal
+        let fs = focusService
+        // osascript blocks; run off main thread (same pattern as MenuBarController / Fix B2).
+        Task.detached {
+            _ = fs.focus(terminal)
+        }
+        popover?.performClose(nil)
+    }
+
     // MARK: - Private: window setup
 
     private func setupWindow() {
         let origin = savedPosition() ?? defaultOrigin()
         let contentRect = NSRect(origin: origin, size: windowSize)
 
-        let w = NSWindow(
+        let w = ApeFloatingWindow(
             contentRect: contentRect,
             styleMask: .borderless,
             backing: .buffered,
@@ -115,7 +139,8 @@ final class PetWindowController: NSObject {
         w.contentView = container
 
         self.window = w
-        w.makeKeyAndOrderFront(nil)
+        // Visibility is controlled by `setVisible(_:)`. AppCoordinator calls
+        // `setVisible(true)` on startup so the window starts hidden here.
     }
 
     // MARK: - Private: position persistence
@@ -154,7 +179,9 @@ final class PetWindowController: NSObject {
         }
 
         let rows = currentSessions.map(SessionRowMapper.make)
-        let panelVC = SessionPanelHostController(rows: rows)
+        let panelVC = SessionPanelHostController(rows: rows, onTap: { [weak self] id in
+            self?.handleSessionTap(id: id)
+        })
         let p = NSPopover()
         p.contentViewController = panelVC
         p.behavior = .transient
@@ -170,6 +197,21 @@ final class PetWindowController: NSObject {
         )
         p.show(relativeTo: anchor, of: contentView, preferredEdge: .maxY)
     }
+}
+
+// MARK: - ApeFloatingWindow
+
+/// Borderless floating NSWindow subclass.
+///
+/// Overrides `canBecomeKey` and `canBecomeMain` so that:
+/// - NSPopover can anchor to this window (requires a key-capable window).
+/// - The window can receive keyboard events if needed in future.
+///
+/// A plain `.borderless` NSWindow returns `false` for both properties by default,
+/// which prevents `makeKeyAndOrderFront` from working in an LSUIElement app.
+private final class ApeFloatingWindow: NSWindow {
+    override var canBecomeKey: Bool { true }
+    override var canBecomeMain: Bool { true }
 }
 
 // MARK: - DragDetectorView
@@ -231,17 +273,19 @@ private final class DragDetectorView: NSView {
 private final class SessionPanelHostController: NSViewController {
 
     private var rows: [SessionRowModel]
+    private let onTap: (String) -> Void
     private var hostingController: NSHostingController<SessionPanel>?
 
-    init(rows: [SessionRowModel]) {
+    init(rows: [SessionRowModel], onTap: @escaping (String) -> Void) {
         self.rows = rows
+        self.onTap = onTap
         super.init(nibName: nil, bundle: nil)
     }
 
     required init?(coder: NSCoder) { fatalError("init(coder:) not supported") }
 
     override func loadView() {
-        let panel = SessionPanel(rows: rows, onTap: { _ in })
+        let panel = SessionPanel(rows: rows, onTap: onTap)
         let hc = NSHostingController(rootView: panel)
         hc.view.frame = NSRect(x: 0, y: 0, width: 320, height: 400)
         self.view = hc.view
@@ -251,6 +295,6 @@ private final class SessionPanelHostController: NSViewController {
 
     func update(rows: [SessionRowModel]) {
         self.rows = rows
-        hostingController?.rootView = SessionPanel(rows: rows, onTap: { _ in })
+        hostingController?.rootView = SessionPanel(rows: rows, onTap: onTap)
     }
 }
