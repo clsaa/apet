@@ -176,7 +176,8 @@ SessionStore 变更 ──发布──▶ PetPresenter(算聚合态→选动画)
 
 **幂等 / 去重 / 排序（v2 修订，回应红队 B1/B2/M1）**：
 - **去重**：按 `eventId`。**归一**：按 `(agent, root, sessionId)`（含 `root`，避免多 profile 撞车）。
-- **排序与状态推进**：一律按 `seq`（或 App 赋的 ingest offset），**不用墙钟 `ts`**。规则：`incoming.seq <= session.lastSeq → 忽略`；仅当 `seq` 相等（同一逻辑时刻两路都报）时才用来源 tiebreak（hook > jsonl）。**终态 `ENDED` 不可被非终态事件回退。**
+- **排序与状态推进**：一律按 `seq`，**不用墙钟 `ts`**。ingestor 对**所有来源所有行**赋**单一全局单调 seq**（= 合并后 append 顺序），故"等值 seq"不会发生 → 规则简化为 `incoming.seq <= session.lastSeq → 忽略`（**取消** v2 里的来源 tiebreak，面板报告 2026-06-28 确认）。**终态 `ENDED` 不可被非终态事件回退。** 注意：**面板展示排序**另用状态优先级 + `lastActiveAt`（见 §6 B4），seq 仅用于状态推进/去重。
+- **宽容解码（B5）**：`reason`/`notify` 等枚举字段遇未知值降级为 `nil`（与 `event`/`terminal.kind` 一致），**不得**因未知枚举值丢弃整条合法事件。
 - **字段级合并**（last-non-null-wins）：`cwd/title/terminal` 等空值不覆盖已有值；`terminal` 一旦拿到精确 ref，后续空值或"猜测"值**不得降级覆盖**。
 - **回放**：App 启动从持久化的 `(eventsFileId, lastConsumedOffset)` checkpoint 续读；回放产生的事件打 `replay` 标志，**NotifyCenter 静默不补发历史通知**。
 - **短路**：状态无变化的 `busy` 自环只刷新 `lastActiveAt`（喂 STALE 计时），不广播订阅，避免高频刷新。
@@ -205,24 +206,31 @@ SessionStore 变更 ──发布──▶ PetPresenter(算聚合态→选动画)
 
 | 当前态 \ 事件 | session_start | busy | stop | attention | session_end | 超时无事件 |
 |---|---|---|---|---|---|---|
-| (无) | → RUNNING | → RUNNING | → WAITING(stop) | → WAITING(attention) | (忽略) | — |
-| RUNNING | (刷新) | RUNNING(刷 lastActiveAt) | → WAITING(stop) | → WAITING(attention) | → ENDED（**补一次"结束"判断**） | → STALE |
-| WAITING | → RUNNING | → RUNNING | → WAITING(更新 reason) | → WAITING(attention) | → ENDED | → STALE |
+| (无) | → RUNNING | → RUNNING | → WAITING(stop) | → WAITING(attention) | **(忽略，不建会话)** | — |
+| RUNNING | (刷新) | RUNNING(刷 lastActiveAt) | → WAITING(stop) | → WAITING(attention) | → ENDED | **→ STALE** |
+| WAITING | → RUNNING | → RUNNING | → WAITING(更新 reason) | → WAITING(attention) | → ENDED | **(保持 WAITING，不降级)** |
 | ENDED | (终态，忽略) | (忽略) | (忽略) | (忽略) | (忽略) | (忽略) |
 | STALE | → RUNNING | → RUNNING | → WAITING | → WAITING | → ENDED | (保持) |
 
-- **终态**：`ENDED` 不可复活；`STALE` **可复活**（收到任何事件回到对应态）——这是两者关键区别。
-- **STALE 阈值**：可配（默认 RUNNING 无事件 N 分钟，建议 N=10，长任务用户可调高，避免编译/推理被误判睡觉）。
-- **未知事件 / 未知 `v`**：不改状态，仅刷新 `lastActiveAt`续命，不当坏行丢弃。
-- 面板：绿点 = `RUNNING`，红点 = `WAITING`（tooltip 显示 reason：等你输入 / 已完成待命），灰 = `ENDED`(已结束) / `STALE`(疑似停滞，仍可尝试跳转)。
+> **§6 面板修订（2026-06-28，见 `2026-06-28-panel-review-core-engine.md`）**：
 
-**宠物聚合三态**（PetPresenter 从所有会话推导）：
+- **终态**：`ENDED` 不可复活；`STALE` **可复活**（收到任何事件回到对应态）。
+- **STALE 只作用于 RUNNING**（B2）：`WAITING` 是"轮到用户"，本就无活动事件，**不因超时降级**——否则"等你授权"的红点会变灰被静默。`session_end` 作为**首事件**不建会话（B3）。
+- **STALE 阈值**：可配，默认建议提到 20–30 分钟（B/AI：长任务 hook 心跳稀疏，10 分钟过短）；Plan B 内置 hook 在 PostToolUse 发 busy 心跳缓解误判。
+- **未知事件 / 未知 `v`**：不改状态，仅刷新 `lastActiveAt` 续命，不当坏行丢弃。
+- 面板：绿点 = `RUNNING`，红点 = `WAITING`（`attention`=橙/紧急、`stop`=红/完成待命，颜色区分紧急度），灰 = `ENDED`，橙 `?` = `STALE`(疑似停滞，区别于 ENDED)。
+
+**宠物聚合 — 富聚合 `summary()`（B1，取代单一枚举）**：
 ```
-有任一 RUNNING            → 忙碌动画(打字/忙)
-无 RUNNING 但有 WAITING   → 喊你动画(叫/红色感叹号气泡)   ← 最高优先级提示
-全 ENDED/无活跃           → 待机动画(睡觉/发呆)
+PetSummary {
+  state: busy | calling | idle    // busy=有 running；calling=无 running 但有 waiting；idle=否
+  hasWaiting / attentionCount / staleCount / runningCount
+}
 ```
-菜单栏模式下同一套语义：图标着色 / 角标表达三态。
+- **关键修正**：即便 `state==busy`（有会话在跑），只要 `hasWaiting`，PetPresenter 也必须在宠物/菜单栏图标**叠加"喊你"角标/计数**——绝不能让"忙碌"吞掉"有 N 个等你"。`attentionCount>0` 用更强提示（橙色感叹号）。
+- 菜单栏模式同一套：图标着色 + 角标数字。
+
+**面板会话排序（B4）**：按状态优先级 `waiting(attention) > waiting(stop) > running > stale`，同级再按 `lastActiveAt` 倒序（**不用 lastSeq**——跨插件 seq 命名空间独立，比较无意义）。让"最需要你的"自动置顶。
 
 ---
 
