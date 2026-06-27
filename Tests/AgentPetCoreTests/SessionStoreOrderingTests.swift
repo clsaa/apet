@@ -71,4 +71,25 @@ final class SessionStoreOrderingTests: XCTestCase {
         let ids = s.activeSessions().map { $0.key.sessionId }
         XCTAssertEqual(ids, ["Y", "X"])
     }
+
+    // MARK: - H2 补强
+
+    /// seq 等值（非严格大于）视为落后，丢弃
+    func test_equal_seq_is_ignored() {
+        let s = SessionStore()
+        _ = s.apply(ev("E1", .sessionStart), seq: 5, now: 0, replay: false)
+        let changes = s.apply(ev("E2", .stop), seq: 5, now: 0, replay: false)
+        XCTAssertEqual(changes, [])
+        XCTAssertEqual(s.sessions.values.first?.state, .running)
+    }
+
+    /// waiting → busy 触发广播（状态变化）
+    func test_waiting_to_running_broadcasts() {
+        let s = SessionStore()
+        _ = s.apply(ev("E1", .stop), seq: 1, now: 0, replay: false)
+        let key = SessionKey(agent: "a", root: "r", sessionId: "S")
+        let changes = s.apply(ev("E2", .busy), seq: 2, now: 0, replay: false)
+        XCTAssertEqual(changes, [.upserted(key)])
+        XCTAssertEqual(s.sessions[key]?.state, .running)
+    }
 }

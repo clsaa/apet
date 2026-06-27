@@ -49,4 +49,44 @@ final class AgentEventTests: XCTestCase {
         XCTAssertNotNil(e)
         XCTAssertNil(e?.notify)
     }
+
+    // MARK: - H2 补强
+
+    func test_empty_json_object_returns_nil() {
+        XCTAssertNil(AgentEvent.decode(line: "{}"))
+    }
+
+    func test_missing_each_required_field_returns_nil() {
+        // 缺 eventId
+        XCTAssertNil(AgentEvent.decode(line: #"{"agent":"a","event":"stop","sessionId":"S","root":"r","ts":"t"}"#))
+        // 缺 agent
+        XCTAssertNil(AgentEvent.decode(line: #"{"eventId":"E","event":"stop","sessionId":"S","root":"r","ts":"t"}"#))
+        // 缺 event
+        XCTAssertNil(AgentEvent.decode(line: #"{"eventId":"E","agent":"a","sessionId":"S","root":"r","ts":"t"}"#))
+        // 缺 sessionId
+        XCTAssertNil(AgentEvent.decode(line: #"{"eventId":"E","agent":"a","event":"stop","root":"r","ts":"t"}"#))
+        // 缺 root
+        XCTAssertNil(AgentEvent.decode(line: #"{"eventId":"E","agent":"a","event":"stop","sessionId":"S","ts":"t"}"#))
+        // 缺 ts
+        XCTAssertNil(AgentEvent.decode(line: #"{"eventId":"E","agent":"a","event":"stop","sessionId":"S","root":"r"}"#))
+    }
+
+    func test_unknown_terminal_kind_falls_to_other() {
+        let line = #"{"eventId":"E","agent":"a","event":"stop","sessionId":"S","root":"r","ts":"t","terminal":{"kind":"hyper","itermSessionId":"w0t1p0"}}"#
+        let e = AgentEvent.decode(line: Substring(line))
+        XCTAssertEqual(e?.terminal?.kind, .other)
+        XCTAssertEqual(e?.terminal?.itermSessionId, "w0t1p0")
+    }
+
+    func test_missing_terminal_kind_falls_to_other() {
+        let line = #"{"eventId":"E","agent":"a","event":"stop","sessionId":"S","root":"r","ts":"t","terminal":{"itermSessionId":"w0t1p0"}}"#
+        let e = AgentEvent.decode(line: Substring(line))
+        XCTAssertEqual(e?.terminal?.kind, .other)
+    }
+
+    func test_v_absent_defaults_to_1() {
+        let line = #"{"eventId":"E","agent":"a","event":"stop","sessionId":"S","root":"r","ts":"t"}"#
+        let e = AgentEvent.decode(line: Substring(line))
+        XCTAssertEqual(e?.v, 1)
+    }
 }

@@ -62,4 +62,33 @@ final class PetStateTests: XCTestCase {
         XCTAssertEqual(sum.staleCount, 1)
         XCTAssertEqual(sum.state, .idle)
     }
+
+    // MARK: - H2 补强
+
+    /// 全部变 stale → aggregateState == .idle（stale 不算 running）
+    func test_all_stale_means_idle() {
+        let s = SessionStore()
+        push(s, "E1", .sessionStart, sid: "A", seq: 1)
+        _ = s.markStale(now: 9999, timeout: 600)
+        XCTAssertEqual(s.aggregateState(), .idle)
+    }
+
+    /// stale + waiting → .calling（stale 不贡献 running）
+    func test_stale_plus_waiting_is_calling() {
+        let s = SessionStore()
+        push(s, "E1", .sessionStart, sid: "A", seq: 1)
+        _ = s.markStale(now: 9999, timeout: 600)
+        push(s, "E2", .stop, sid: "B", seq: 2)
+        XCTAssertEqual(s.aggregateState(), .calling)
+    }
+
+    /// stale 会话出现在 activeSessions（未被 ended 过滤）
+    func test_stale_remains_in_activeSessions() {
+        let s = SessionStore()
+        push(s, "E1", .sessionStart, sid: "A", seq: 1)
+        _ = s.markStale(now: 9999, timeout: 600)
+        let active = s.activeSessions()
+        XCTAssertEqual(active.count, 1)
+        XCTAssertEqual(active.first?.state, .stale)
+    }
 }
