@@ -7,7 +7,7 @@ if CommandLine.arguments.contains("--smoke") {
     // @MainActor-isolated AppCoordinator callable from this synchronous context.
     MainActor.assumeIsolated {
         let coordinator = AppCoordinator()
-        coordinator.start()
+        coordinator.start(headless: true)
 
         // Spin the RunLoop for up to 60 s; the test harness kills us externally
         let deadline = Date().addingTimeInterval(60)

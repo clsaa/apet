@@ -26,6 +26,7 @@ final class AppCoordinator {
     private var checkpoint: Checkpoint?
 
     private var notificationService: NotificationService?
+    private var menuBar: MenuBarController?
 
     private var watchSource: DispatchSourceFileSystemObject?
     private var watchFd: Int32 = -1
@@ -46,7 +47,7 @@ final class AppCoordinator {
 
     // MARK: - Lifecycle
 
-    func start() {
+    func start(headless: Bool = false) {
         // 1. Create parent dirs; touch events file if missing
         let fm = FileManager.default
         for path in [eventsPath, logPath] {
@@ -70,12 +71,18 @@ final class AppCoordinator {
         notificationService = ns
         ns.start()
 
-        // 3. Register change handler: log every store mutation
+        // 2c. Create MenuBarController when running as a real GUI app (skip in headless mode)
+        if !headless {
+            menuBar = MenuBarController()
+        }
+
+        // 3. Register change handler: log every store mutation + refresh menu bar
         store.addChangeHandler { [weak self] changes, isReplay in
             guard let self, let store = self.store else { return }
             let summary = store.summary()
             let line = "[change] \(changes) replay=\(isReplay) summary=\(summary)\n"
             self.appendToLog(line)
+            self.menuBar?.update(summary: summary, sessions: store.activeSessions())
         }
 
         // 4. Replay existing file content (replay: true)
@@ -100,7 +107,7 @@ final class AppCoordinator {
         // 5. Live file watch via DispatchSource
         openWatchSource()
 
-        // 6. Reap timer: every 60 s, markStale + reap
+        // 6. Reap timer: every 60 s, markStale + reap + refresh menu bar
         let timer = DispatchSource.makeTimerSource(queue: .main)
         timer.schedule(deadline: .now() + tickInterval, repeating: tickInterval)
         timer.setEventHandler { [weak self] in
@@ -108,6 +115,7 @@ final class AppCoordinator {
             let now = Date().timeIntervalSince1970
             _ = store.markStale(now: now, timeout: self.staleAfter)
             store.reap(now: now, endedAfter: self.endedAfter, waitingEndedAfter: self.waitingEndedAfter)
+            self.menuBar?.update(summary: store.summary(), sessions: store.activeSessions())
         }
         timer.resume()
         reapTimer = timer
