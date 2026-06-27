@@ -24,8 +24,10 @@ final class SessionStoreStaleTests: XCTestCase {
 
     func test_ended_is_not_marked_stale() {
         let s = SessionStore()
-        _ = s.apply(AgentEvent(v: 1, eventId: "E1", agent: "a", kind: .sessionEnd,
+        _ = s.apply(AgentEvent(v: 1, eventId: "E0", agent: "a", kind: .sessionStart,
                     sessionId: "S", root: "r", ts: "t"), seq: 1, now: 0, replay: false)
+        _ = s.apply(AgentEvent(v: 1, eventId: "E1", agent: "a", kind: .sessionEnd,
+                    sessionId: "S", root: "r", ts: "t"), seq: 2, now: 0, replay: false)
         XCTAssertEqual(s.markStale(now: 9999, timeout: 600), [])
         XCTAssertEqual(s.sessions.values.first?.state, .ended)
     }
@@ -37,5 +39,15 @@ final class SessionStoreStaleTests: XCTestCase {
         _ = s.apply(AgentEvent(v: 1, eventId: "E2", agent: "a", kind: .busy,
                     sessionId: "S", root: "r", ts: "t"), seq: 2, now: 800, replay: false)
         XCTAssertEqual(s.sessions.values.first?.state, .running) // 复活
+    }
+
+    /// B2: WAITING 不因超时降级为 stale
+    func test_waiting_is_not_marked_stale() {
+        let s = SessionStore()
+        _ = s.apply(AgentEvent(v: 1, eventId: "W1", agent: "a", kind: .stop,
+                    sessionId: "S", root: "r", ts: "t"), seq: 1, now: 0, replay: false)
+        let changes = s.markStale(now: 9999, timeout: 600)
+        XCTAssertEqual(changes, [])
+        XCTAssertEqual(s.sessions.values.first?.state, .waiting(.stop))
     }
 }

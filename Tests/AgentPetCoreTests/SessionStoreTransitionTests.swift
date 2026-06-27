@@ -46,8 +46,17 @@ final class SessionStoreTransitionTests: XCTestCase {
 
     func test_ended_is_terminal_ignores_all_events() {
         let s = SessionStore()
-        _ = s.apply(ev("E1", .sessionEnd), seq: 1, now: 0, replay: false)
-        _ = s.apply(ev("E2", .sessionStart), seq: 2, now: 0, replay: false)
+        _ = s.apply(ev("E0", .sessionStart), seq: 1, now: 0, replay: false)
+        _ = s.apply(ev("E1", .sessionEnd), seq: 2, now: 0, replay: false)
+        _ = s.apply(ev("E2", .sessionStart), seq: 3, now: 0, replay: false)
         XCTAssertEqual(s.sessions.values.first?.state, .ended)
+    }
+
+    /// B3: 首事件即 session_end 不建会话
+    func test_first_event_session_end_is_ignored() {
+        let s = SessionStore()
+        let changes = s.apply(ev("E1", .sessionEnd), seq: 1, now: 0, replay: false)
+        XCTAssertEqual(changes, [])
+        XCTAssertTrue(s.sessions.isEmpty)
     }
 }

@@ -32,4 +32,21 @@ final class AgentEventTests: XCTestCase {
         XCTAssertNil(e?.terminal)
         XCTAssertEqual(e?.kind, .busy)
     }
+
+    /// B5: 未知 reason rawValue 不丢整条事件，字段降为 nil
+    func test_unknown_reason_value_keeps_event_with_nil_reason() {
+        let line = #"{"v":1,"eventId":"E","agent":"a","event":"stop","sessionId":"S","root":"r","reason":"focus","ts":"t"}"#
+        let e = AgentEvent.decode(line: Substring(line))
+        XCTAssertNotNil(e)
+        XCTAssertEqual(e?.kind, .stop)
+        XCTAssertNil(e?.reason)
+    }
+
+    /// B5: 未知 notify rawValue 不丢整条事件，字段降为 nil
+    func test_unknown_notify_value_keeps_event_with_nil_notify() {
+        let line = #"{"v":1,"eventId":"E","agent":"a","event":"busy","sessionId":"S","root":"r","notify":"weird","ts":"t"}"#
+        let e = AgentEvent.decode(line: Substring(line))
+        XCTAssertNotNil(e)
+        XCTAssertNil(e?.notify)
+    }
 }

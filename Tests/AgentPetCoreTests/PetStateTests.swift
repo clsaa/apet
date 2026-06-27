@@ -38,4 +38,28 @@ final class PetStateTests: XCTestCase {
         XCTAssertEqual(active.count, 1)
         XCTAssertEqual(active.first?.key.sessionId, "A")
     }
+
+    /// B1: 忙碌时仍能读到等待计数（rich summary）
+    func test_summary_reports_waiting_even_when_busy() {
+        let s = SessionStore()
+        push(s, "E1", .sessionStart,   sid: "A", seq: 1)   // running
+        push(s, "E2", .stop,           sid: "B", seq: 2)   // waiting(.stop)
+        push(s, "E3", .attention,      sid: "C", seq: 3)   // waiting(.attention)
+        let sum = s.summary()
+        XCTAssertEqual(sum.state, .busy)
+        XCTAssertTrue(sum.hasWaiting)
+        XCTAssertEqual(sum.waitingCount, 2)
+        XCTAssertEqual(sum.attentionCount, 1)
+        XCTAssertEqual(sum.runningCount, 1)
+    }
+
+    /// B1: stale 计数正确，且 state 为 idle（无 running/waiting）
+    func test_summary_counts_stale() {
+        let s = SessionStore()
+        push(s, "E1", .sessionStart, sid: "A", seq: 1)
+        _ = s.markStale(now: 9999, timeout: 600)
+        let sum = s.summary()
+        XCTAssertEqual(sum.staleCount, 1)
+        XCTAssertEqual(sum.state, .idle)
+    }
 }

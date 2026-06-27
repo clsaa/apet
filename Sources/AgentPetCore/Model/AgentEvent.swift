@@ -74,13 +74,14 @@ public struct AgentEvent: Equatable {
     }
 
     /// 解析单行 NDJSON。坏行/解析失败返回 nil（绝不抛）。设计 §9。
+    /// reason/notify 宽容解码：未知 rawValue 不丢整条事件，字段降为 nil（面板 B5）。
     public static func decode(line: Substring) -> AgentEvent? {
         guard let data = line.data(using: .utf8), !data.isEmpty else { return nil }
         struct Raw: Decodable {
             var v: Int?; var eventId: String?; var seq: Int?; var agent: String?
             var event: String?; var sessionId: String?; var root: String?
             var cwd: String?; var title: String?; var terminal: TerminalRef?
-            var notify: NotifyClass?; var reason: WaitingReason?; var message: String?; var ts: String?
+            var notify: String?; var reason: String?; var message: String?; var ts: String?
         }
         guard let r = try? JSONDecoder().decode(Raw.self, from: data),
               let eventId = r.eventId, let agent = r.agent, let event = r.event,
@@ -88,7 +89,9 @@ public struct AgentEvent: Equatable {
         else { return nil }
         return AgentEvent(v: r.v ?? 1, eventId: eventId, seq: r.seq, agent: agent,
                           kind: EventKind(raw: event), sessionId: sessionId, root: root,
-                          cwd: r.cwd, title: r.title, terminal: r.terminal, notify: r.notify,
-                          reason: r.reason, message: r.message, ts: ts)
+                          cwd: r.cwd, title: r.title, terminal: r.terminal,
+                          notify: NotifyClass(rawValue: r.notify ?? ""),
+                          reason: WaitingReason(rawValue: r.reason ?? ""),
+                          message: r.message, ts: ts)
     }
 }
