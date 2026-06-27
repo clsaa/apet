@@ -13,5 +13,6 @@ let package = Package(
         .testTarget(name: "AgentPetCoreTests", dependencies: ["AgentPetCore"]),
         .target(name: "AppShellKit"),
         .testTarget(name: "AppShellKitTests", dependencies: ["AppShellKit", "AgentPetCore"]),
+        .executableTarget(name: "apet", dependencies: ["AgentPetCore", "AppShellKit"]),
     ]
 )
