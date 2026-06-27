@@ -21,6 +21,7 @@ public final class SessionStore {
     }
 
     private func nextState(from current: SessionState, event: AgentEvent) -> SessionState {
+        guard current != .ended else { return .ended }   // 终态不可回退（CLAUDE.md 硬约束 #4）
         switch event.kind {
         case .sessionStart, .busy: return .running
         case .stop:                return .waiting(event.reason ?? .stop)

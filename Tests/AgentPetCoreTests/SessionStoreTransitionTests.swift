@@ -43,4 +43,11 @@ final class SessionStoreTransitionTests: XCTestCase {
         _ = s.apply(ev("E1", .attention), seq: 1, now: 0, replay: false)  // reason 缺省
         XCTAssertEqual(s.sessions.values.first?.state, .waiting(.attention))
     }
+
+    func test_ended_is_terminal_ignores_all_events() {
+        let s = SessionStore()
+        _ = s.apply(ev("E1", .sessionEnd), seq: 1, now: 0, replay: false)
+        _ = s.apply(ev("E2", .sessionStart), seq: 2, now: 0, replay: false)
+        XCTAssertEqual(s.sessions.values.first?.state, .ended)
+    }
 }
