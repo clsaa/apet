@@ -25,6 +25,8 @@ final class AppCoordinator {
     private let reader = EventTailReader()
     private var checkpoint: Checkpoint?
 
+    private var notificationService: NotificationService?
+
     private var watchSource: DispatchSourceFileSystemObject?
     private var watchFd: Int32 = -1
     private var reapTimer: DispatchSourceTimer?
@@ -61,6 +63,13 @@ final class AppCoordinator {
         self.store = store
         self.ingestor = ingestor
 
+        // 2b. Create and start NotificationService (safe to call before replay)
+        let ns = NotificationService(sessionLookup: { [weak self] key in
+            self?.store?.sessions[key]
+        })
+        notificationService = ns
+        ns.start()
+
         // 3. Register change handler: log every store mutation
         store.addChangeHandler { [weak self] changes, isReplay in
             guard let self, let store = self.store else { return }
@@ -75,6 +84,12 @@ final class AppCoordinator {
             let result = try reader.readNewLines(path: eventsPath, from: nil)
             for line in result.lines {
                 ingestor.ingest(line: Substring(line), now: replayNow, replay: true)
+                // replay: true — NotificationGate suppresses all; call for correct flag propagation.
+                if let event = AgentEvent.decode(line: Substring(line)) {
+                    let key = SessionKey(event: event)
+                    ns.consider(event: event, session: store.sessions[key],
+                                mode: .attentionOnly, replay: true)
+                }
             }
             checkpoint = result.next
             appendToLog("[start] replay done, lines=\(result.lines.count), offset=\(result.next.offset)\n")
@@ -152,6 +167,12 @@ final class AppCoordinator {
                 let result = try self.reader.readNewLines(path: self.eventsPath, from: self.checkpoint)
                 for line in result.lines {
                     ingestor.ingest(line: Substring(line), now: now, replay: false)
+                    if let event = AgentEvent.decode(line: Substring(line)),
+                       let ns = self.notificationService {
+                        let key = SessionKey(event: event)
+                        ns.consider(event: event, session: self.store?.sessions[key],
+                                    mode: .attentionOnly, replay: false)
+                    }
                 }
                 if !result.lines.isEmpty {
                     self.checkpoint = result.next
@@ -176,6 +197,12 @@ final class AppCoordinator {
                 let result = try self.reader.readNewLines(path: self.eventsPath, from: self.checkpoint)
                 for line in result.lines {
                     ingestor.ingest(line: Substring(line), now: now, replay: false)
+                    if let event = AgentEvent.decode(line: Substring(line)),
+                       let ns = self.notificationService {
+                        let key = SessionKey(event: event)
+                        ns.consider(event: event, session: self.store?.sessions[key],
+                                    mode: .attentionOnly, replay: false)
+                    }
                 }
                 if !result.lines.isEmpty {
                     self.checkpoint = result.next
