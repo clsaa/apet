@@ -43,5 +43,12 @@ final class ITerm2LocatorTests: XCTestCase {
         XCTAssertFalse(ITermSessionId.isValid("a\"b"))
         XCTAssertFalse(ITermSessionId.isValid("a\nb"))
         XCTAssertFalse(ITermSessionId.isValid(""))
+        XCTAssertFalse(ITermSessionId.isValid("a$b"))
+        XCTAssertFalse(ITermSessionId.isValid("a`b"))
+        XCTAssertFalse(ITermSessionId.isValid("a;b"))
+        XCTAssertFalse(ITermSessionId.isValid("a\\b"))
+        XCTAssertFalse(ITermSessionId.isValid("a(b)"))
+        XCTAssertFalse(ITermSessionId.isValid("a/b"))
+        XCTAssertFalse(ITermSessionId.isValid("é"))   // 非 ASCII 字母现在也应被拒
     }
 }

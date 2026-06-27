@@ -1,5 +1,7 @@
 import Foundation
 
+/// 终端跳转脚本调用。约定：`arguments[0]` = 脚本全文（执行层用 `osascript -` 经 stdin 传入），
+/// `arguments[1...]` = 脚本的 argv 元素（`on run argv`）。执行层不得把 arguments[0] 当文件路径直接传给 osascript。
 public struct ScriptInvocation: Equatable {
     public let executable: String
     public let arguments: [String]
@@ -22,7 +24,8 @@ public enum ITermSessionId {
     public static func isValid(_ s: String) -> Bool {
         guard !s.isEmpty else { return false }
         return s.allSatisfy { c in
-            c.isLetter || c.isNumber || c == ":" || c == "_" || c == "-"
+            (c >= "a" && c <= "z") || (c >= "A" && c <= "Z") ||
+            (c >= "0" && c <= "9") || c == ":" || c == "_" || c == "-"
         }
     }
 }
