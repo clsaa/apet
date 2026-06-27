@@ -24,7 +24,7 @@ AGENTPET_OUT="${AGENTPET_OUT:-}"
 # cwd/title values that may contain spaces, quotes, or backslashes)
 export _APET_HOOK_JSON="$HOOK_JSON"
 export _APET_OUT="$AGENTPET_OUT"
-export _APET_ROOT="${AGENTPET_ROOT:-~/.claude}"
+export _APET_ROOT="${AGENTPET_ROOT:-$HOME/.claude}"
 export _APET_ITERM="${ITERM_SESSION_ID:-}"
 export _APET_TERM_PROG="${TERM_PROGRAM:-}"
 

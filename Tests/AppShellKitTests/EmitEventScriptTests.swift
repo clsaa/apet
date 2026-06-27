@@ -121,4 +121,131 @@ final class EmitEventScriptTests: XCTestCase {
         XCTAssertEqual(event.sessionId, "S2")
         XCTAssertNil(event.terminal,    "No terminal env → terminal must be nil")
     }
+
+    // MARK: - Test 3: SessionStart hook → session_start event
+
+    func testSessionStartMapsToSessionStart() throws {
+        let outURL = makeTempURL()
+        defer {
+            try? FileManager.default.removeItem(at: outURL)
+            try? FileManager.default.removeItem(at: URL(fileURLWithPath: outURL.path + ".lock"))
+        }
+
+        let hookJSON = #"{"hook_event_name":"SessionStart","session_id":"S_START","cwd":"/tmp"}"#
+        let status = try runScript(hookJSON: hookJSON, outURL: outURL)
+        XCTAssertEqual(status, 0, "Script must exit 0")
+
+        let content = try String(contentsOf: outURL, encoding: .utf8)
+        let lines = content.split(separator: "\n", omittingEmptySubsequences: true)
+        XCTAssertEqual(lines.count, 1, "Exactly one NDJSON line must be written")
+
+        guard let event = AgentEvent.decode(line: lines[0]) else {
+            return XCTFail("Could not decode AgentEvent from: \(lines[0])")
+        }
+
+        XCTAssertEqual(event.kind,      .sessionStart)
+        XCTAssertEqual(event.sessionId, "S_START")
+    }
+
+    // MARK: - Test 4: PreToolUse hook → busy event
+
+    func testPreToolUseMapsToBusy() throws {
+        let outURL = makeTempURL()
+        defer {
+            try? FileManager.default.removeItem(at: outURL)
+            try? FileManager.default.removeItem(at: URL(fileURLWithPath: outURL.path + ".lock"))
+        }
+
+        let hookJSON = #"{"hook_event_name":"PreToolUse","session_id":"S_TOOL","cwd":"/tmp"}"#
+        let status = try runScript(hookJSON: hookJSON, outURL: outURL)
+        XCTAssertEqual(status, 0, "Script must exit 0")
+
+        let content = try String(contentsOf: outURL, encoding: .utf8)
+        let lines = content.split(separator: "\n", omittingEmptySubsequences: true)
+        XCTAssertEqual(lines.count, 1, "Exactly one NDJSON line must be written")
+
+        guard let event = AgentEvent.decode(line: lines[0]) else {
+            return XCTFail("Could not decode AgentEvent from: \(lines[0])")
+        }
+
+        XCTAssertEqual(event.kind,      .busy)
+        XCTAssertEqual(event.sessionId, "S_TOOL")
+    }
+
+    // MARK: - Test 5: Injection-safe cwd handling
+
+    func testInjectionSafeCwd() throws {
+        let outURL = makeTempURL()
+        defer {
+            try? FileManager.default.removeItem(at: outURL)
+            try? FileManager.default.removeItem(at: URL(fileURLWithPath: outURL.path + ".lock"))
+        }
+
+        // cwd with quotes, backticks, and $(...) injection attempt
+        let dangerousCwd = "/Users/x/proj \"a\" $(touch /tmp/apet_pwn_$$)"
+        let escaped = dangerousCwd.replacingOccurrences(of: "\"", with: "\\\"")
+        let hookJSON = "{\"hook_event_name\":\"Stop\",\"session_id\":\"S_INJ\",\"cwd\":\"\(escaped)\"}"
+
+        let status = try runScript(hookJSON: hookJSON, outURL: outURL)
+        XCTAssertEqual(status, 0, "Script must exit 0 even with dangerous cwd")
+
+        let content = try String(contentsOf: outURL, encoding: .utf8)
+        let lines = content.split(separator: "\n", omittingEmptySubsequences: true)
+        XCTAssertEqual(lines.count, 1, "Exactly one NDJSON line must be written")
+
+        guard let event = AgentEvent.decode(line: lines[0]) else {
+            return XCTFail("Could not decode AgentEvent from: \(lines[0])")
+        }
+
+        // Verify cwd is stored as literal string, not executed
+        XCTAssertEqual(event.cwd, dangerousCwd, "cwd must be literal string, not shell-expanded")
+
+        // Verify no injection occurred (no /tmp/apet_pwn_* file created)
+        let fileManager = FileManager.default
+        let tmpDir = "/tmp"
+        do {
+            let files = try fileManager.contentsOfDirectory(atPath: tmpDir)
+            let pwnedFiles = files.filter { $0.hasPrefix("apet_pwn_") }
+            XCTAssertTrue(pwnedFiles.isEmpty, "No shell injection should have occurred - no /tmp/apet_pwn_* files should exist")
+        } catch {
+            XCTFail("Could not read /tmp directory: \(error)")
+        }
+    }
+
+    // MARK: - Test 6: Missing AGENTPET_OUT exits zero, no crash
+
+    func testMissingAgentpetOutExitsZeroNoCrash() throws {
+        let outURL = makeTempURL()
+        defer {
+            try? FileManager.default.removeItem(at: outURL)
+            try? FileManager.default.removeItem(at: URL(fileURLWithPath: outURL.path + ".lock"))
+        }
+
+        let process = Process()
+        process.executableURL = URL(fileURLWithPath: "/bin/bash")
+        process.arguments = [Self.scriptURL.path]
+
+        let env: [String: String] = [
+            "PATH": "/usr/bin:/bin:/usr/local/bin",
+            "HOME": NSHomeDirectory(),
+            // AGENTPET_OUT is intentionally NOT set
+        ]
+        process.environment = env
+
+        // Pipe hook payload to stdin
+        let stdinPipe = Pipe()
+        process.standardInput = stdinPipe
+        let hookJSON = #"{"hook_event_name":"Stop","session_id":"S_NOOUT","cwd":"/tmp"}"#
+        stdinPipe.fileHandleForWriting.write(hookJSON.data(using: .utf8)!)
+        stdinPipe.fileHandleForWriting.closeFile()
+
+        try process.run()
+        process.waitUntilExit()
+
+        XCTAssertEqual(process.terminationStatus, 0, "Script must exit 0 even when AGENTPET_OUT is unset")
+
+        // Verify no output file was created
+        let exists = FileManager.default.fileExists(atPath: outURL.path)
+        XCTAssertFalse(exists, "No output file should be created when AGENTPET_OUT is unset")
+    }
 }
