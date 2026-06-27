@@ -9,14 +9,14 @@ import AppShellKit
 @MainActor
 final class AppCoordinator {
 
-    // MARK: - Config
+    // MARK: - Config (persistent)
 
     let eventsPath: String
     let logPath: String
 
-    private let staleAfter: Double = 600          // 10 min
-    private let endedAfter: Double = 14400        // 4 h
-    private let waitingEndedAfter: Double = 28800 // 8 h
+    private let configStore: ConfigStore
+    private var config: AppConfig
+
     private let tickInterval: Double = 60         // 1 min
 
     // MARK: - State
@@ -35,6 +35,15 @@ final class AppCoordinator {
     private var reapTimer: DispatchSourceTimer?
     private var isStopped = false
 
+    private var preferencesController: PreferencesWindowController?
+
+    // MARK: - Derived config helpers
+
+    /// Convert the string-encoded notifyMode into the typed enum consumed by NotificationDecider.
+    private var currentNotifyMode: NotifyMode {
+        config.notifyMode == "everyStop" ? .everyStop : .attentionOnly
+    }
+
     // MARK: - Init
 
     init() {
@@ -45,6 +54,12 @@ final class AppCoordinator {
             ?? (appSupport as NSString).appendingPathComponent("events.ndjson")
         self.logPath = env["AGENTPET_LOG"]
             ?? (appSupport as NSString).appendingPathComponent("apet.log")
+
+        let configURL = URL(fileURLWithPath: appSupport)
+            .appendingPathComponent("config.json")
+        let store = ConfigStore(url: configURL)
+        self.configStore = store
+        self.config = store.load()
     }
 
     // MARK: - Lifecycle
@@ -61,9 +76,9 @@ final class AppCoordinator {
         }
 
         // 2. Create store + ingestor
-        let store = SessionStore()
-        let ingestor = NDJSONIngestor(store: store)
-        self.store = store
+        let sessionStore = SessionStore()
+        let ingestor = NDJSONIngestor(store: sessionStore)
+        self.store = sessionStore
         self.ingestor = ingestor
 
         // 2b. Create and start NotificationService (safe to call before replay).
@@ -84,19 +99,23 @@ final class AppCoordinator {
                 guard let pw else { return }
                 pw.setVisible(!pw.isVisible)
             }
+            mb.onOpenPreferences = { [weak self] in
+                self?.openPreferences()
+            }
             menuBar = mb
             petWindow = pw
 
-            // Show pet window on startup (default DisplayMode = visible).
-            // `orderFrontRegardless()` inside setVisible() ensures the borderless
-            // window appears in an LSUIElement (accessory) app.
-            pw.setVisible(true)
+            // Apply display mode from config.
+            let showPet = config.displayMode != "menuBarOnly"
+            if showPet {
+                pw.setVisible(true)
+            }
             // Activate the app once so AppKit delivers window-order events properly.
             NSApp.activate(ignoringOtherApps: true)
         }
 
         // 3. Register change handler: log every store mutation + refresh menu bar
-        store.addChangeHandler { [weak self] changes, isReplay in
+        sessionStore.addChangeHandler { [weak self] changes, isReplay in
             guard let self, let store = self.store else { return }
             let summary = store.summary()
             let line = "[change] \(changes) replay=\(isReplay) summary=\(summary)\n"
@@ -108,6 +127,7 @@ final class AppCoordinator {
 
         // 4. Replay existing file content (replay: true)
         let replayNow = Date().timeIntervalSince1970
+        let replayMode = currentNotifyMode
         do {
             let result = try reader.readNewLines(path: eventsPath, from: nil)
             for line in result.lines {
@@ -115,8 +135,8 @@ final class AppCoordinator {
                 // replay: true — NotificationGate suppresses all; call for correct flag propagation.
                 if let event = AgentEvent.decode(line: Substring(line)) {
                     let key = SessionKey(event: event)
-                    ns.consider(event: event, session: store.sessions[key],
-                                mode: .attentionOnly, replay: true)
+                    ns.consider(event: event, session: sessionStore.sessions[key],
+                                mode: replayMode, replay: true)
                 }
             }
             checkpoint = result.next
@@ -134,8 +154,10 @@ final class AppCoordinator {
         timer.setEventHandler { [weak self] in
             guard let self, let store = self.store else { return }
             let now = Date().timeIntervalSince1970
-            _ = store.markStale(now: now, timeout: self.staleAfter)
-            store.reap(now: now, endedAfter: self.endedAfter, waitingEndedAfter: self.waitingEndedAfter)
+            _ = store.markStale(now: now, timeout: self.config.staleAfterSec)
+            store.reap(now: now,
+                       endedAfter: self.config.endedAfterSec,
+                       waitingEndedAfter: self.config.waitingEndedAfterSec)
             let timerSessions = store.activeSessions()
             self.menuBar?.update(summary: store.summary(), sessions: timerSessions)
             self.petWindow?.update(summary: store.summary(), sessions: timerSessions)
@@ -154,6 +176,49 @@ final class AppCoordinator {
         }
         reapTimer?.cancel()
         reapTimer = nil
+    }
+
+    // MARK: - Preferences
+
+    /// Open the Preferences window, creating it if needed.
+    ///
+    /// If the window is already visible, it is simply brought to front.
+    func openPreferences() {
+        if let pc = preferencesController, pc.window?.isVisible == true {
+            pc.show()
+            return
+        }
+        let pc = PreferencesWindowController(
+            config: config,
+            configStore: configStore,
+            onSave: { [weak self] newConfig in
+                self?.applyConfig(newConfig)
+            }
+        )
+        preferencesController = pc
+        pc.show()
+    }
+
+    // MARK: - Config application
+
+    /// Apply a newly-saved configuration at runtime (no restart needed for thresholds/mode).
+    ///
+    /// - Thresholds (`staleAfterSec`, `endedAfterSec`, `waitingEndedAfterSec`) take effect
+    ///   on the **next** reap-timer tick.
+    /// - `notifyMode` takes effect on the **next** inbound event.
+    /// - `displayMode` is applied immediately.
+    private func applyConfig(_ newConfig: AppConfig) {
+        config = newConfig
+
+        // Apply display mode immediately.
+        if let pw = petWindow {
+            let shouldShow = newConfig.displayMode != "menuBarOnly"
+            if shouldShow != pw.isVisible {
+                pw.setVisible(shouldShow)
+            }
+        }
+        // selectedPet, dataRoots: take effect next time relevant code reads config.
+        // (pet sprite reload and hook install paths are lazy / user-initiated.)
     }
 
     // MARK: - Private: file watch
@@ -194,6 +259,7 @@ final class AppCoordinator {
 
             // .write / .extend: read new content
             let now = Date().timeIntervalSince1970
+            let liveMode = self.currentNotifyMode
             do {
                 let result = try self.reader.readNewLines(path: self.eventsPath, from: self.checkpoint)
                 for line in result.lines {
@@ -203,7 +269,7 @@ final class AppCoordinator {
                         if let ns = self.notificationService {
                             let key = SessionKey(event: event)
                             ns.consider(event: event, session: self.store?.sessions[key],
-                                        mode: .attentionOnly, replay: false)
+                                        mode: liveMode, replay: false)
                         }
                     }
                 }
@@ -226,6 +292,7 @@ final class AppCoordinator {
         DispatchQueue.main.async { [weak self] in
             guard let self, !self.isStopped, let ingestor = self.ingestor else { return }
             let now = Date().timeIntervalSince1970
+            let drainMode = self.currentNotifyMode
             do {
                 let result = try self.reader.readNewLines(path: self.eventsPath, from: self.checkpoint)
                 for line in result.lines {
@@ -235,7 +302,7 @@ final class AppCoordinator {
                         if let ns = self.notificationService {
                             let key = SessionKey(event: event)
                             ns.consider(event: event, session: self.store?.sessions[key],
-                                        mode: .attentionOnly, replay: false)
+                                        mode: drainMode, replay: false)
                         }
                     }
                 }

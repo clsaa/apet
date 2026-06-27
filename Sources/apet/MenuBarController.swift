@@ -5,18 +5,21 @@ import AppShellKit
 
 // MARK: - PanelRootView
 
-/// Wraps ``SessionPanel`` with a "退出" footer.  Private to this file.
+/// Wraps ``SessionPanel`` with action footer buttons. Private to this file.
 private struct PanelRootView: View {
     let rows: [SessionRowModel]
     let petVisible: Bool
     let onTap: (String) -> Void
     let onTogglePet: () -> Void
+    let onOpenPreferences: () -> Void
     let onQuit: () -> Void
 
     var body: some View {
         VStack(spacing: 0) {
             SessionPanel(rows: rows, onTap: onTap)
             Divider()
+
+            // 隐藏/显示宠物
             Button {
                 onTogglePet()
             } label: {
@@ -29,6 +32,21 @@ private struct PanelRootView: View {
             .padding(.horizontal, 10)
             .padding(.top, 6)
             .padding(.bottom, 2)
+
+            // 首选项…
+            Button {
+                onOpenPreferences()
+            } label: {
+                Text("首选项…")
+                    .frame(maxWidth: .infinity)
+                    .padding(.vertical, 3)
+            }
+            .buttonStyle(.plain)
+            .foregroundStyle(.secondary)
+            .padding(.horizontal, 10)
+            .padding(.vertical, 2)
+
+            // 退出
             Button {
                 onQuit()
             } label: {
@@ -64,6 +82,8 @@ final class MenuBarController: NSObject {
     var petVisibilityProvider: (() -> Bool)?
     /// Invoked when the user taps 隐藏/显示宠物; AppCoordinator toggles the pet window.
     var onTogglePet: (() -> Void)?
+    /// Invoked when the user taps 首选项…; AppCoordinator shows the preferences window.
+    var onOpenPreferences: (() -> Void)?
 
     // MARK: - State
 
@@ -141,8 +161,13 @@ final class MenuBarController: NSObject {
                 self?.onTogglePet?()
                 // Re-render the panel so the button label flips immediately.
                 self?.panelHosting?.rootView = self?.makePanelRootView() ?? PanelRootView(
-                    rows: [], petVisible: false, onTap: { _ in }, onTogglePet: {}, onQuit: {}
+                    rows: [], petVisible: false,
+                    onTap: { _ in }, onTogglePet: {}, onOpenPreferences: {}, onQuit: {}
                 )
+            },
+            onOpenPreferences: { [weak self] in
+                self?.popover?.performClose(nil)
+                self?.onOpenPreferences?()
             },
             onQuit: { NSApplication.shared.terminate(nil) }
         )
