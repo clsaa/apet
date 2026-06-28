@@ -13,12 +13,19 @@ public struct PetPresentation: Equatable {
     public let bubble: String?
     /// True when attentionCount > 0 (drives orange vs red tint).
     public let emphasize: Bool
+    /// 始终显示的"进行中"会话数（绿点），即便为 0（用户反馈：时刻显示）。
+    public let runningCount: Int
+    /// 始终显示的"停下等你/完成"会话数（红点）= waiting + attention，即便为 0。
+    public let doneCount: Int
 
-    public init(assetState: String, badge: String?, bubble: String?, emphasize: Bool) {
+    public init(assetState: String, badge: String?, bubble: String?, emphasize: Bool,
+                runningCount: Int = 0, doneCount: Int = 0) {
         self.assetState = assetState
         self.badge = badge
         self.bubble = bubble
         self.emphasize = emphasize
+        self.runningCount = runningCount
+        self.doneCount = doneCount
     }
 }
 
@@ -30,6 +37,9 @@ public enum PetPresenter {
     public static func make(from summary: PetSummary) -> PetPresentation {
         let badge = summary.badgeCount > 0 ? "\(summary.badgeCount)" : nil
         let emphasize = summary.attentionCount > 0
+        // 始终携带计数：running=进行中；done=停下等你/完成（waiting + attention）。
+        let running = summary.runningCount
+        let done = summary.waitingCount + summary.attentionCount
 
         switch summary.state {
         case .idle:
@@ -37,14 +47,18 @@ public enum PetPresenter {
                 assetState: "idle",
                 badge: nil,
                 bubble: nil,
-                emphasize: false
+                emphasize: false,
+                runningCount: running,
+                doneCount: done
             )
         case .busy:
             return PetPresentation(
                 assetState: "busy",
                 badge: badge,
                 bubble: nil,
-                emphasize: emphasize
+                emphasize: emphasize,
+                runningCount: running,
+                doneCount: done
             )
         case .calling:
             let bubble = "\(summary.badgeCount) 个等你"
@@ -52,7 +66,9 @@ public enum PetPresenter {
                 assetState: "calling",
                 badge: badge,
                 bubble: bubble,
-                emphasize: emphasize
+                emphasize: emphasize,
+                runningCount: running,
+                doneCount: done
             )
         }
     }

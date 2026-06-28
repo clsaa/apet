@@ -84,4 +84,25 @@ final class PetPresenterTests: XCTestCase {
         XCTAssertEqual(p.bubble, "3 个等你")
         XCTAssertFalse(p.emphasize)
     }
+
+    // MARK: - Always-on counts（用户反馈：时刻显示运行/完成数）
+
+    func test_counts_idle_bothZero() {
+        let p = PetPresenter.make(from: PetSummary(state: .idle, runningCount: 0, waitingCount: 0, attentionCount: 0, staleCount: 0))
+        XCTAssertEqual(p.runningCount, 0)
+        XCTAssertEqual(p.doneCount, 0)   // 即便 0 也有值，供桌宠常显
+    }
+
+    func test_counts_running_isRunningCount() {
+        let p = PetPresenter.make(from: PetSummary(state: .busy, runningCount: 2, waitingCount: 0, attentionCount: 0, staleCount: 0))
+        XCTAssertEqual(p.runningCount, 2)
+        XCTAssertEqual(p.doneCount, 0)
+    }
+
+    func test_counts_done_isWaitingPlusAttention() {
+        // 1 running + 2 waiting(含 1 attention) → done = waiting(2) + attention(1) = 3（停下等你/完成）
+        let p = PetPresenter.make(from: PetSummary(state: .busy, runningCount: 1, waitingCount: 2, attentionCount: 1, staleCount: 0))
+        XCTAssertEqual(p.runningCount, 1)
+        XCTAssertEqual(p.doneCount, 3)
+    }
 }
