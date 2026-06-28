@@ -149,12 +149,16 @@ final class JSONLSessionScannerTests: XCTestCase {
         )
     }
 
-    func test_age_belowIdleWindow_doesNotIgnoreAsTooOld() {
+    func test_age_belowIdleWindow_observesNotTooOld() {
         let now: Double = 1_001_799
         let f = makeFile(mtime: 1_000_000) // age = 1799 < 1800
-        let result = JSONLSessionScanner.scan(f, now: now, idleWindow: 1800)
-        // Should NOT be tooOld — it's an observe
-        if case .ignore(.tooOld) = result { XCTFail("Should not be tooOld") }
+        // age < idleWindow 且无 subagent/synthetic/blacklist → 精确钉住 observe（占位 .stale）
+        XCTAssertEqual(
+            JSONLSessionScanner.scan(f, now: now, idleWindow: 1800),
+            .observe(state: .stale,
+                     key: SessionKey(agent: "claude", root: "/Users/x/.claude", sessionId: "sess-1"),
+                     cwd: "/Users/x/project", title: "My Session")
+        )
     }
 
     /// effectiveTs = min(mtime, lastConversationTs ?? mtime)
@@ -168,7 +172,7 @@ final class JSONLSessionScannerTests: XCTestCase {
         )
     }
 
-    func test_effectiveTs_lastConversationTs_newerThanMtime_usesLastConversation_notOld() {
+    func test_effectiveTs_lastConversationTs_newerThanMtime_minPicksMtime_isTooOld() {
         let now: Double = 1_003_600
         // mtime=1_000_000 (age=3600 >= 1800), lastConversationTs=1_002_000 (age=1600 < 1800)
         // effectiveTs = min(1_000_000, 1_002_000) = 1_000_000 → tooOld
@@ -180,7 +184,7 @@ final class JSONLSessionScannerTests: XCTestCase {
         )
     }
 
-    func test_effectiveTs_lastConversationTs_olderThanMtime_usesMtime_notOld() {
+    func test_effectiveTs_lastConversationTs_olderThanMtime_minPicksLastConvTs_isTooOld() {
         let now: Double = 1_001_700
         // mtime=1_001_600 (age=100), lastConversationTs=999_000 (very old)
         // effectiveTs = min(1_001_600, 999_000) = 999_000 → age=2700 >= 1800 → tooOld
@@ -193,10 +197,14 @@ final class JSONLSessionScannerTests: XCTestCase {
 
     func test_effectiveTs_nilLastConversationTs_fallsBackToMtime() {
         let now: Double = 1_001_799
-        // lastConversationTs=nil → effectiveTs=mtime=1_000_000 → age=1799 < 1800 → not tooOld
+        // lastConversationTs=nil → effectiveTs=mtime=1_000_000 → age=1799 < 1800 → observe（占位 .stale）
         let f = makeFile(mtime: 1_000_000, lastConversationTs: nil)
-        let result = JSONLSessionScanner.scan(f, now: now, idleWindow: 1800)
-        if case .ignore(.tooOld) = result { XCTFail("Should not be tooOld") }
+        XCTAssertEqual(
+            JSONLSessionScanner.scan(f, now: now, idleWindow: 1800),
+            .observe(state: .stale,
+                     key: SessionKey(agent: "claude", root: "/Users/x/.claude", sessionId: "sess-1"),
+                     cwd: "/Users/x/project", title: "My Session")
+        )
     }
 
     // MARK: - Observe: check key, cwd, title
