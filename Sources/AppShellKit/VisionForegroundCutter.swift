@@ -105,7 +105,11 @@ public struct VisionForegroundCutter: ForegroundCutter {
         // Any nil here is a system/disk issue, not a Vision inference problem.
         let ciImage = CIImage(cvPixelBuffer: pixelBuffer)
         let ciContext = CIContext()
-        guard let resultCGImage = ciContext.createCGImage(ciImage, from: ciImage.extent) else {
+        // 显式 RGBA8 + sRGB：保住 alpha 通道，否则透明背景会被压成黑/白方块（安全评审 MAJ-1）。
+        let rgbColorSpace = CGColorSpace(name: CGColorSpace.sRGB) ?? CGColorSpaceCreateDeviceRGB()
+        guard let resultCGImage = ciContext.createCGImage(
+            ciImage, from: ciImage.extent, format: .RGBA8, colorSpace: rgbColorSpace
+        ) else {
             throw CutoutError.outputWriteFailed("CIContext.createCGImage returned nil")
         }
         let rep = NSBitmapImageRep(cgImage: resultCGImage)
