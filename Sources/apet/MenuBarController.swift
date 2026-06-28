@@ -46,6 +46,20 @@ private struct PanelRootView: View {
             .padding(.horizontal, 10)
             .padding(.vertical, 2)
 
+            // Part D: 低调常驻增强入口——让只看面板的用户也知道有精确跳转/通知可开启。
+            Button {
+                onOpenPreferences()
+            } label: {
+                Label("开启精确跳转/通知…", systemImage: "bolt.badge.a.fill")
+                    .frame(maxWidth: .infinity)
+                    .padding(.vertical, 2)
+            }
+            .buttonStyle(.plain)
+            .foregroundStyle(Color.accentColor.opacity(0.6))
+            .font(.caption)
+            .padding(.horizontal, 10)
+            .padding(.vertical, 2)
+
             // 退出
             Button {
                 onQuit()
@@ -97,6 +111,8 @@ final class MenuBarController: NSObject {
     private var panelHosting: NSHostingController<PanelRootView>?
     /// Guard: only one "无法跳转" alert at a time (prevents rapid-click alert stacking).
     private var isShowingTapAlert = false
+    /// Part C: throttles just-in-time hook hints to at most once per session, capped globally.
+    private var hookHintThrottle = HookHintThrottle()
 
     // MARK: - Init
 
@@ -260,6 +276,9 @@ final class MenuBarController: NSObject {
         }) else { return }
 
         let terminal = session.terminal
+        // Part C: jsonl-inferred sessions have no terminal info at all.
+        // Capture before going off-main so we can check it in the alert block.
+        let isJsonlSession = (terminal == nil)
         let fs = focusService
         // Dismiss the popover before the off-main focus attempt.
         popover?.performClose(nil)
@@ -277,7 +296,13 @@ final class MenuBarController: NSObject {
                     let alert = NSAlert()
                     alert.messageText = "无法跳转到会话"
                     // .targetGone=窗口已关；.unsupported=无终端信息（如 jsonl 推断会话）。文案兼顾两者。
-                    alert.informativeText = "无法跳转到会话终端（可能已关闭，或终端信息不可用）。"
+                    var infoText = "无法跳转到会话终端（可能已关闭，或终端信息不可用）。"
+                    // Part C: just-in-time hook hint — only for jsonl-inferred sessions,
+                    // throttled to once per session and capped globally by HookHintThrottle.
+                    if isJsonlSession && self.hookHintThrottle.shouldHint(sessionKey: id) {
+                        infoText += "\n\n💡 安装 Hook 可精确跳到这个 tab（会改 settings.json，自动备份/一键卸载）→ 在「首选项」中开启。"
+                    }
+                    alert.informativeText = infoText
                     alert.alertStyle = .informational
                     alert.addButton(withTitle: "好的")
                     alert.runModal()

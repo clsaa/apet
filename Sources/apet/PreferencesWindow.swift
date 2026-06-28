@@ -1,6 +1,7 @@
 import AppKit
 import SwiftUI
 import AppShellKit
+import UserNotifications
 
 // MARK: - HookRowView
 
@@ -19,6 +20,8 @@ private struct HookRowView: View {
     @State private var showInstallConfirm: Bool = false
     @State private var showUninstallConfirm: Bool = false
     @State private var errorText: String?
+    /// Pre-computed preview of hook entries shown inside the install confirmation dialog.
+    @State private var installPreviewText: String = ""
 
     private var settingsURL: URL {
         URL(fileURLWithPath: root.path).appendingPathComponent("settings.json")
@@ -66,9 +69,17 @@ private struct HookRowView: View {
                         .buttonStyle(.bordered)
                         .controlSize(.small)
                 } else {
-                    Button("安装 Hook") { showInstallConfirm = true }
-                        .buttonStyle(.borderedProminent)
-                        .controlSize(.small)
+                    Button("安装 Hook") {
+                        // Part A: Pre-compute preview so it's shown in the confirmation dialog.
+                        installPreviewText = HookInstaller.previewLines(
+                            scriptPath: runnerPath,
+                            eventsPath: AppPaths.eventsFile,
+                            rootPath: root.path
+                        )
+                        showInstallConfirm = true
+                    }
+                    .buttonStyle(.borderedProminent)
+                    .controlSize(.small)
                 }
             }
 
@@ -94,8 +105,17 @@ private struct HookRowView: View {
             Button("确认安装") { performInstall() }
             Button("取消", role: .cancel) {}
         } message: {
-            // swiftlint:disable:next line_length
-            Text("将在以下文件中写入 apet hook 条目，并自动备份原文件：\n\(settingsURL.path)\n→ 备份路径：\(settingsURL.path).apet.bak\n\n继续？")
+            // Part A: include previewLines so the user sees exactly what will be written
+            // before confirming. installPreviewText is populated when the button is tapped.
+            Text("""
+                将在以下文件中写入 apet hook 条目，并自动备份原文件：
+                \(settingsURL.path)
+                → 备份路径：\(settingsURL.path).apet.bak
+
+                \(installPreviewText)
+
+                继续？
+                """)
         }
 
         // ── Uninstall confirmation ────────────────────────────────────────
@@ -185,6 +205,14 @@ struct PreferencesView: View {
     @State private var newRootPath = ""
     @State private var saveError: String?
 
+    // MARK: - Health panel state (Part B)
+    @State private var notifStatusForHealth: NotificationStatus = .notDetermined
+    @State private var hookStatusForHealth: HookStatus = .notInstalled
+    @State private var jsonlStatusForHealth: JSONLSourceStatus = .pathMissing
+    @State private var hasOtherProfiles: Bool = false
+    /// Changing this UUID forces `.task(id:)` to re-run `refreshHealthStatus`.
+    @State private var healthRefreshID = UUID()
+
     init(config: AppConfig, configStore: ConfigStore, onSave: @escaping (AppConfig) -> Void) {
         _config = State(initialValue: config)
         self.configStore = configStore
@@ -194,6 +222,8 @@ struct PreferencesView: View {
     var body: some View {
         ScrollView(.vertical, showsIndicators: true) {
             VStack(alignment: .leading, spacing: 20) {
+                configHealthSection        // Part B: health overview at top
+                Divider()
                 dataRootsSection
                 Divider()
                 displaySection
@@ -207,6 +237,10 @@ struct PreferencesView: View {
             .padding(20)
         }
         .frame(minWidth: 480, idealWidth: 520, minHeight: 440)
+        // Part B: load health status on appear; re-run whenever healthRefreshID changes.
+        .task(id: healthRefreshID) {
+            await refreshHealthStatus()
+        }
     }
 
     // MARK: - Sections
@@ -345,6 +379,228 @@ struct PreferencesView: View {
                 Text("🐩 比熊（Bichon）").tag("bichon")
             }
             .pickerStyle(.radioGroup)
+        }
+    }
+
+    // MARK: - Part B: Config health section
+
+    /// Aggregated `ConfigHealth` built from the async-loaded `@State` health vars.
+    private var computedHealth: ConfigHealth {
+        ConfigHealth(
+            notification: notifStatusForHealth,
+            hook: hookStatusForHealth,
+            jsonlSource: jsonlStatusForHealth,
+            dataRoots: config.dataRoots.map(\.path)
+        )
+    }
+
+    private var configHealthSection: some View {
+        let health = computedHealth
+        return VStack(alignment: .leading, spacing: 10) {
+            HStack {
+                Label("配置健康", systemImage: "checkmark.shield")
+                    .font(.headline)
+                Spacer()
+                Button {
+                    healthRefreshID = UUID()
+                } label: {
+                    Image(systemName: "arrow.clockwise")
+                        .font(.caption)
+                }
+                .buttonStyle(.plain)
+                .foregroundStyle(.secondary)
+                .help("刷新健康状态")
+            }
+
+            // Overall status row
+            overallStatusRow(for: health.overall)
+
+            // Hook row (neutral, not red when not installed)
+            hookStatusRow(for: health.hook)
+
+            // JSONL source row
+            jsonlStatusRow(for: health.jsonlSource)
+
+            // Other-profile hint (M4 future scope note)
+            if hasOtherProfiles {
+                HStack(alignment: .top, spacing: 4) {
+                    Image(systemName: "info.circle")
+                        .foregroundStyle(.secondary)
+                        .font(.caption)
+                    Text("发现其他 profile 目录（~/.claude-profiles），本期仅扫描默认 ~/.claude。")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+            }
+        }
+        .padding(12)
+        .background(Color(nsColor: .controlBackgroundColor))
+        .cornerRadius(8)
+    }
+
+    @ViewBuilder
+    private func overallStatusRow(for overall: OverallHealth) -> some View {
+        switch overall {
+        case .ready:
+            HStack(spacing: 6) {
+                Image(systemName: "checkmark.circle.fill")
+                    .foregroundStyle(.green)
+                Text("已就绪，正在看你的会话（hook 不装也在正常工作）")
+                    .font(.subheadline)
+                    .foregroundStyle(.green)
+            }
+        case .readyEnhanced:
+            HStack(spacing: 6) {
+                Image(systemName: "checkmark.circle.fill")
+                    .foregroundStyle(.green)
+                Text("已就绪（精确跳转/通知已启用）")
+                    .font(.subheadline)
+                    .foregroundStyle(.green)
+            }
+        case .degraded(let reason):
+            VStack(alignment: .leading, spacing: 6) {
+                HStack(spacing: 6) {
+                    Image(systemName: "exclamationmark.triangle.fill")
+                        .foregroundStyle(.orange)
+                    Text("配置需要关注：\(reason)")
+                        .font(.subheadline)
+                        .foregroundStyle(.orange)
+                }
+                if case .denied = notifStatusForHealth {
+                    Button("打开系统通知设置") {
+                        if let url = URL(string: "x-apple.systempreferences:com.apple.preference.notifications") {
+                            NSWorkspace.shared.open(url)
+                        }
+                    }
+                    .buttonStyle(.bordered)
+                    .controlSize(.small)
+                }
+            }
+        }
+    }
+
+    @ViewBuilder
+    private func hookStatusRow(for hookStatus: HookStatus) -> some View {
+        switch hookStatus {
+        case .installed:
+            HStack(spacing: 6) {
+                Circle()
+                    .fill(Color.green)
+                    .frame(width: 8, height: 8)
+                Text("精确跳转/通知：已启用")
+                    .font(.subheadline)
+                    .foregroundStyle(.secondary)
+            }
+        case .notInstalled:
+            // Neutral — not a red error; hook is optional enhancement.
+            Text("➕ 开启精确跳转/通知（可选，在「数据根目录」中安装 Hook）")
+                .font(.subheadline)
+                .foregroundStyle(.secondary)
+        case .failed(let reason):
+            HStack(spacing: 6) {
+                Image(systemName: "exclamationmark.circle")
+                    .foregroundStyle(.orange)
+                Text("Hook 检测失败：\(reason)")
+                    .font(.subheadline)
+                    .foregroundStyle(.orange)
+            }
+        }
+    }
+
+    @ViewBuilder
+    private func jsonlStatusRow(for status: JSONLSourceStatus) -> some View {
+        switch status {
+        case .found(let count):
+            HStack(spacing: 6) {
+                Image(systemName: "folder.fill")
+                    .foregroundStyle(.secondary)
+                let label = count > 0 ? "找到 \(count) 个会话文件" : "数据目录已就绪（暂无会话）"
+                Text("会话数据：\(label)")
+                    .font(.subheadline)
+                    .foregroundStyle(.secondary)
+            }
+        case .pathMissing:
+            HStack(spacing: 6) {
+                Image(systemName: "exclamationmark.circle.fill")
+                    .foregroundStyle(.red)
+                Text("会话数据路径不存在（请确认数据根目录设置）")
+                    .font(.subheadline)
+                    .foregroundStyle(.red)
+            }
+        case .unreadable(let path):
+            HStack(spacing: 6) {
+                Image(systemName: "exclamationmark.circle.fill")
+                    .foregroundStyle(.red)
+                Text("会话数据路径不可读：\(path)")
+                    .font(.subheadline)
+                    .foregroundStyle(.red)
+                    .lineLimit(2)
+                    .truncationMode(.middle)
+            }
+        }
+    }
+
+    // MARK: - Part B: async health loader
+
+    private func refreshHealthStatus() async {
+        // 1. Notification authorisation status (async, returns on caller actor = MainActor)
+        let settings = await UNUserNotificationCenter.current().notificationSettings()
+        switch settings.authorizationStatus {
+        case .authorized, .provisional, .ephemeral:
+            notifStatusForHealth = .authorized
+        case .denied:
+            notifStatusForHealth = .denied
+        default:
+            notifStatusForHealth = .notDetermined
+        }
+
+        // 2. Hook status — check each data root; first installed one wins.
+        let installer = HookInstaller()
+        let marker = hookMarker
+        var hookInstalled = false
+        for root in config.dataRoots {
+            let url = URL(fileURLWithPath: root.path).appendingPathComponent("settings.json")
+            if (try? installer.isInstalled(settingsURL: url, marker: marker)) == true {
+                hookInstalled = true
+                // Path is informational; pass empty string — overall only checks installed/not.
+                hookStatusForHealth = .installed(path: url.path)
+                break
+            }
+        }
+        if !hookInstalled {
+            hookStatusForHealth = .notInstalled
+        }
+
+        // 3. JSONL source status — inspect the primary data root's projects/ directory.
+        let fm = FileManager.default
+        let primaryRoot = config.dataRoots.first?.path
+            ?? fm.homeDirectoryForCurrentUser.appendingPathComponent(".claude").path
+        let projectsPath = (primaryRoot as NSString).appendingPathComponent("projects")
+
+        if !fm.fileExists(atPath: projectsPath) {
+            jsonlStatusForHealth = .pathMissing
+        } else if !fm.isReadableFile(atPath: projectsPath) {
+            jsonlStatusForHealth = .unreadable(path: projectsPath)
+        } else {
+            let files = DefaultDirectoryScanner().jsonlFiles(under: projectsPath)
+            jsonlStatusForHealth = .found(count: files.count)
+        }
+
+        // 4. Detect ~/.claude-profiles/* directories not currently in config.
+        let home = fm.homeDirectoryForCurrentUser.path
+        let profilesDir = (home as NSString).appendingPathComponent(".claude-profiles")
+        if fm.fileExists(atPath: profilesDir) {
+            let contents = (try? fm.contentsOfDirectory(atPath: profilesDir)) ?? []
+            let knownPaths = Set(config.dataRoots.map(\.path))
+            let unknownProfiles = contents.filter { name in
+                guard !name.hasPrefix(".") else { return false }
+                let full = (profilesDir as NSString).appendingPathComponent(name)
+                return !knownPaths.contains(full)
+            }
+            hasOtherProfiles = !unknownProfiles.isEmpty
+        } else {
+            hasOtherProfiles = false
         }
     }
 
