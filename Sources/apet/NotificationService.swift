@@ -1,5 +1,5 @@
 import Foundation
-import UserNotifications
+@preconcurrency import UserNotifications   // 消除 UNNotificationRequest 非 Sendable 捕获告警（M2-E）
 import AgentPetCore
 import AppShellKit
 

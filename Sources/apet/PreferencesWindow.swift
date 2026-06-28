@@ -266,7 +266,7 @@ struct PreferencesView: View {
 
     /// apet-managed hook marker written into settings.json. Never change once shipped
     /// (it is the key used to identify and cleanly remove apet entries).
-    private let hookMarker = "apet-1"
+    private let hookMarker = HookConstants.marker   // 单一事实源（M2-E）
 
     /// Path to the hook runner script installed inside the app bundle.
     private var runnerPath: String {

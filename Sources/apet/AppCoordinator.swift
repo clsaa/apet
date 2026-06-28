@@ -14,8 +14,8 @@ final class AppCoordinator {
     let eventsPath: String
     let logPath: String
 
-    /// apet-managed hook marker written into settings.json. 必须与 PreferencesView.hookMarker 一致。
-    static let hookMarker = "apet-1"
+    /// apet-managed hook marker；单一事实源 HookConstants.marker（消除重复字面量，M2-E）。
+    static let hookMarker = HookConstants.marker
 
     private let configStore: ConfigStore
     private var config: AppConfig
