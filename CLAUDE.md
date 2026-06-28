@@ -12,20 +12,29 @@
 apet/
 ├── README.md                    项目门面
 ├── CLAUDE.md                    本文件
-├── Package.swift                SwiftPM（建后存在）
+├── Package.swift                SwiftPM（三 target）
 ├── Sources/AgentPetCore/        纯逻辑核心库（无 GUI、无系统副作用，完全单测覆盖）
-│   ├── Model/                   AgentEvent / SessionKey / SessionState
+│   ├── Model/                   AgentEvent / SessionKey / SessionState / SessionSource
 │   ├── Store/                   SessionStore（单一事实源，状态机）/ PetState
-│   ├── Ingest/                  NDJSONIngestor
+│   ├── Ingest/                  NDJSONIngestor / JSONLSessionScanner（jsonl 内容信号→状态，纯函数）
 │   ├── Notify/                  NotificationDecider
 │   └── Terminal/                TerminalLocator（iTerm2…）
-├── Tests/AgentPetCoreTests/     XCTest
+├── Sources/AppShellKit/         可测胶水层（含系统副作用但抽了协议缝）
+│   ├── EventTailReader / TailLineReader        （增量读 / 反向读尾+读首行）
+│   ├── JSONLParse / JSONLDirectoryWatcher      （真实 jsonl 解析 / 扫目录+滞回+差分，queue:.main）
+│   ├── HookInstaller / HookHintThrottle        （门控装 hook + previewLines / just-in-time 提示节流）
+│   ├── ConfigHealth / OnboardingGate           （配置健康决策表 / 首启谓词）
+│   └── MenuBarMenuModel / SessionRowModel / …  （UI 纯数据模型）
+├── Sources/apet/                可执行 GUI（@MainActor）：AppCoordinator / MenuBarController /
+│                                PetWindowController / OnboardingWindow / PreferencesWindow / …
+├── Tests/AgentPetCoreTests/ + Tests/AppShellKitTests/   XCTest（含 fixtures/jsonl 真实语料）
 └── docs/superpowers/
-    ├── specs/2026-06-27-apet-design.md        权威设计（v2，含红队加固）
-    └── plans/2026-06-27-apet-m1-core.md       M1 核心引擎实现计划（10 TDD 任务）
+    ├── specs/2026-06-27-apet-design.md                       原始权威设计（v2，红队加固）
+    ├── specs/2026-06-28-apet-onboarding-jsonl-menubar-design.md  M1.5 设计（jsonl兜底+常规体验，§13 含二轮面板评审）
+    └── plans/…                                               各里程碑 TDD 实现计划
 ```
 
-> **App 壳**（NSWindow 宠物窗、菜单栏、SwiftUI 面板、真实 osascript、hook 安装器、UNUserNotificationCenter）尚未规划成代码——属于后续 Plan B。当前仓库只有 `AgentPetCore` 纯逻辑引擎。
+> **两路数据源融合**：`hook 实时`（emit-event.sh→events.ndjson→EventTailReader）+ `jsonl 兜底`（~/.claude/projects/**.jsonl→JSONLDirectoryWatcher）都经**同一个 NDJSONIngestor**（唯一 seq 源）喂进**同一个 SessionStore**。jsonl 用 `SessionSource.jsonl` 进程内标记与 hook 隔离。
 
 ## 构建 / 测试
 
@@ -49,17 +58,28 @@ swift test --filter SessionStoreOrderingTests   # 跑单个测试类
 6. **AppleScript 一律参数化** —— 终端跳转脚本**严禁字符串内插**事件字段；id 先经正则白名单校验，再作为 `osascript` 的 argv 传入。这是防注入红线。
 7. **测试是规范** —— 测试失败时改实现、不改测试迁就实现。断言精确，覆盖正常/边界/异常。
 
+### M1.5 jsonl 兜底专属约束（见 `2026-06-28-…design.md` §13）
+
+8. **唯一 seq 源是 NDJSONIngestor 实例** —— jsonl 合成事件必须经**同一个** ingestor `ingest(event:)` 取号，**严禁自带 seq 计数器**（否则跨源 `seq<=lastSeq` 比较错乱）。
+9. **`SessionSource` 是进程内标记**（`AgentEvent`/`Session` 默认 `.hook`，**不进 wire `decode`**）。来源判定/面板柔和渲染/markStale 跳过一律用 `session.source == .jsonl`，**不用 `terminal == nil` 当来源代理**。hook 一旦标记不被 jsonl 降级。
+10. **jsonl 永不发 OS 通知** —— jsonl 路径只驱动面板/桌宠视觉，**不调用 NotificationService**；可靠的完成/需关注通知是 hook 专属（just-in-time）。`markStale` 定时器跳过 `source==.jsonl`（其生命周期由 watcher 驱动）。
+11. **jsonl 状态派生「内容信号优先、mtime 兜底」** —— 读末条 assistant `message.stop_reason`、`away_summary`（时间感知）、`queue-operation`、`entrypoint`（从**对话行**非首行取）；mtime 仅兜底，且用 `effectiveTs=min(mtime,lastConversationTs)` 校正带外写入漂移。窗口 `runningWindow=120/idleWindow=1800` 作入参注入。
+12. **hook 安装永远门控** —— 绝不自动写用户 `~/.claude/settings.json`；安装前展示 `previewLines` 条目预览，用户确认才写（自动备份 `.apet.bak`、可一键卸载）。
+
 ## 设计权威性
 
 `docs/superpowers/specs/2026-06-27-apet-design.md` 是唯一权威设计。改行为先改 spec，再改实现与测试，保持一致。事件协议 / 插件 Manifest 字段是第三方对接的契约，改动需谨慎（见 spec §3 / §3.1 安全基线）。
 
 ## 协作约定
 
-- **分支**：不在 `main` 上直接开发，用 `feature/` 前缀分支（当前：`feature/m1-core-engine`）。push 用 SSH（本机 git 全局把 github https 改写到被拦截的代理，**https 推不动、SSH 可以**：`git@github.com:clsaa/apet.git`）。
+- **分支**：不在 `main` 上直接开发，用 `feature/` 前缀分支。push 用 SSH（本机 git 全局把 github https 改写到被拦截的代理，**https 推不动、SSH 可以**：`git@github.com:clsaa/apet.git`）。
 - **提交身份**：本仓库已配 `clsaa <812022339@qq.com>`，直接 `git commit` 即可，勿覆盖。
 - **提交粒度**：小步提交，一个可独立测试的交付物一个 commit；中文 commit message。
-- **执行计划**：M1 按 `docs/superpowers/plans/2026-06-27-apet-m1-core.md` 逐任务 TDD 推进（写失败测试→跑→实现→跑过→提交）。
+- **执行计划**：按 `docs/superpowers/plans/` 下对应里程碑计划逐任务 TDD 推进（写失败测试→跑→实现→跑过→提交）。
 
 ## 路线图
 
-M1 地基+桌宠 → M2 宠物扩展+多源 → M3 终端+安全加固 → M4 生态（公开契约+第三方样例）。详见 README 与 spec §11。
+- **M1 地基+桌宠** ✅ 事件协议 + SessionStore 状态机 + hook 内置插件 + 悬浮宠物窗 + 菜单栏 + iTerm2 精确跳转。
+- **M1.5 开箱即用+常规体验** ✅ jsonl 兜底（零配置看到会话含当前在跑的）+ 右键菜单 + 首启引导 + 配置健康 + just-in-time 授权。
+- **M2 宠物扩展+多源** 上传照片宠物 + 多 root 并行 + 通知模式可配。
+- **M3 终端+安全加固** / **M4 生态**（公开契约 + 第三方样例）。详见 README 与 spec。
