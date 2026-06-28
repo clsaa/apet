@@ -33,6 +33,13 @@ final class PetWindowController: NSObject {
     /// 精简条模式。
     private var currentCompact: Bool
 
+    /// 打开首选项的回调。桌宠面板的「首选项」按钮通过它进入设置——
+    /// 这是**不依赖状态栏图标**的首选项入口（状态栏图标可能被刘海/菜单栏溢出区藏住，
+    /// 那样用户就只剩这条路）。由 AppCoordinator 注入。
+    var onOpenPreferences: (() -> Void)?
+    /// 面板「全部标记已读」回调，由 AppCoordinator 注入 store.acknowledgeAll。
+    var onAcknowledgeAll: (() -> Void)?
+
     // MARK: - Dependencies
 
     private let focusService: TerminalFocusService
@@ -328,14 +335,18 @@ final class PetWindowController: NSObject {
         w.orderFrontRegardless()
 
         let rows = currentSessions.map(SessionRowMapper.make)
-        let panelVC = SessionPanelHostController(rows: rows, hotkeyHint: hotkeyHint, onTap: { [weak self] id in
-            self?.handleSessionTap(id: id)
-        })
+        let panelVC = SessionPanelHostController(
+            rows: rows,
+            hotkeyHint: hotkeyHint,
+            onTap: { [weak self] id in self?.handleSessionTap(id: id) },
+            onOpenPreferences: { [weak self] in self?.onOpenPreferences?() },
+            onAcknowledgeAll: { [weak self] in self?.onAcknowledgeAll?() }
+        )
         let p = NSPopover()
         p.contentViewController = panelVC
         p.behavior = .transient
-        // 顶部快捷键提示约占 28px，有提示时加高，避免会话列表被截断（评审 MINOR-5）。
-        p.contentSize = NSSize(width: 320, height: hotkeyHint != nil ? 428 : 400)
+        // 顶部快捷键提示约占 28px；底部页脚现含「全部已读」「首选项」「退出」三按钮(约 110px)，整体加高避免列表被截断。
+        p.contentSize = NSSize(width: 320, height: hotkeyHint != nil ? 512 : 484)
         self.popover = p
 
         // Anchor to center of content view; let NSPopover pick the best edge
@@ -345,7 +356,21 @@ final class PetWindowController: NSObject {
             width: 1,
             height: 1
         )
-        p.show(relativeTo: anchor, of: contentView, preferredEdge: .maxY)
+        // 弹出后下一 runloop 校验是否真的显示——LSUIElement 背景 App 锚到刚激活的非 key
+        // 窗口偶发吞首击。未显示且有剩余次数则重试（PopoverShowPlanner），已显示则不再 show
+        // （杜绝 double-show）。最多 2 次。
+        let planner = PopoverShowPlanner()
+        func attemptShow(_ attempt: Int) {
+            p.show(relativeTo: anchor, of: contentView, preferredEdge: .maxY)
+            DispatchQueue.main.async { [weak self] in
+                guard let self, let live = self.popover, live === p else { return }
+                switch planner.planAfterOpen(isShownNow: live.isShown, attempt: attempt, maxAttempts: 2) {
+                case .ok, .giveUp: break
+                case .retry:       attemptShow(attempt + 1)
+                }
+            }
+        }
+        attemptShow(1)
     }
 }
 
@@ -375,9 +400,10 @@ private final class DragDetectorView: NSView {
 
     private var dragStartLocation: NSPoint = .zero
     private var windowOriginAtDragStart: NSPoint = .zero
-    private var hasDragged = false
+    // 累积两轴最大绝对位移并判定点击/拖动（纯逻辑下沉 AgentPetCore，可单测）。
+    private var dragAccumulator = DragAccumulator()
     // 8pt：4pt 太小，正常点击（尤其触控板）的微小抖动会被误判成拖动→保存位置而不弹面板（点击修复）。
-    private let dragThreshold: CGFloat = 8
+    private let dragThreshold: Double = 8
 
     override init(frame: NSRect) {
         super.init(frame: frame)
@@ -388,16 +414,14 @@ private final class DragDetectorView: NSView {
     override func mouseDown(with event: NSEvent) {
         dragStartLocation = NSEvent.mouseLocation
         windowOriginAtDragStart = window?.frame.origin ?? .zero
-        hasDragged = false
+        dragAccumulator.reset()
     }
 
     override func mouseDragged(with event: NSEvent) {
         let current = NSEvent.mouseLocation
         let dx = current.x - dragStartLocation.x
         let dy = current.y - dragStartLocation.y
-        if abs(dx) >= dragThreshold || abs(dy) >= dragThreshold {
-            hasDragged = true
-        }
+        dragAccumulator.accumulate(dx: Double(dx), dy: Double(dy))
         window?.setFrameOrigin(NSPoint(
             x: windowOriginAtDragStart.x + dx,
             y: windowOriginAtDragStart.y + dy
@@ -405,10 +429,9 @@ private final class DragDetectorView: NSView {
     }
 
     override func mouseUp(with event: NSEvent) {
-        if hasDragged {
-            onDragEnded?()
-        } else {
-            onClicked?()
+        switch dragAccumulator.gesture(threshold: dragThreshold) {
+        case .drag:  onDragEnded?()
+        case .click: onClicked?()
         }
     }
 
@@ -418,29 +441,111 @@ private final class DragDetectorView: NSView {
     }
 }
 
+// MARK: - PetPanelRootView
+
+/// ``SessionPanel`` + 一个「首选项…」页脚按钮。
+///
+/// 桌宠面板必须自带通往首选项的入口，**不能只依赖状态栏图标**——状态栏图标会被
+/// 刘海 / 菜单栏溢出区藏掉，那样用户就再也打不开首选项（实测踩坑）。
+private struct PetPanelRootView: View {
+    let rows: [SessionRowModel]
+    let hotkeyHint: String?
+    let onTap: (String) -> Void
+    let onOpenPreferences: () -> Void
+    let onAcknowledgeAll: () -> Void
+
+    /// 是否存在未读 waiting 会话（红/橙点）。仅此时显示「全部已读」，
+    /// 避免全绿/全已读时按钮可见却点了无反应（产品评审 MAJOR-1）。
+    private var hasUnread: Bool {
+        rows.contains { $0.dot == .doneWaiting || $0.dot == .attention }
+    }
+
+    var body: some View {
+        VStack(spacing: 0) {
+            SessionPanel(rows: rows, onTap: onTap, hotkeyHint: hotkeyHint)
+            Divider()
+            if hasUnread {
+                Button {
+                    onAcknowledgeAll()
+                } label: {
+                    Label("全部标记已读", systemImage: "checkmark.circle")
+                        .frame(maxWidth: .infinity)
+                        .padding(.vertical, 4)
+                }
+                .buttonStyle(.plain)
+                .foregroundStyle(.secondary)
+                .padding(.horizontal, 10)
+                .padding(.top, 4)
+            }
+            Button {
+                onOpenPreferences()
+            } label: {
+                Label("首选项…", systemImage: "gearshape")
+                    .frame(maxWidth: .infinity)
+                    .padding(.vertical, 4)
+            }
+            .buttonStyle(.plain)
+            .foregroundStyle(.secondary)
+            .padding(.horizontal, 10)
+            .padding(.vertical, 4)
+
+            // 退出入口——状态栏图标被刘海/溢出区藏住时，这是唯一能退出 App 的地方（A1）。
+            // 与「首选项」用 Divider + 间距 + 更弱配色拉开，降低顺手误点退出整个常驻 App 的概率（产品评审 MAJOR-2）。
+            Divider().padding(.top, 2)
+            Button {
+                NSApplication.shared.terminate(nil)
+            } label: {
+                Label("退出 apet", systemImage: "power")
+                    .font(.system(size: 11))
+                    .frame(maxWidth: .infinity)
+                    .padding(.vertical, 3)
+            }
+            .buttonStyle(.plain)
+            .foregroundStyle(.tertiary)
+            .padding(.horizontal, 10)
+            .padding(.top, 4)
+            .padding(.bottom, 4)
+        }
+    }
+}
+
 // MARK: - SessionPanelHostController
 
-/// Minimal NSViewController that wraps ``SessionPanel`` in a popover.
+/// Minimal NSViewController that wraps ``PetPanelRootView`` in a popover.
 private final class SessionPanelHostController: NSViewController {
 
     private var rows: [SessionRowModel]
     private let hotkeyHint: String?
     private let onTap: (String) -> Void
-    private var hostingController: NSHostingController<SessionPanel>?
+    private let onOpenPreferences: () -> Void
+    private let onAcknowledgeAll: () -> Void
+    private var hostingController: NSHostingController<PetPanelRootView>?
 
-    init(rows: [SessionRowModel], hotkeyHint: String?, onTap: @escaping (String) -> Void) {
+    init(
+        rows: [SessionRowModel],
+        hotkeyHint: String?,
+        onTap: @escaping (String) -> Void,
+        onOpenPreferences: @escaping () -> Void,
+        onAcknowledgeAll: @escaping () -> Void
+    ) {
         self.rows = rows
         self.hotkeyHint = hotkeyHint
         self.onTap = onTap
+        self.onOpenPreferences = onOpenPreferences
+        self.onAcknowledgeAll = onAcknowledgeAll
         super.init(nibName: nil, bundle: nil)
     }
 
     required init?(coder: NSCoder) { fatalError("init(coder:) not supported") }
 
+    private func makeRoot() -> PetPanelRootView {
+        PetPanelRootView(rows: rows, hotkeyHint: hotkeyHint, onTap: onTap,
+                         onOpenPreferences: onOpenPreferences, onAcknowledgeAll: onAcknowledgeAll)
+    }
+
     override func loadView() {
-        let panel = SessionPanel(rows: rows, onTap: onTap, hotkeyHint: hotkeyHint)
-        let hc = NSHostingController(rootView: panel)
-        hc.view.frame = NSRect(x: 0, y: 0, width: 320, height: 400)
+        let hc = NSHostingController(rootView: makeRoot())
+        hc.view.frame = NSRect(x: 0, y: 0, width: 320, height: 436)
         self.view = hc.view
         addChild(hc)
         hostingController = hc
@@ -448,6 +553,6 @@ private final class SessionPanelHostController: NSViewController {
 
     func update(rows: [SessionRowModel]) {
         self.rows = rows
-        hostingController?.rootView = SessionPanel(rows: rows, onTap: onTap, hotkeyHint: hotkeyHint)
+        hostingController?.rootView = makeRoot()
     }
 }

@@ -152,7 +152,9 @@ final class AppCoordinator {
                     startMin: self?.config.dndStartMin  ?? 0,
                     endMin:   self?.config.dndEndMin    ?? 0
                 )
-            }
+            },
+            // B1：点击通知 → 标记已读（红→黄）。store 变更经既有 changeHandler 刷新面板/桌宠。
+            onAcknowledge: { [weak self] key in self?.store?.acknowledge(key: key) }
         )
         notificationService = ns
         ns.start()
@@ -193,6 +195,8 @@ final class AppCoordinator {
                 customStore: customStore,
                 compact: isCompact
             )
+            // 桌宠面板的「首选项」按钮入口——不依赖状态栏图标（图标可能被刘海/溢出区藏住）。
+            pw.onOpenPreferences = { [weak self] in self?.openPreferences() }
             mb.petVisibilityProvider = { [weak pw] in pw?.isVisible ?? false }
             mb.onTogglePet = { [weak pw] in
                 guard let pw else { return }
@@ -224,6 +228,12 @@ final class AppCoordinator {
             }
             mb.onAcknowledge = ack
             pw.onAcknowledge = ack
+            // 面板「全部标记已读」→ 一次性清空所有 waiting 的未读态。
+            let ackAll: () -> Void = { [weak self] in
+                _ = self?.store?.acknowledgeAll()
+            }
+            mb.onAcknowledgeAll = ackAll
+            pw.onAcknowledgeAll = ackAll
 
             // 面板顶部快捷键提示
             let hint = config.panelHotKey.displayString + " 打开/关闭"

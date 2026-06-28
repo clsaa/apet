@@ -18,11 +18,32 @@ private struct PanelRootView: View {
     let onTogglePet: () -> Void
     let onOpenPreferences: () -> Void
     let onQuit: () -> Void
+    let onAcknowledgeAll: () -> Void
+
+    /// 是否存在未读 waiting 会话——仅此时显示「全部已读」（产品评审 MAJOR-1）。
+    private var hasUnread: Bool {
+        rows.contains { $0.dot == .doneWaiting || $0.dot == .attention }
+    }
 
     var body: some View {
         VStack(spacing: 0) {
             SessionPanel(rows: rows, onTap: onTap, hotkeyHint: hotkeyHint)
             Divider()
+
+            // 全部标记已读（仅在确有未读时显示）
+            if hasUnread {
+                Button {
+                    onAcknowledgeAll()
+                } label: {
+                    Label("全部标记已读", systemImage: "checkmark.circle")
+                        .frame(maxWidth: .infinity)
+                        .padding(.vertical, 3)
+                }
+                .buttonStyle(.plain)
+                .foregroundStyle(.secondary)
+                .padding(.horizontal, 10)
+                .padding(.top, 6)
+            }
 
             // 隐藏/显示宠物
             Button {
@@ -121,6 +142,8 @@ final class MenuBarController: NSObject {
     var hookInstalledProvider: (() -> Bool)?
     /// 用户点开一个会话（跳转终端）后回调，AppCoordinator 据此把会话标记为"已读"（红→黄）。
     var onAcknowledge: ((SessionKey) -> Void)?
+    /// 面板「全部标记已读」回调，由 AppCoordinator 注入 store.acknowledgeAll。
+    var onAcknowledgeAll: (() -> Void)?
     /// 面板顶部快捷键提示字符串，如 "⌥⌘P 打开/关闭"。nil 表示不显示 header。
     var hotkeyHint: String?
 
@@ -219,14 +242,15 @@ final class MenuBarController: NSObject {
                 // Re-render the panel so the button label flips immediately.
                 self?.panelHosting?.rootView = self?.makePanelRootView() ?? PanelRootView(
                     rows: [], petVisible: false, hookInstalled: false, hotkeyHint: nil,
-                    onTap: { _ in }, onTogglePet: {}, onOpenPreferences: {}, onQuit: {}
+                    onTap: { _ in }, onTogglePet: {}, onOpenPreferences: {}, onQuit: {}, onAcknowledgeAll: {}
                 )
             },
             onOpenPreferences: { [weak self] in
                 self?.popover?.performClose(nil)
                 self?.onOpenPreferences?()
             },
-            onQuit: { NSApplication.shared.terminate(nil) }
+            onQuit: { NSApplication.shared.terminate(nil) },
+            onAcknowledgeAll: { [weak self] in self?.onAcknowledgeAll?() }
         )
     }
 

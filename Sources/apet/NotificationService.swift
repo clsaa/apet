@@ -27,6 +27,8 @@ final class NotificationService: NSObject {
     /// Returns the current DND window; called on `@MainActor` inside `consider`.
     /// Defaults to a disabled window so the service is a drop-in replacement for existing callers.
     private let dndProvider: () -> DNDWindow
+    /// 点击通知时把对应会话标记已读（红→黄）。默认空，由 AppCoordinator 注入 store.acknowledge。
+    private let onAcknowledge: (SessionKey) -> Void
 
     // MARK: - Init
 
@@ -34,12 +36,14 @@ final class NotificationService: NSObject {
         cooldown: Double = 60.0,
         focusService: TerminalFocusService,
         sessionLookup: @escaping (SessionKey) -> Session?,
-        dndProvider: @escaping () -> DNDWindow = { DNDWindow(enabled: false, startMin: 0, endMin: 0) }
+        dndProvider: @escaping () -> DNDWindow = { DNDWindow(enabled: false, startMin: 0, endMin: 0) },
+        onAcknowledge: @escaping (SessionKey) -> Void = { _ in }
     ) {
         self.gate = NotificationGate(cooldown: cooldown)
         self.focusService = focusService
         self.sessionLookup = sessionLookup
         self.dndProvider = dndProvider
+        self.onAcknowledge = onAcknowledge
         super.init()
     }
 
@@ -48,11 +52,20 @@ final class NotificationService: NSObject {
     /// Register as delegate. Authorisation is requested lazily on first delivery (Fix 1),
     /// so we never prompt the user until there is an actual notification to show.
     /// No-ops gracefully in headless / non-bundled environments (e.g. `--smoke`, `swift run`).
+    /// 会话通知所属的 category。注册 `.customDismissAction` 后，用户**划掉/清除**通知
+    /// 也会回调 `didReceive`（actionIdentifier == dismiss），从而能"看完即标已读"——
+    /// 覆盖用户最高频的"瞄一眼就划掉、不点进去"场景（用户评审 MAJOR）。
+    static let sessionCategoryId = "apet.session"
+
     func start() {
         // `UNUserNotificationCenter.current()` aborts if there is no app bundle.
         guard Bundle.main.bundleIdentifier != nil else { return }
         let center = UNUserNotificationCenter.current()
         center.delegate = self
+        let category = UNNotificationCategory(identifier: Self.sessionCategoryId,
+                                              actions: [], intentIdentifiers: [],
+                                              options: [.customDismissAction])
+        center.setNotificationCategories([category])
         // Note: no requestAuthorization here — deferred to `deliver(_:)` on first banner.
     }
 
@@ -89,6 +102,8 @@ final class NotificationService: NSObject {
         un.title = content.title
         un.body  = content.body
         un.sound = .default
+        // 归入会话 category，使"划掉通知"也触发 didReceive → 标已读。
+        un.categoryIdentifier = Self.sessionCategoryId
 
         // Encode the session key in userInfo so the click handler can reconstruct it.
         let key = SessionKey(event: event)
@@ -161,24 +176,33 @@ extension NotificationService: UNUserNotificationCenterDelegate {
         didReceive response: UNNotificationResponse,
         withCompletionHandler completionHandler: @escaping () -> Void
     ) {
-        let userInfo = response.notification.request.content.userInfo
-        guard
-            let agent     = userInfo["agent"]     as? String,
-            let root      = userInfo["root"]      as? String,
-            let sessionId = userInfo["sessionId"] as? String
-        else {
+        let rawInfo = response.notification.request.content.userInfo
+        // 纯函数决策（可单测）：合法 userInfo → [.acknowledge(key), .focus(key)]；缺字段 → []。
+        let actions = NotificationClickResolver.resolve(userInfo: rawInfo)
+        guard !actions.isEmpty else {
             completionHandler()
             return
         }
-        let key = SessionKey(agent: agent, root: root, sessionId: sessionId)
+        // 划掉/清除通知（dismiss）也算"看完"→ 只标已读，不跳转终端（用户没点进去就别抢焦点）。
+        // 点击（default action）→ 标已读 + 跳转。
+        let isDismiss = response.actionIdentifier == UNNotificationDismissActionIdentifier
 
         // Hop to MainActor to access @MainActor-isolated state, then hop OFF for the blocking
         // osascript call so we never stall the main thread (Fix I-1).
         Task { @MainActor in
-            let terminal = self.sessionLookup(key)?.terminal
-            let fs = self.focusService
-            Task.detached {
-                _ = fs.focus(terminal)
+            for action in actions {
+                switch action {
+                case .acknowledge(let key):
+                    // B1：看完通知即标记已读（红→黄），与点列表/全部已读路径一致。点击与划掉都标。
+                    self.onAcknowledge(key)
+                case .focus(let key):
+                    if isDismiss { break }   // 划掉不跳转
+                    let terminal = self.sessionLookup(key)?.terminal
+                    let fs = self.focusService
+                    Task.detached {
+                        _ = fs.focus(terminal)
+                    }
+                }
             }
             completionHandler()
         }

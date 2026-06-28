@@ -9,8 +9,8 @@ struct PetView: View {
     let presentation: PetPresentation
     /// Pre-resolved image passed in by ``PetWindowController``; avoids asset loading inside the view.
     let resolvedImage: NSImage?
-    /// When `true` the pet image is clipped to a circle (photo pets).
-    /// Built-in PNG sprites are rendered unclipped to preserve transparent shapes.
+    /// 是否为用户上传的照片宠物。内置与自定义宠物现统一圆形裁剪（B3 起内置 PNG 已透明），
+    /// 该标志暂保留供未来按来源区分渲染之用。
     var isCustomPet: Bool = false
     /// 精简条模式：仅渲染 countChip，不显示宠物图、气泡、呼吸动画。
     /// 窗口尺寸由 ``PetWindowController`` 根据此标志调整。
@@ -93,15 +93,12 @@ struct PetView: View {
         let fallback = NSImage(systemSymbolName: "pawprint.fill",
                                accessibilityDescription: "pet") ?? NSImage()
         let nsImage = resolvedImage ?? fallback
-        let img = Image(nsImage: nsImage)
+        // 内置宠物 PNG 已处理为透明背景（B3），与自定义照片宠物统一圆形裁剪。
+        Image(nsImage: nsImage)
             .resizable()
             .interpolation(.high)
             .frame(width: 96, height: 96)
-        if isCustomPet {
-            img.clipShape(Circle())
-        } else {
-            img
-        }
+            .clipShape(Circle())
     }
 
     /// 常驻计数条（4 段）：🟢 在跑 · 🔴 未读 · 🟡 已读 · ⚪ 闲置。每段始终显示（即便为 0）。

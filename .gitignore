@@ -4,3 +4,6 @@ build/
 DerivedData/
 *.xcuserstate
 AgentPet.app/
+
+# Claude subagent worktrees (never commit)
+.claude/worktrees/
