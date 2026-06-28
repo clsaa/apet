@@ -40,14 +40,18 @@ public struct AppConfig: Codable, Equatable {
     public var selectedPet: String
     /// 已读（黄）会话超过此秒数自动转灰（闲置）。默认 3600（1 小时）。
     public var readGrayAfterSec: Double
+    /// 呼出面板的全局快捷键配置。默认 ⌥⌘P。
+    public var panelHotKey: HotKeyConfig
 
-    // CodingKeys：含 readGrayAfterSec，供自定义 decoder 和 synthesized encoder 共同使用。
+    // CodingKeys：含 readGrayAfterSec / panelHotKey，供自定义 decoder 和 synthesized encoder 共同使用。
     private enum CodingKeys: String, CodingKey {
         case dataRoots, displayMode, notifyMode, staleAfterSec, endedAfterSec,
-             waitingEndedAfterSec, selectedPet, readGrayAfterSec
+             waitingEndedAfterSec, selectedPet, readGrayAfterSec, panelHotKey
     }
 
-    /// 自定义解码：旧版 config.json 缺少 readGrayAfterSec 时用默认值 3600，不丢失其他已有设置。
+    /// 自定义解码：旧版 config.json 缺少可选字段时用默认值，不丢失其他已有设置。
+    /// - `readGrayAfterSec` 缺失 → 3600
+    /// - `panelHotKey` 缺失 → `.defaultPanel`（⌥⌘P）
     public init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
         dataRoots            = try c.decode([DataRoot].self, forKey: .dataRoots)
@@ -57,7 +61,8 @@ public struct AppConfig: Codable, Equatable {
         endedAfterSec        = try c.decode(Double.self,    forKey: .endedAfterSec)
         waitingEndedAfterSec = try c.decode(Double.self,    forKey: .waitingEndedAfterSec)
         selectedPet          = try c.decode(String.self,    forKey: .selectedPet)
-        readGrayAfterSec     = try c.decodeIfPresent(Double.self, forKey: .readGrayAfterSec) ?? 3600
+        readGrayAfterSec     = try c.decodeIfPresent(Double.self,        forKey: .readGrayAfterSec) ?? 3600
+        panelHotKey          = try c.decodeIfPresent(HotKeyConfig.self,  forKey: .panelHotKey) ?? .defaultPanel
     }
 
     public init(
@@ -68,7 +73,8 @@ public struct AppConfig: Codable, Equatable {
         endedAfterSec: Double,
         waitingEndedAfterSec: Double,
         selectedPet: String,
-        readGrayAfterSec: Double = 3600
+        readGrayAfterSec: Double = 3600,
+        panelHotKey: HotKeyConfig = .defaultPanel
     ) {
         self.dataRoots = dataRoots
         self.displayMode = displayMode
@@ -78,11 +84,13 @@ public struct AppConfig: Codable, Equatable {
         self.waitingEndedAfterSec = waitingEndedAfterSec
         self.selectedPet = selectedPet
         self.readGrayAfterSec = readGrayAfterSec
+        self.panelHotKey = panelHotKey
     }
 
     /// Factory that produces the out-of-the-box defaults.
     ///
     /// The default data root is `~/.claude` (the standard Claude Code profile directory).
+    /// `displayMode` 合法值：`"pet"` | `"compact"` | `"menuBarOnly"`。
     public static var defaults: AppConfig {
         let homeDir = FileManager.default.homeDirectoryForCurrentUser
         let claudeRoot = homeDir.appendingPathComponent(".claude").path
@@ -94,7 +102,8 @@ public struct AppConfig: Codable, Equatable {
             endedAfterSec: 14400,
             waitingEndedAfterSec: 28800,
             selectedPet: "shiba",
-            readGrayAfterSec: 3600
+            readGrayAfterSec: 3600,
+            panelHotKey: .defaultPanel
         )
     }
 }

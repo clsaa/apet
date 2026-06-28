@@ -183,6 +183,75 @@ private struct HookRowView: View {
     }
 }
 
+// MARK: - HotKeyRecorder
+
+/// 快捷键录制状态机（ObservableObject，供 PreferencesView @StateObject 持有）。
+///
+/// 录制流程：
+/// 1. 调用 `start(onRecord:)` → 进入 `isRecording = true` 态，注册 NSEvent local monitor。
+/// 2. 用户按下任意键 → 解析 keyCode + Carbon 修饰位 + keyLabel → 回调 onRecord，自动停止。
+/// 3. 调用 `stop()` → 移除 monitor，回到 `isRecording = false`。
+@MainActor
+final class HotKeyRecorder: ObservableObject {
+
+    @Published private(set) var isRecording = false
+    private var monitor: Any?
+
+    func start(onRecord: @escaping (HotKeyConfig) -> Void) {
+        stop()   // 防御：清掉可能残留的旧 monitor，避免重复 start 泄漏（评审 MAJOR-2）
+        isRecording = true
+        monitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { [weak self] event in
+            let keyCode = UInt32(event.keyCode)
+            let carbonMods = nsModifiersToCarbonModifiers(event.modifierFlags.rawValue)
+            // 必须带修饰键：裸键(空格/字母)注册成全局热键会接管所有 App 的该键输入（评审 MAJOR-1）。
+            guard carbonMods != 0 else { return event }   // 无修饰键 → 不录制、不消费
+            let label = Self.keyLabel(from: event)
+            onRecord(HotKeyConfig(keyCode: keyCode, modifiers: carbonMods, keyLabel: label))
+            Task { @MainActor [weak self] in self?.stop() }
+            return nil   // 消费事件，不传递给其他响应者
+        }
+    }
+
+    func stop() {
+        isRecording = false
+        if let m = monitor {
+            NSEvent.removeMonitor(m)
+            monitor = nil
+        }
+    }
+
+    deinit {
+        if let m = monitor { NSEvent.removeMonitor(m) }
+    }
+
+    // MARK: - Private helpers
+
+    /// 从 NSEvent 提取人类可读的键名。
+    private static func keyLabel(from event: NSEvent) -> String {
+        switch Int(event.keyCode) {
+        case 36:  return "↩"       // Return
+        case 48:  return "⇥"       // Tab
+        case 49:  return "Space"   // Space
+        case 51:  return "⌫"       // Delete
+        case 53:  return "⎋"       // Escape
+        case 122: return "F1"
+        case 120: return "F2"
+        case 99:  return "F3"
+        case 118: return "F4"
+        case 96:  return "F5"
+        case 97:  return "F6"
+        case 98:  return "F7"
+        case 100: return "F8"
+        case 101: return "F9"
+        case 109: return "F10"
+        case 103: return "F11"
+        case 111: return "F12"
+        default:
+            return event.charactersIgnoringModifiers?.uppercased() ?? "?"
+        }
+    }
+}
+
 // MARK: - PreferencesView
 
 /// SwiftUI form for all user-configurable apet preferences.
@@ -209,6 +278,10 @@ struct PreferencesView: View {
     @State private var newRootPath = ""
     @State private var saveError: String?
 
+    // MARK: - 快捷键录制状态
+    @State private var isRecordingHotKey = false
+    @StateObject private var hotKeyRecorder = HotKeyRecorder()
+
     // MARK: - Health panel state (Part B)
     @State private var notifStatusForHealth: NotificationStatus = .notDetermined
     @State private var hookStatusForHealth: HookStatus = .notInstalled
@@ -230,7 +303,7 @@ struct PreferencesView: View {
                 Divider()
                 dataRootsSection
                 Divider()
-                displaySection
+                displayAndHotkeySection
                 Divider()
                 thresholdsSection
                 Divider()
@@ -244,6 +317,10 @@ struct PreferencesView: View {
         // Part B: load health status on appear; re-run whenever healthRefreshID changes.
         .task(id: healthRefreshID) {
             await refreshHealthStatus()
+        }
+        .onDisappear {
+            // 离开时若还在录制状态，自动停止，避免 monitor 泄漏
+            hotKeyRecorder.stop()
         }
     }
 
@@ -288,23 +365,26 @@ struct PreferencesView: View {
         }
     }
 
-    private var displaySection: some View {
+    private var displayAndHotkeySection: some View {
         VStack(alignment: .leading, spacing: 12) {
-            Label("显示与通知", systemImage: "bell.badge")
+            Label("显示与快捷键", systemImage: "macwindow.badge.plus")
                 .font(.headline)
 
+            // ── 显示模式 ─────────────────────────────────────────────────────
             VStack(alignment: .leading, spacing: 6) {
                 Text("显示模式")
                     .font(.subheadline)
                     .foregroundStyle(.secondary)
                 Picker("显示模式", selection: $config.displayMode) {
                     Text("悬浮宠物").tag("pet")
+                    Text("精简条").tag("compact")
                     Text("仅菜单栏").tag("menuBarOnly")
                 }
                 .pickerStyle(.segmented)
                 .labelsHidden()
             }
 
+            // ── 通知模式 ─────────────────────────────────────────────────────
             VStack(alignment: .leading, spacing: 6) {
                 Text("通知模式")
                     .font(.subheadline)
@@ -315,6 +395,47 @@ struct PreferencesView: View {
                 }
                 .pickerStyle(.segmented)
                 .labelsHidden()
+            }
+
+            // ── 呼出面板快捷键 ───────────────────────────────────────────────
+            VStack(alignment: .leading, spacing: 6) {
+                Text("呼出面板快捷键")
+                    .font(.subheadline)
+                    .foregroundStyle(.secondary)
+                HStack(spacing: 8) {
+                    if hotKeyRecorder.isRecording {
+                        Text("请按下快捷键…")
+                            .foregroundStyle(.secondary)
+                            .frame(minWidth: 110)
+                            .padding(.horizontal, 8)
+                            .padding(.vertical, 5)
+                            .background(Color.accentColor.opacity(0.12))
+                            .cornerRadius(6)
+                    } else {
+                        Text(config.panelHotKey.displayString)
+                            .font(.system(.body, design: .monospaced))
+                            .frame(minWidth: 80)
+                            .padding(.horizontal, 8)
+                            .padding(.vertical, 5)
+                            .background(Color(nsColor: .controlBackgroundColor))
+                            .cornerRadius(6)
+                    }
+
+                    Button(hotKeyRecorder.isRecording ? "取消" : "录制") {
+                        if hotKeyRecorder.isRecording {
+                            hotKeyRecorder.stop()
+                        } else {
+                            hotKeyRecorder.start { newHotKey in
+                                config.panelHotKey = newHotKey
+                            }
+                        }
+                    }
+                    .buttonStyle(.bordered)
+                    .controlSize(.small)
+                }
+                Text("支持字母/功能键 + 修饰键（⌘⌥⌃⇧）组合")
+                    .font(.caption)
+                    .foregroundStyle(.tertiary)
             }
         }
     }

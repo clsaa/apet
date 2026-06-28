@@ -119,4 +119,48 @@ final class JSONLParseTests: XCTestCase {
         XCTAssertTrue(f.isSubagentPath,
             "路径含 /subagents/ 时 isSubagentPath 应为 true，实际路径：\(dstPath)")
     }
+
+    // MARK: - M3: latestSubagentMtime 填充
+
+    /// 主文件 <dir>/<sessionId>.jsonl 旁有 <dir>/<sessionId>/subagents/agent-x.jsonl
+    /// → parse 应发现 subagent 文件并填充 latestSubagentMtime（值约等于该文件 mtime）
+    func test_parse_subagentMtime_discovered() throws {
+        let srcPath = fx("end_turn.jsonl")
+
+        // 构造临时目录：<tmp>/<sessionId>.jsonl + <tmp>/<sessionId>/subagents/agent-x.jsonl
+        let tmpBase = FileManager.default.temporaryDirectory
+            .appendingPathComponent("apet-subagent-\(UUID().uuidString)")
+            .path
+        let sessionId = "testsession-abc"
+        let mainDir = tmpBase
+        let subagentDir = (tmpBase as NSString)
+            .appendingPathComponent("\(sessionId)/subagents")
+        try FileManager.default.createDirectory(atPath: subagentDir, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(atPath: tmpBase) }
+
+        // 主文件
+        let mainPath = (mainDir as NSString).appendingPathComponent("\(sessionId).jsonl")
+        try FileManager.default.copyItem(atPath: srcPath, toPath: mainPath)
+
+        // subagent 文件（agent- 前缀 + .jsonl 后缀）
+        let agentPath = (subagentDir as NSString).appendingPathComponent("agent-001.jsonl")
+        try FileManager.default.copyItem(atPath: srcPath, toPath: agentPath)
+
+        // 读取 agent 文件的实际 mtime 作为参考
+        let agentAttrs = try FileManager.default.attributesOfItem(atPath: agentPath)
+        let agentMtime = (agentAttrs[.modificationDate] as? Date)!.timeIntervalSince1970
+
+        let f = JSONLParse.parse(path: mainPath, root: "/r")!
+        XCTAssertNotNil(f.latestSubagentMtime,
+            "存在 agent-*.jsonl 时 latestSubagentMtime 应不为 nil")
+        XCTAssertEqual(f.latestSubagentMtime!, agentMtime, accuracy: 1.0,
+            "latestSubagentMtime 应与 subagent 文件 mtime 基本一致")
+    }
+
+    /// 主文件旁无 subagent 目录 → latestSubagentMtime 应为 nil
+    func test_parse_noSubagentDir_latestSubagentMtimeIsNil() {
+        let f = JSONLParse.parse(path: fx("end_turn.jsonl"), root: "/r")!
+        XCTAssertNil(f.latestSubagentMtime,
+            "无 subagent 目录时 latestSubagentMtime 应为 nil")
+    }
 }

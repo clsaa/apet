@@ -20,7 +20,8 @@ final class JSONLSessionScannerTests: XCTestCase {
         entrypoint: String? = nil,
         promptSource: String? = nil,
         isSidechain: Bool = false,
-        isSubagentPath: Bool = false
+        isSubagentPath: Bool = false,
+        latestSubagentMtime: Double? = nil
     ) -> ScannedFile {
         ScannedFile(
             sessionId: sessionId,
@@ -37,7 +38,8 @@ final class JSONLSessionScannerTests: XCTestCase {
             entrypoint: entrypoint,
             promptSource: promptSource,
             isSidechain: isSidechain,
-            isSubagentPath: isSubagentPath
+            isSubagentPath: isSubagentPath,
+            latestSubagentMtime: latestSubagentMtime
         )
     }
 
@@ -386,6 +388,85 @@ extension JSONLSessionScannerTests {
                      key: SessionKey(agent: "claude", root: "/Users/x/.claude", sessionId: "sess-1"),
                      cwd: "/Users/x/project", title: "My Session"),
             "刚启动无 assistant 回合应为 stale，不应误判为 running"
+        )
+    }
+}
+
+// MARK: - 子 Agent 活跃度点亮父会话
+extension JSONLSessionScannerTests {
+
+    /// 活跃子 Agent（latestSubagentMtime=now-30，新鲜 < runningWindow=120）
+    /// + 父会话末条 assistant 是 end_turn → 应判 .running，不应是 .waitingStop
+    func test_subagentActive_overrides_endTurn_running() {
+        let now: Double = 1_000_000
+        let f = makeFile(
+            mtime: now - 60,
+            lastAssistantStopReason: "end_turn",
+            lastAssistantTs: now - 60,
+            latestSubagentMtime: now - 30    // 30 秒前更新，新鲜
+        )
+        XCTAssertEqual(
+            JSONLSessionScanner.scan(f, now: now),
+            .observe(state: .running,
+                     key: SessionKey(agent: "claude", root: "/Users/x/.claude", sessionId: "sess-1"),
+                     cwd: "/Users/x/project", title: "My Session"),
+            "活跃子 Agent 应使父会话强制判 .running，不应因 end_turn 变 waitingStop"
+        )
+    }
+
+    /// 旧子 Agent（latestSubagentMtime=now-9999，远超 runningWindow=120）
+    /// + 父会话 end_turn → 仍应判 .waitingStop（子 Agent 旧了无影响）
+    func test_subagentStale_endTurn_waitingStop() {
+        let now: Double = 1_000_000
+        let f = makeFile(
+            mtime: now - 60,
+            lastAssistantStopReason: "end_turn",
+            lastAssistantTs: now - 60,
+            latestSubagentMtime: now - 9_999   // 远超 runningWindow，子 Agent 已过时
+        )
+        XCTAssertEqual(
+            JSONLSessionScanner.scan(f, now: now),
+            .observe(state: .waitingStop,
+                     key: SessionKey(agent: "claude", root: "/Users/x/.claude", sessionId: "sess-1"),
+                     cwd: "/Users/x/project", title: "My Session"),
+            "旧子 Agent 不应影响父会话状态，end_turn 仍应为 waitingStop"
+        )
+    }
+
+    /// 父文件 mtime 超出 idleWindow，但子 Agent 文件在 10 秒前才更新
+    /// → 父会话不应被 tooOld 过滤掉，应判 .running
+    func test_subagentActive_oldParent_notTooOld_running() {
+        let now: Double = 1_000_000
+        let idleWindow: Double = 1800
+        let f = makeFile(
+            mtime: now - 9_000,              // 父文件超老（age=9000 > 1800）
+            lastAssistantStopReason: "end_turn",
+            latestSubagentMtime: now - 10    // 子 Agent 刚活跃
+        )
+        let result = JSONLSessionScanner.scan(f, now: now, idleWindow: idleWindow)
+        guard case .observe(let state, _, _, _) = result else {
+            return XCTFail("父文件虽老但子 Agent 活跃，不应被 tooOld 过滤，实际结果：\(result)")
+        }
+        XCTAssertEqual(state, .running,
+            "子 Agent 活跃应使父会话判 .running，不受父文件旧 mtime 影响")
+    }
+
+    /// latestSubagentMtime=nil → 行为与无子 Agent 时一致（回归保护）
+    /// end_turn + 无子 Agent → .waitingStop
+    func test_noSubagent_unchanged() {
+        let now: Double = 1_000_000
+        let f = makeFile(
+            mtime: now - 60,
+            lastAssistantStopReason: "end_turn",
+            lastAssistantTs: now - 60,
+            latestSubagentMtime: nil    // 明确 nil
+        )
+        XCTAssertEqual(
+            JSONLSessionScanner.scan(f, now: now),
+            .observe(state: .waitingStop,
+                     key: SessionKey(agent: "claude", root: "/Users/x/.claude", sessionId: "sess-1"),
+                     cwd: "/Users/x/project", title: "My Session"),
+            "latestSubagentMtime=nil 时行为应与既有一致，end_turn 应为 waitingStop"
         )
     }
 }
