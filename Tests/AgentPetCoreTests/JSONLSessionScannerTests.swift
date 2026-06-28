@@ -317,6 +317,11 @@ extension JSONLSessionScannerTests {
         assertState(base { $0.lastAssistantStopReason = "end_turn"; $0.mtime = 1000 }, now: 1010, .waitingStop)
     }
 
+    // stop_sequence 与 end_turn 同路 → waitingStop（spec 显式列为关键字，独立钉一例）
+    func test_stop_sequence_recent_waitingStop() {
+        assertState(base { $0.lastAssistantStopReason = "stop_sequence"; $0.mtime = 1000 }, now: 1010, .waitingStop)
+    }
+
     // tool_use 新鲜（age=50 < runningWindow=120）→ running
     func test_tool_use_fresh_running() {
         assertState(base { $0.lastAssistantStopReason = "tool_use"; $0.mtime = 1000 }, now: 1050, .running)
