@@ -39,6 +39,7 @@ final class AppCoordinator {
     private var isStopped = false
 
     private var jsonlWatcher: JSONLDirectoryWatcher?
+    private var hotKeyManager: HotKeyManager?
     /// 进程内单调计数器，用于 jsonl 合成事件的唯一 eventId（替代 UUID，防 seenEventIds 慢泄漏）。
     private var jsonlSeqCounter: Int = 0
 
@@ -116,8 +117,9 @@ final class AppCoordinator {
 
         // 2c. Create MenuBarController + PetWindowController for real GUI app (skip in headless mode)
         if !headless {
+            let isCompact = config.displayMode == "compact"
             let mb = MenuBarController(focusService: focusService)
-            let pw = PetWindowController(focusService: focusService, pet: config.selectedPet)
+            let pw = PetWindowController(focusService: focusService, pet: config.selectedPet, compact: isCompact)
             mb.petVisibilityProvider = { [weak pw] in pw?.isVisible ?? false }
             mb.onTogglePet = { [weak pw] in
                 guard let pw else { return }
@@ -142,16 +144,35 @@ final class AppCoordinator {
                 }
                 return false
             }
+            // 点开会话 → 标记已读（红→黄）。acknowledge 内部 emit 变更，
+            // 已注册的 changeHandler 会随之刷新 menuBar/petWindow，无需手动刷新。
+            let ack: (SessionKey) -> Void = { [weak self] key in
+                self?.store?.acknowledge(key: key)
+            }
+            mb.onAcknowledge = ack
+            pw.onAcknowledge = ack
+
+            // 面板顶部快捷键提示
+            let hint = config.panelHotKey.displayString + " 打开/关闭"
+            mb.hotkeyHint = hint
+            pw.hotkeyHint = hint
+
             menuBar = mb
             petWindow = pw
 
-            // Apply display mode from config.
+            // Apply display mode from config.（pet 和 compact 都算"显示窗口"，仅 menuBarOnly 隐藏）
             let showPet = config.displayMode != "menuBarOnly"
             if showPet {
                 pw.setVisible(true)
             }
             // Activate the app once so AppKit delivers window-order events properly.
             NSApp.activate(ignoringOtherApps: true)
+
+            // 注册全局热键（不需辅助功能权限）
+            let hkm = HotKeyManager()
+            hkm.onActivate = { [weak self] in self?.togglePanel() }
+            hkm.register(keyCode: config.panelHotKey.keyCode, modifiers: config.panelHotKey.modifiers)
+            self.hotKeyManager = hkm
 
             // ── 首启引导（just-in-time，非 headless 模式专属）──────────────────────
             // 用 UserDefaults 持久化"已展示"标志，避免 AppConfig 改动；
@@ -210,6 +231,7 @@ final class AppCoordinator {
             guard let self, let store = self.store else { return }
             let now = Date().timeIntervalSince1970
             _ = store.markStale(now: now, timeout: self.config.staleAfterSec)
+            _ = store.ageReadToStale(now: now, readGrayAfter: self.config.readGrayAfterSec)
             store.reap(now: now,
                        endedAfter: self.config.endedAfterSec,
                        waitingEndedAfter: self.config.waitingEndedAfterSec)
@@ -233,6 +255,8 @@ final class AppCoordinator {
         reapTimer = nil
         jsonlWatcher?.stop()
         jsonlWatcher = nil
+        hotKeyManager?.unregister()
+        hotKeyManager = nil
     }
 
     // MARK: - Preferences
@@ -263,8 +287,9 @@ final class AppCoordinator {
     /// - Thresholds (`staleAfterSec`, `endedAfterSec`, `waitingEndedAfterSec`) take effect
     ///   on the **next** reap-timer tick.
     /// - `notifyMode` takes effect on the **next** inbound event.
-    /// - `displayMode` is applied immediately.
+    /// - `displayMode`, `panelHotKey`, `selectedPet` are applied immediately.
     private func applyConfig(_ newConfig: AppConfig) {
+        let oldHotKey = config.panelHotKey
         config = newConfig
 
         // Apply display mode immediately.
@@ -275,6 +300,32 @@ final class AppCoordinator {
             }
             // Apply selected pet sprite immediately (Fix I-2).
             pw.applyPet(newConfig.selectedPet)
+            // Apply compact mode immediately.
+            pw.applyCompact(newConfig.displayMode == "compact")
+        }
+
+        // Re-register hot key if changed.
+        if newConfig.panelHotKey != oldHotKey {
+            hotKeyManager?.register(keyCode: newConfig.panelHotKey.keyCode,
+                                    modifiers: newConfig.panelHotKey.modifiers)
+        }
+
+        // Update panel hotkey hint.
+        let hint = newConfig.panelHotKey.displayString + " 打开/关闭"
+        menuBar?.hotkeyHint = hint
+        petWindow?.hotkeyHint = hint
+    }
+
+    // MARK: - Private: panel toggle (hot key target)
+
+    /// 全局热键触发：根据显示模式决定在哪个入口切换面板。
+    private func togglePanel() {
+        if let pw = petWindow, pw.isVisible {
+            // pet 或 compact 模式：切换 pet 窗口上的 popover
+            pw.togglePopover()
+        } else {
+            // menuBarOnly 或 pet 窗口不可见：切换菜单栏 popover
+            menuBar?.showPanel()
         }
     }
 

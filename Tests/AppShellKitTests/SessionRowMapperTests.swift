@@ -15,7 +15,8 @@ final class SessionRowMapperTests: XCTestCase {
         state: SessionState = .running,
         cwd: String? = nil,
         title: String? = nil,
-        terminal: TerminalRef? = nil
+        terminal: TerminalRef? = nil,
+        acknowledged: Bool = false
     ) -> Session {
         Session(
             key: SessionKey(agent: agent, root: root, sessionId: sessionId),
@@ -24,8 +25,37 @@ final class SessionRowMapperTests: XCTestCase {
             title: title,
             terminal: terminal,
             lastSeq: 1,
-            lastActiveAt: 1_000
+            lastActiveAt: 1_000,
+            acknowledged: acknowledged
         )
+    }
+
+    // MARK: - TC-ROWMAP-READ-001  waiting + acknowledged → dot .read（黄，优先于 doneWaiting/attention）
+
+    func test_waitingStop_acknowledged_dotRead() {
+        let session = makeSession(state: .waiting(.stop), acknowledged: true)
+        XCTAssertEqual(SessionRowMapper.make(session).dot, .read)
+    }
+
+    // MARK: - TC-ROWMAP-READ-002  waiting(.attention) + acknowledged → dot .read（已读优先于 attention）
+
+    func test_waitingAttention_acknowledged_dotRead() {
+        let session = makeSession(state: .waiting(.attention), acknowledged: true)
+        XCTAssertEqual(SessionRowMapper.make(session).dot, .read)
+    }
+
+    // MARK: - TC-ROWMAP-READ-003  waiting + 未读 → 原有 doneWaiting（不受 acknowledged 默认值影响）
+
+    func test_waitingStop_unread_dotDoneWaiting() {
+        let session = makeSession(state: .waiting(.stop), acknowledged: false)
+        XCTAssertEqual(SessionRowMapper.make(session).dot, .doneWaiting)
+    }
+
+    // MARK: - TC-ROWMAP-READ-004  running + acknowledged(残留) → dot .running（已读只对 waiting 生效）
+
+    func test_running_acknowledged_dotRunning() {
+        let session = makeSession(state: .running, acknowledged: true)
+        XCTAssertEqual(SessionRowMapper.make(session).dot, .running)
     }
 
     // MARK: - TC-ROWMAP-FUNC-001  running + iterm2 → dot .running, activateOnly false

@@ -13,13 +13,34 @@ struct SessionPanel: View {
     let rows: [SessionRowModel]
     /// Called with the row's stable `id` when the user taps a row.
     let onTap: (String) -> Void
+    /// 面板顶部显示的快捷键提示，如 "⌥⌘P 打开/关闭"。为 nil 时不显示 header。
+    var hotkeyHint: String? = nil
 
     var body: some View {
-        if rows.isEmpty {
-            emptyState
-        } else {
-            rowList
+        VStack(spacing: 0) {
+            if let hint = hotkeyHint {
+                hotkeyHeader(hint)
+            }
+            if rows.isEmpty {
+                emptyState
+            } else {
+                rowList
+            }
         }
+    }
+
+    // MARK: - Hotkey header
+
+    private func hotkeyHeader(_ hint: String) -> some View {
+        HStack {
+            Spacer()
+            Text(hint)
+                .font(.system(size: 10))
+                .foregroundStyle(.tertiary)
+            Spacer()
+        }
+        .padding(.vertical, 4)
+        .background(Color(NSColor.windowBackgroundColor).opacity(0.6))
     }
 
     // MARK: - Empty state
@@ -122,6 +143,7 @@ private struct SessionRowCell: View {
         case .running:     base = .green
         case .attention:   base = .orange
         case .doneWaiting: base = .red
+        case .read:        base = .yellow   // 已读：红→黄
         case .stale:       base = .gray
         }
         // Inferred (jsonl waiting) rows get a muted dot so they don't look as urgent

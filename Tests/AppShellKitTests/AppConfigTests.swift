@@ -121,4 +121,99 @@ final class AppConfigTests: XCTestCase {
         let root = DataRoot(path: "/x")
         XCTAssertEqual(root.agent, "claude-code")
     }
+
+    // MARK: - 精修 3：readGrayAfterSec 字段
+
+    /// defaults 中 readGrayAfterSec == 3600
+    func test_defaults_readGrayAfterSec_is3600() {
+        XCTAssertEqual(AppConfig.defaults.readGrayAfterSec, 3600)
+    }
+
+    /// round-trip：save + load 保留 readGrayAfterSec
+    func test_readGrayAfterSec_roundTrip() throws {
+        let store = ConfigStore(url: configURL)
+        var custom = AppConfig.defaults
+        custom.readGrayAfterSec = 7200
+        try store.save(custom)
+        let loaded = store.load()
+        XCTAssertEqual(loaded.readGrayAfterSec, 7200)
+    }
+
+    /// 旧版 config.json（无 readGrayAfterSec 字段）解码后：其他设置完整保留，新字段默认 3600。
+    func test_decode_oldJson_withoutReadGrayAfter_keepsSettings_defaults3600() throws {
+        let oldJson = """
+        {
+          "dataRoots": [{"agent": "claude-code", "path": "/tmp/root"}],
+          "displayMode": "menuBarOnly",
+          "endedAfterSec": 7200,
+          "notifyMode": "everyStop",
+          "selectedPet": "bichon",
+          "staleAfterSec": 300,
+          "waitingEndedAfterSec": 3600
+        }
+        """
+        let data = oldJson.data(using: .utf8)!
+        let config = try JSONDecoder().decode(AppConfig.self, from: data)
+
+        // 既有字段完整保留（不被 keyNotFound 踢回 defaults）
+        XCTAssertEqual(config.displayMode, "menuBarOnly", "displayMode 应保留")
+        XCTAssertEqual(config.notifyMode, "everyStop", "notifyMode 应保留")
+        XCTAssertEqual(config.selectedPet, "bichon", "selectedPet 应保留")
+        XCTAssertEqual(config.staleAfterSec, 300, "staleAfterSec 应保留")
+        XCTAssertEqual(config.endedAfterSec, 7200, "endedAfterSec 应保留")
+        XCTAssertEqual(config.waitingEndedAfterSec, 3600, "waitingEndedAfterSec 应保留")
+        XCTAssertEqual(config.dataRoots.first?.path, "/tmp/root", "dataRoots 应保留")
+
+        // 新字段 → 默认 3600
+        XCTAssertEqual(config.readGrayAfterSec, 3600, "旧 json 无此字段时应默认 3600")
+    }
+
+    // MARK: - panelHotKey 字段
+
+    /// defaults.panelHotKey == .defaultPanel（⌥⌘P）
+    func test_defaults_panelHotKey_isDefaultPanel() {
+        XCTAssertEqual(AppConfig.defaults.panelHotKey, HotKeyConfig.defaultPanel)
+    }
+
+    /// 旧版 json（无 panelHotKey 字段）解码后：其他设置完整保留，panelHotKey == .defaultPanel。
+    func test_decode_oldJson_withoutHotKey_keepsSettings_defaultHotKey() throws {
+        let oldJson = """
+        {
+          "dataRoots": [{"agent": "claude-code", "path": "/tmp/root"}],
+          "displayMode": "menuBarOnly",
+          "endedAfterSec": 7200,
+          "notifyMode": "everyStop",
+          "selectedPet": "bichon",
+          "staleAfterSec": 300,
+          "waitingEndedAfterSec": 3600,
+          "readGrayAfterSec": 1800
+        }
+        """
+        let data = oldJson.data(using: .utf8)!
+        let config = try JSONDecoder().decode(AppConfig.self, from: data)
+
+        // 既有字段完整保留
+        XCTAssertEqual(config.displayMode, "menuBarOnly", "displayMode 应保留")
+        XCTAssertEqual(config.notifyMode, "everyStop", "notifyMode 应保留")
+        XCTAssertEqual(config.selectedPet, "bichon", "selectedPet 应保留")
+        XCTAssertEqual(config.staleAfterSec, 300, "staleAfterSec 应保留")
+        XCTAssertEqual(config.readGrayAfterSec, 1800, "readGrayAfterSec 应保留")
+        XCTAssertEqual(config.dataRoots.first?.path, "/tmp/root", "dataRoots 应保留")
+
+        // 无 panelHotKey → 默认 .defaultPanel
+        XCTAssertEqual(config.panelHotKey, HotKeyConfig.defaultPanel, "旧 json 无 panelHotKey 时应默认 .defaultPanel")
+    }
+
+    /// round-trip：设置非默认 panelHotKey 后 save+load，值完整保留（验证进了 CodingKeys）。
+    func test_panelHotKey_roundTrip_nonDefault() throws {
+        let store = ConfigStore(url: configURL)
+        var custom = AppConfig.defaults
+        custom.panelHotKey = HotKeyConfig(keyCode: 12, modifiers: 4096 | 256, keyLabel: "Q")
+        try store.save(custom)
+        let loaded = store.load()
+        XCTAssertEqual(loaded.panelHotKey, custom.panelHotKey)
+        XCTAssertEqual(loaded.panelHotKey.keyCode, 12)
+        XCTAssertEqual(loaded.panelHotKey.modifiers, 4096 | 256)
+        XCTAssertEqual(loaded.panelHotKey.keyLabel, "Q")
+    }
 }

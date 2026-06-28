@@ -8,10 +8,23 @@ import AppShellKit
 struct PetView: View {
     let presentation: PetPresentation
     let pet: String
+    /// 精简条模式：仅渲染 countChip，不显示宠物图、气泡、呼吸动画。
+    /// 窗口尺寸由 ``PetWindowController`` 根据此标志调整。
+    var compact: Bool = false
 
     @State private var bobOffset: CGFloat = 0
 
     var body: some View {
+        if compact {
+            compactBody
+        } else {
+            fullBody
+        }
+    }
+
+    // MARK: - Full pet body (pet + bubble + countChip)
+
+    private var fullBody: some View {
         ZStack(alignment: .top) {
             VStack(spacing: 4) {
                 // Speech bubble (calling state)
@@ -53,6 +66,22 @@ struct PetView: View {
         .frame(width: 140, height: 160)
     }
 
+    // MARK: - Compact body (only countChip)
+
+    private var compactBody: some View {
+        HStack {
+            Spacer(minLength: 0)
+            countChip
+            Spacer(minLength: 0)
+        }
+        .frame(width: 160, height: 40)
+        .background(
+            RoundedRectangle(cornerRadius: 8)
+                .fill(Color(NSColor.windowBackgroundColor).opacity(0.88))
+                .shadow(radius: 3)
+        )
+    }
+
     // MARK: - Subviews
 
     @ViewBuilder
@@ -64,7 +93,7 @@ struct PetView: View {
             .frame(width: 96, height: 96)
     }
 
-    /// 常驻计数条：🟢 在跑 · 🔴 完成。即便都是 0 也显示，让用户一眼看到全局而不必点开面板。
+    /// 常驻计数条（4 段）：🟢 在跑 · 🔴 未读 · 🟡 已读 · ⚪ 闲置。每段始终显示（即便为 0）。
     @ViewBuilder
     private var countChip: some View {
         HStack(spacing: 8) {
@@ -80,13 +109,25 @@ struct PetView: View {
                     .font(.system(size: 11, weight: .semibold))
                     .foregroundColor(.primary)
             }
+            HStack(spacing: 3) {
+                Circle().fill(Color.yellow).frame(width: 7, height: 7)
+                Text("\(presentation.readCount)")
+                    .font(.system(size: 11, weight: .semibold))
+                    .foregroundColor(.primary)
+            }
+            HStack(spacing: 3) {
+                Circle().fill(Color.gray).frame(width: 7, height: 7)
+                Text("\(presentation.idleCount)")
+                    .font(.system(size: 11, weight: .semibold))
+                    .foregroundColor(.primary)
+            }
         }
         .padding(.horizontal, 8)
         .padding(.vertical, 3)
         .background(
             Capsule().fill(Color(NSColor.windowBackgroundColor).opacity(0.9)).shadow(radius: 2)
         )
-        .help("绿=进行中 · 红=停下等你/完成")
+        .help("绿=进行中 · 红=停下等你/未读 · 黄=已读 · 灰=闲置")
     }
 
     @ViewBuilder

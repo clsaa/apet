@@ -15,17 +15,23 @@ public struct PetPresentation: Equatable {
     public let emphasize: Bool
     /// 始终显示的"进行中"会话数（绿点），即便为 0（用户反馈：时刻显示）。
     public let runningCount: Int
-    /// 始终显示的"停下等你/完成"会话数（红点）= waiting + attention，即便为 0。
+    /// 始终显示的"停下等你/完成（未读）"会话数（红点）= waiting - acknowledged，即便为 0。
     public let doneCount: Int
+    /// "已读"会话数（黄点）= acknowledgedCount，即便为 0。
+    public let readCount: Int
+    /// "闲置"会话数（灰点）= staleCount，即便为 0。
+    public let idleCount: Int
 
     public init(assetState: String, badge: String?, bubble: String?, emphasize: Bool,
-                runningCount: Int = 0, doneCount: Int = 0) {
+                runningCount: Int = 0, doneCount: Int = 0, readCount: Int = 0, idleCount: Int = 0) {
         self.assetState = assetState
         self.badge = badge
         self.bubble = bubble
         self.emphasize = emphasize
         self.runningCount = runningCount
         self.doneCount = doneCount
+        self.readCount = readCount
+        self.idleCount = idleCount
     }
 }
 
@@ -37,9 +43,13 @@ public enum PetPresenter {
     public static func make(from summary: PetSummary) -> PetPresentation {
         let badge = summary.badgeCount > 0 ? "\(summary.badgeCount)" : nil
         let emphasize = summary.attentionCount > 0
-        // 始终携带计数：running=进行中；done=停下等你/完成（waiting + attention）。
+        // 始终携带计数：running=进行中；
+        // done=停下等你/完成「未读」（waiting - acknowledged，attention 已计入 waiting，红色只数未读）；
+        // read=已读（acknowledged，黄色）。
         let running = summary.runningCount
-        let done = summary.waitingCount + summary.attentionCount
+        let read = summary.acknowledgedCount
+        let done = max(0, summary.waitingCount - summary.acknowledgedCount)
+        let idle = summary.staleCount
 
         switch summary.state {
         case .idle:
@@ -49,7 +59,9 @@ public enum PetPresenter {
                 bubble: nil,
                 emphasize: false,
                 runningCount: running,
-                doneCount: done
+                doneCount: done,
+                readCount: read,
+                idleCount: idle
             )
         case .busy:
             return PetPresentation(
@@ -58,7 +70,9 @@ public enum PetPresenter {
                 bubble: nil,
                 emphasize: emphasize,
                 runningCount: running,
-                doneCount: done
+                doneCount: done,
+                readCount: read,
+                idleCount: idle
             )
         case .calling:
             let bubble = "\(summary.badgeCount) 个等你"
@@ -68,7 +82,9 @@ public enum PetPresenter {
                 bubble: bubble,
                 emphasize: emphasize,
                 runningCount: running,
-                doneCount: done
+                doneCount: done,
+                readCount: read,
+                idleCount: idle
             )
         }
     }

@@ -165,4 +165,40 @@ final class SessionStoreMarkStaleSessionTests: XCTestCase {
         XCTAssertEqual(store.markStaleSessionIfJSONL(key, now: 100), [],
                        "不存在的 key 返回 []")
     }
+
+    // MARK: - MAJOR-1: markStaleSession 清除 acknowledged（防止幽灵已读态）
+
+    /// TC-MSS-FUNC-007：waiting+acknowledged 会话 markStaleSession → stale 且 acknowledged==false
+    func test_markStaleSession_clears_acknowledged() {
+        let store = SessionStore()
+        _ = store.apply(makeEvent(eventId: "e1", kind: .stop), seq: 1, now: 100, replay: false)
+        let key = SessionKey(agent: "claude", root: "/r", sessionId: "s")
+        _ = store.acknowledge(key: key)
+        XCTAssertEqual(store.sessions[key]?.state, .waiting(.stop), "前置：waiting")
+        XCTAssertEqual(store.sessions[key]?.acknowledged, true, "前置：已读")
+
+        let changes = store.markStaleSession(key, now: 200)
+
+        XCTAssertEqual(changes, [.upserted(key)], "应广播 upserted")
+        XCTAssertEqual(store.sessions[key]?.state, .stale, "状态应为 stale")
+        XCTAssertEqual(store.sessions[key]?.acknowledged, false,
+                       "MAJOR-1: 打灰后 acknowledged 必须清除，防止幽灵已读态")
+    }
+
+    /// TC-MSS-FUNC-008：markStaleSession 后收到 .stop 事件 → waiting 且 acknowledged==false（新未读）
+    func test_markStaleSession_thenStop_isNewUnread() {
+        let store = SessionStore()
+        _ = store.apply(makeEvent(eventId: "e1", kind: .stop), seq: 1, now: 100, replay: false)
+        let key = SessionKey(agent: "claude", root: "/r", sessionId: "s")
+        _ = store.acknowledge(key: key)
+        _ = store.markStaleSession(key, now: 200)
+        XCTAssertEqual(store.sessions[key]?.state, .stale, "前置：stale")
+        XCTAssertEqual(store.sessions[key]?.acknowledged, false, "前置：acknowledged 已清")
+
+        // 新的 .stop 事件让会话从 stale 复活为 waiting（新一轮未读）
+        _ = store.apply(makeEvent(eventId: "e2", kind: .stop), seq: 2, now: 300, replay: false)
+
+        XCTAssertEqual(store.sessions[key]?.state, .waiting(.stop), "应恢复为 waiting(.stop)")
+        XCTAssertEqual(store.sessions[key]?.acknowledged, false, "新一轮 waiting 应为未读")
+    }
 }
