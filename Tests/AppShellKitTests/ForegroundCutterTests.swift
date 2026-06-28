@@ -18,6 +18,12 @@ final class ForegroundCutterTests: XCTestCase {
         XCTAssertEqual(CutoutDecision.decide(result: .failure(.platformUnsupported), cutoutPath: "/c.png"),
                        .keepCurrent(message: "抠图需 macOS 14 及以上，可直接用原图"))
     }
+    func test_inferenceFailure_keepCurrent() {
+        XCTAssertEqual(
+            CutoutDecision.decide(result: .failure(.inferenceFailure("vision err")), cutoutPath: "/c.png"),
+            .keepCurrent(message: "抠图未成功，可用原图")
+        )
+    }
     func test_unavailableCutter_throws() async {
         do { try await UnavailableForegroundCutter().cutout(srcPath: "/a", dstPath: "/b"); XCTFail() }
         catch { XCTAssertEqual(error as? CutoutError, .platformUnsupported) }

@@ -11,7 +11,16 @@ final class CustomPetStoreTests: XCTestCase {
         func fileExists(_ p: String) -> Bool { existing.contains(p) }
         func createDir(_ p: String) throws {}
         func copyItem(from: String, to: String) throws { existing.insert(to) }
-        func removeItem(_ p: String) throws { existing.remove(p) }
+        func removeItem(_ p: String) throws {
+            existing.remove(p)
+            // Remove directory entry: clear the key so contentsOfDir returns []
+            dirs.removeValue(forKey: p)
+            // Also remove the basename from the parent directory's listing so list() reflects deletion.
+            guard let slashIdx = p.lastIndex(of: "/") else { return }
+            let parent = String(p[..<slashIdx])
+            let base   = String(p[p.index(after: slashIdx)...])
+            dirs[parent]?.removeAll { $0 == base }
+        }
         func contentsOfDir(_ p: String) -> [String] { dirs[p] ?? [] }
     }
 
@@ -49,18 +58,22 @@ final class CustomPetStoreTests: XCTestCase {
 
     // MARK: - delete test (extra, from plan review)
 
-    /// delete(id:) must remove every file found under <rootDir>/<id>/
+    /// delete(id:) must remove every file found under <rootDir>/<id>/,
+    /// then remove the id directory itself so list() returns no ghost entry.
     func test_delete_removesFilesUnderIdDir() {
         let fo = MockFileOps()
         fo.existing.insert("/r/id1/original.png")
         fo.existing.insert("/r/id1/cutout.png")
         fo.dirs["/r/id1"] = ["original.png", "cutout.png"]
+        fo.dirs["/r"] = ["id1"]   // list() must return ["id1"] before delete
         let store = CustomPetStore(rootDir: "/r", fileOps: fo, idProvider: { "id1" })
         XCTAssertNoThrow(try store.delete(id: "id1"))
         XCTAssertFalse(fo.existing.contains("/r/id1/original.png"),
                        "original.png should be removed")
         XCTAssertFalse(fo.existing.contains("/r/id1/cutout.png"),
                        "cutout.png should be removed")
+        XCTAssertTrue(store.list().isEmpty,
+                      "list() must not return ghost id after delete removes the directory")
     }
 
     // MARK: - importPhoto test (extra, from plan review)

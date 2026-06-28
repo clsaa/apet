@@ -44,13 +44,15 @@ public struct CustomPetStore {
         return id
     }
 
-    /// Removes every file found under `<rootDir>/<id>/`.
+    /// Removes every file found under `<rootDir>/<id>/`, then removes the id directory itself.
+    /// Without removing the directory, `list()` would still enumerate it as a ghost entry.
     public func delete(id: String) throws {
         let dir   = idDir(for: id)
         let files = fileOps.contentsOfDir(dir)
         for file in files {
             try fileOps.removeItem("\(dir)/\(file)")
         }
+        try fileOps.removeItem(dir)
     }
 
     // MARK: - Read operations

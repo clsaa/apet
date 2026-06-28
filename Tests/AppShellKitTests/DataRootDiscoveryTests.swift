@@ -62,6 +62,26 @@ final class DataRootDiscoveryTests: XCTestCase {
 
     // MARK: - 补充用例：existing 含 profile 子目录路径的去重
 
+    /// 验证：existing 中 agent 非 "claude-code" 的 DataRoot，discover 后 agent 不被覆盖为 "claude-code"。
+    func test_existing_agent_preserved() {
+        let fo = MockFileOps()
+        fo.dirs["/h/.claude-profiles"] = ["work"]
+        fo.existing.insert("/h/.claude-profiles/work/projects")
+        // existing root has agent "qoder" — must survive discover()
+        let existingRoot = DataRoot(path: "/h/.claude-profiles/work", agent: "qoder")
+        let r = DataRootDiscovery.discover(
+            home: "/h",
+            existing: [existingRoot],
+            excluded: [],
+            fileOps: fo
+        )
+        XCTAssertEqual(r.roots.count, 1)
+        XCTAssertEqual(r.roots[0].agent, "qoder",
+                       "existing root's agent must not be overwritten by discover()")
+        XCTAssertTrue(r.newlyDiscovered.isEmpty,
+                      "a root already in existing must not appear in newlyDiscovered")
+    }
+
     /// 验证：已在 existing 的 profile 子目录不重复出现在 roots；
     /// 且不计入 newlyDiscovered，只有真正新发现的 profile 才算。
     func test_dedup_profile_already_in_existing() {

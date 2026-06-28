@@ -55,23 +55,25 @@ public enum DataRootDiscovery {
         var ordered: [DataRoot] = []
         var seen = Set<String>()
 
-        /// Attempt to append a root for `path`.  No-ops if already seen or excluded.
-        func add(_ path: String) {
-            guard !seen.contains(path) else { return }
-            guard !excludedPaths.contains(path) else { return }
-            seen.insert(path)
-            ordered.append(DataRoot(path: path, agent: "claude-code"))
+        /// Attempt to append `root`.  No-ops if the path is already seen or excluded.
+        /// Preserving the `DataRoot` object (rather than just the path) retains the
+        /// original `agent` field for roots that come from `existing`.
+        func add(_ root: DataRoot) {
+            guard !seen.contains(root.path) else { return }
+            guard !excludedPaths.contains(root.path) else { return }
+            seen.insert(root.path)
+            ordered.append(root)
         }
 
-        // 1. Seed with existing roots (preserves user-configured order, handles exclusions).
+        // 1. Seed with existing roots (preserves user-configured order, agent, and exclusions).
         for root in existing {
-            add(root.path)
+            add(root)
         }
 
         // 2. Candidate: <home>/.claude
         let defaultClaude = home + "/.claude"
         if fileOps.fileExists(defaultClaude) {
-            add(defaultClaude)
+            add(DataRoot(path: defaultClaude, agent: "claude-code"))
         }
 
         // 3. Candidates: <home>/.claude-profiles/<x> where <x>/projects exists.
@@ -80,7 +82,7 @@ public enum DataRootDiscovery {
         for name in fileOps.contentsOfDir(profilesDir) {
             let profilePath = profilesDir + "/" + name
             if fileOps.fileExists(profilePath + "/projects") {
-                add(profilePath)
+                add(DataRoot(path: profilePath, agent: "claude-code"))
             }
         }
 
