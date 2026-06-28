@@ -147,7 +147,22 @@ final class AppCoordinator {
         if !headless {
             let isCompact = config.displayMode == "compact"
             let mb = MenuBarController(focusService: focusService)
-            let pw = PetWindowController(focusService: focusService, pet: config.selectedPet, compact: isCompact)
+            // Build a shared CustomPetStore; rootDir under ~/Library/Application Support/AgentPet/pets-custom.
+            let appSupport = (NSHomeDirectory() as NSString)
+                .appendingPathComponent("Library/Application Support/AgentPet")
+            let petsCustomDir = (appSupport as NSString).appendingPathComponent("pets-custom")
+            let customStore = CustomPetStore(
+                rootDir: petsCustomDir,
+                fileOps: RealFileOps(),
+                idProvider: { UUID().uuidString }
+            )
+            let initialSelection = PetSelection.parse(config.selectedPet)
+            let pw = PetWindowController(
+                focusService: focusService,
+                selection: initialSelection,
+                customStore: customStore,
+                compact: isCompact
+            )
             mb.petVisibilityProvider = { [weak pw] in pw?.isVisible ?? false }
             mb.onTogglePet = { [weak pw] in
                 guard let pw else { return }
@@ -327,7 +342,7 @@ final class AppCoordinator {
                 pw.setVisible(shouldShow)
             }
             // Apply selected pet sprite immediately (Fix I-2).
-            pw.applyPet(newConfig.selectedPet)
+            pw.applyPet(PetSelection.parse(newConfig.selectedPet))
             // Apply compact mode immediately.
             pw.applyCompact(newConfig.displayMode == "compact")
         }

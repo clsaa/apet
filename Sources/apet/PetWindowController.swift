@@ -28,14 +28,15 @@ final class PetWindowController: NSObject {
     private var popover: NSPopover?
     private var currentPresentation: PetPresentation
     private var currentSessions: [Session] = []
-    /// Currently rendered pet sprite name ("shiba" | "bichon").
-    private var currentPet: String
+    /// Currently selected pet (builtin name or custom photo id).
+    private var currentSelection: PetKind
     /// 精简条模式。
     private var currentCompact: Bool
 
     // MARK: - Dependencies
 
     private let focusService: TerminalFocusService
+    private let customStore: CustomPetStore
 
     /// 用户点开一个会话（跳转终端）后回调，AppCoordinator 据此把会话标记为"已读"（红→黄）。
     var onAcknowledge: ((SessionKey) -> Void)?
@@ -46,11 +47,18 @@ final class PetWindowController: NSObject {
 
     /// - Parameters:
     ///   - focusService: Service used to jump to the terminal that owns a session.
-    ///   - pet: Initial pet sprite ("shiba" or "bichon").  Defaults to "shiba".
+    ///   - selection: Initial pet selection (builtin name or custom photo id).  Defaults to `.builtin("shiba")`.
+    ///   - customStore: Store for custom pet photos (injected by AppCoordinator).
     ///   - compact: 精简条模式（仅显示计数条）。Defaults to false.
-    init(focusService: TerminalFocusService, pet: String = "shiba", compact: Bool = false) {
+    init(
+        focusService: TerminalFocusService,
+        selection: PetKind = .builtin("shiba"),
+        customStore: CustomPetStore,
+        compact: Bool = false
+    ) {
         self.focusService = focusService
-        self.currentPet = pet
+        self.currentSelection = selection
+        self.customStore = customStore
         self.currentCompact = compact
         self.currentPresentation = PetPresenter.make(
             from: PetSummary(
@@ -72,7 +80,19 @@ final class PetWindowController: NSObject {
         let presentation = PetPresenter.make(from: summary)
         currentPresentation = presentation
         currentSessions = sessions
-        hostingView?.rootView = PetView(presentation: presentation, pet: currentPet, compact: currentCompact)
+        let img = PetAssetLoader.image(
+            selection: currentSelection,
+            assetState: presentation.assetState,
+            customStore: customStore
+        )
+        let isCustom: Bool
+        if case .custom = currentSelection { isCustom = true } else { isCustom = false }
+        hostingView?.rootView = PetView(
+            presentation: presentation,
+            resolvedImage: img,
+            isCustomPet: isCustom,
+            compact: currentCompact
+        )
 
         // Update popover session list in-place when visible
         if let popover, popover.isShown,
@@ -97,14 +117,26 @@ final class PetWindowController: NSObject {
 
     var isVisible: Bool { window?.isVisible ?? false }
 
-    /// Switch the displayed pet sprite.
+    /// Switch the displayed pet.
     ///
     /// Call from ``AppCoordinator/applyConfig(_:)`` whenever `selectedPet` changes.
     /// The swap is live — the hosting view is updated immediately.
-    func applyPet(_ pet: String) {
-        guard pet != currentPet else { return }
-        currentPet = pet
-        hostingView?.rootView = PetView(presentation: currentPresentation, pet: currentPet, compact: currentCompact)
+    func applyPet(_ selection: PetKind) {
+        guard selection != currentSelection else { return }
+        currentSelection = selection
+        let img = PetAssetLoader.image(
+            selection: currentSelection,
+            assetState: currentPresentation.assetState,
+            customStore: customStore
+        )
+        let isCustom: Bool
+        if case .custom = currentSelection { isCustom = true } else { isCustom = false }
+        hostingView?.rootView = PetView(
+            presentation: currentPresentation,
+            resolvedImage: img,
+            isCustomPet: isCustom,
+            compact: currentCompact
+        )
     }
 
     /// 切换精简条模式。窗口尺寸随之调整，宿主视图立即更新。
@@ -128,7 +160,19 @@ final class PetWindowController: NSObject {
                 sub.frame = NSRect(origin: .zero, size: newSize)
             }
         }
-        hostingView?.rootView = PetView(presentation: currentPresentation, pet: currentPet, compact: compact)
+        let img = PetAssetLoader.image(
+            selection: currentSelection,
+            assetState: currentPresentation.assetState,
+            customStore: customStore
+        )
+        let isCustom: Bool
+        if case .custom = currentSelection { isCustom = true } else { isCustom = false }
+        hostingView?.rootView = PetView(
+            presentation: currentPresentation,
+            resolvedImage: img,
+            isCustomPet: isCustom,
+            compact: compact
+        )
     }
 
     // MARK: - Private: session tap (mirrors MenuBarController.handleSessionTap)
@@ -171,7 +215,19 @@ final class PetWindowController: NSObject {
         w.isExcludedFromWindowsMenu = true
 
         // Hosting view for SwiftUI content
-        let hv = NSHostingView(rootView: PetView(presentation: currentPresentation, pet: currentPet, compact: currentCompact))
+        let setupImg = PetAssetLoader.image(
+            selection: currentSelection,
+            assetState: currentPresentation.assetState,
+            customStore: customStore
+        )
+        let setupIsCustom: Bool
+        if case .custom = currentSelection { setupIsCustom = true } else { setupIsCustom = false }
+        let hv = NSHostingView(rootView: PetView(
+            presentation: currentPresentation,
+            resolvedImage: setupImg,
+            isCustomPet: setupIsCustom,
+            compact: currentCompact
+        ))
         hv.frame = NSRect(origin: .zero, size: size)
         hostingView = hv
 
