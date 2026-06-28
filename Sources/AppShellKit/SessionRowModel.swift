@@ -29,6 +29,10 @@ public struct SessionRowModel: Equatable, Identifiable {
     /// `true` when the terminal kind only supports app-activate (no precise tab jump).
     /// Currently: `.warp` and `.other`.
     public let activateOnly: Bool
+    /// `true` when the session state is inferred from jsonl replay (source == .jsonl &&
+    /// state == .waiting). The session is paused/stopped but the terminal info comes from
+    /// file scanning rather than a live hook event — so it may be stale.
+    public let isInferred: Bool
 
     public init(
         id: String,
@@ -36,7 +40,8 @@ public struct SessionRowModel: Equatable, Identifiable {
         subtitle: String,
         profileTag: String?,
         dot: Dot,
-        activateOnly: Bool
+        activateOnly: Bool,
+        isInferred: Bool = false
     ) {
         self.id = id
         self.title = title
@@ -44,6 +49,7 @@ public struct SessionRowModel: Equatable, Identifiable {
         self.profileTag = profileTag
         self.dot = dot
         self.activateOnly = activateOnly
+        self.isInferred = isInferred
     }
 }
 
@@ -87,13 +93,21 @@ public enum SessionRowMapper {
         default:            activateOnly = false
         }
 
+        // isInferred: jsonl-sourced session whose state is waiting (stop or attention).
+        // The session appears stopped/paused but we learned this from file scanning, not a
+        // live hook event — the terminal may no longer exist.
+        let isWaiting: Bool
+        if case .waiting = session.state { isWaiting = true } else { isWaiting = false }
+        let isInferred = session.source == .jsonl && isWaiting
+
         return SessionRowModel(
             id: id,
             title: title,
             subtitle: subtitle,
             profileTag: session.profileLabel,
             dot: dot,
-            activateOnly: activateOnly
+            activateOnly: activateOnly,
+            isInferred: isInferred
         )
     }
 }

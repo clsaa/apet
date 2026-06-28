@@ -259,12 +259,25 @@ final class MenuBarController: NSObject {
 
         let terminal = session.terminal
         let fs = focusService
+        // Dismiss the popover before the off-main focus attempt.
+        popover?.performClose(nil)
+
         // Off-main — osascript blocks (Fix I-1 / B2 pattern).
         Task.detached {
-            _ = fs.focus(terminal)
+            let result = fs.focus(terminal)
+            // Inform the user when the terminal window can't be reached.
+            // .targetGone  — osascript ran but the session tab no longer exists.
+            // .unsupported — no terminal info at all (e.g. jsonl-inferred session).
+            if result == .targetGone || result == .unsupported {
+                await MainActor.run {
+                    let alert = NSAlert()
+                    alert.messageText = "无法跳转到会话"
+                    alert.informativeText = "会话窗口可能已关闭。"
+                    alert.alertStyle = .informational
+                    alert.addButton(withTitle: "好的")
+                    alert.runModal()
+                }
+            }
         }
-
-        // Dismiss the popover after the user taps.
-        popover?.performClose(nil)
     }
 }

@@ -122,4 +122,52 @@ final class SessionRowMapperTests: XCTestCase {
         // Assert
         XCTAssertFalse(row.activateOnly)
     }
+
+    // MARK: - TC-ROWMAP-INFER-001  jsonl + waiting(.stop) → isInferred true
+
+    func test_jsonl_waitingStop_isInferred() {
+        // Arrange — jsonl 来源，waiting(.stop)，应标记为推断态
+        var s = makeSession(state: .waiting(.stop))
+        s.source = .jsonl
+        // Act
+        let row = SessionRowMapper.make(s)
+        // Assert
+        XCTAssertTrue(row.isInferred)
+    }
+
+    // MARK: - TC-ROWMAP-INFER-002  hook + waiting(.stop) → isInferred false
+
+    func test_hook_waitingStop_notInferred() {
+        // Arrange — hook 来源，waiting(.stop)，精确事件流，不是推断
+        var s = makeSession(state: .waiting(.stop))
+        s.source = .hook
+        // Act
+        let row = SessionRowMapper.make(s)
+        // Assert
+        XCTAssertFalse(row.isInferred)
+    }
+
+    // MARK: - TC-ROWMAP-INFER-003  jsonl + running → isInferred false
+
+    func test_jsonl_running_notInferred() {
+        // Arrange — jsonl 来源但处于 running，活跃中不是推断
+        var s = makeSession(state: .running)
+        s.source = .jsonl
+        // Act
+        let row = SessionRowMapper.make(s)
+        // Assert
+        XCTAssertFalse(row.isInferred)
+    }
+
+    // MARK: - TC-ROWMAP-INFER-004  jsonl + stale → isInferred false
+
+    func test_jsonl_stale_notInferred() {
+        // Arrange — jsonl 来源但已 stale，超时灰显不是推断
+        var s = makeSession(state: .stale)
+        s.source = .jsonl
+        // Act
+        let row = SessionRowMapper.make(s)
+        // Assert
+        XCTAssertFalse(row.isInferred)
+    }
 }
