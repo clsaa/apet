@@ -84,4 +84,36 @@ final class JSONLParseTests: XCTestCase {
         let f = JSONLParse.parse(path: fx("end_turn.jsonl"), root: "/r")!
         XCTAssertEqual(f.lastPrompt, "explain this code")
     }
+
+    // MARK: - M1: ISO8601 无小数秒兜底
+
+    /// M1 修复：无小数秒时间戳（"2026-06-28T10:01:00Z"）应能解析，lastAssistantTs 不应为 nil
+    func test_parse_no_fractional_seconds_timestamp_parseable() {
+        let f = JSONLParse.parse(path: fx("no_frac_ts.jsonl"), root: "/r")!
+        XCTAssertNotNil(f.lastAssistantTs,
+            "无小数秒 ISO8601 时间戳应能解析，lastAssistantTs 不应为 nil")
+        XCTAssertEqual(f.lastAssistantStopReason, "end_turn")
+    }
+
+    // MARK: - M2: isSubagentPath 路径判断
+
+    /// M2：路径含 /subagents/ 时，parse 应将 isSubagentPath 置为 true
+    func test_parse_path_containing_subagents_dir_isSubagentPath() throws {
+        // 在系统临时目录构造含 /subagents/ 的路径
+        let tmpBase = FileManager.default.temporaryDirectory
+            .appendingPathComponent("apet-m2-\(UUID().uuidString)")
+            .path
+        let subagentsDir = (tmpBase as NSString).appendingPathComponent("projects/default/subagents")
+        try FileManager.default.createDirectory(atPath: subagentsDir, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(atPath: tmpBase) }
+
+        // 把 end_turn.jsonl 内容复制到 /subagents/ 子目录下
+        let srcPath = fx("end_turn.jsonl")
+        let dstPath = (subagentsDir as NSString).appendingPathComponent("session.jsonl")
+        try FileManager.default.copyItem(atPath: srcPath, toPath: dstPath)
+
+        let f = JSONLParse.parse(path: dstPath, root: "/r")!
+        XCTAssertTrue(f.isSubagentPath,
+            "路径含 /subagents/ 时 isSubagentPath 应为 true，实际路径：\(dstPath)")
+    }
 }

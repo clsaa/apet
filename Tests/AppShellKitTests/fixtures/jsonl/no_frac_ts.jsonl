@@ -1,0 +1,3 @@
+{"type":"last-prompt","lastPrompt":"no frac ts test","sessionId":"aaaa0010-0000-0000-0000-000000000010"}
+{"type":"user","cwd":"/Users/test/proj","sessionId":"aaaa0010-0000-0000-0000-000000000010","timestamp":"2026-06-28T10:00:00Z","isSidechain":false,"entrypoint":"cli","version":"1.0.0"}
+{"type":"assistant","cwd":"/Users/test/proj","sessionId":"aaaa0010-0000-0000-0000-000000000010","timestamp":"2026-06-28T10:01:00Z","isSidechain":false,"entrypoint":"cli","version":"1.0.0","message":{"role":"assistant","content":[{"type":"text","text":"No fractional seconds test."}],"stop_reason":"end_turn"}}

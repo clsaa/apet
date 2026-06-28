@@ -15,7 +15,7 @@ final class JSONLSessionScannerTests: XCTestCase {
         lastAssistantStopReason: String? = nil,
         lastAssistantTs: Double? = nil,
         lastAwayTs: Double? = nil,
-        hasRecentQueueOp: Bool = false,
+        lastQueueOpTs: Double? = nil,
         lastConversationTs: Double? = nil,
         entrypoint: String? = nil,
         promptSource: String? = nil,
@@ -32,7 +32,7 @@ final class JSONLSessionScannerTests: XCTestCase {
             lastAssistantStopReason: lastAssistantStopReason,
             lastAssistantTs: lastAssistantTs,
             lastAwayTs: lastAwayTs,
-            hasRecentQueueOp: hasRecentQueueOp,
+            lastQueueOpTs: lastQueueOpTs,
             lastConversationTs: lastConversationTs,
             entrypoint: entrypoint,
             promptSource: promptSource,
@@ -342,5 +342,21 @@ extension JSONLSessionScannerTests {
     // effectiveTs=min(2000,1000)=1000, age=1000 ≥ 120 → waitingStop
     func test_mtime_drift_corrected() {
         assertState(base { $0.lastAssistantStopReason = "tool_use"; $0.mtime = 2000; $0.lastConversationTs = 1000 }, now: 2000, .waitingStop)
+    }
+
+    // I1 修复：近期 queue-op（now-ts < runningWindow=120）→ running
+    // lastQueueOpTs=950, now=1000, diff=50 < 120 → recentQueueOp=true
+    // effectiveTs=min(1000, nil)=1000, age=0 < 120 → running
+    func test_recentQueueOp_within_runningWindow_isRunning() {
+        let f = base { $0.lastQueueOpTs = 950 }  // now=1000, now-950=50 < 120
+        assertState(f, now: 1000, .running)
+    }
+
+    // I1 修复：旧 queue-op（now-ts ≥ runningWindow=120）不触发 running
+    // lastQueueOpTs=800, now=1200, diff=400 ≥ 120 → recentQueueOp=false
+    // effectiveTs=min(1000, nil)=1000, age=200 ≥ 120 → waitingStop（else 分支）
+    func test_oldQueueOp_beyondRunningWindow_doesNotForceRunning() {
+        let f = base { $0.lastQueueOpTs = 800 }  // now=1200, now-800=400 ≥ 120
+        assertState(f, now: 1200, .waitingStop)
     }
 }

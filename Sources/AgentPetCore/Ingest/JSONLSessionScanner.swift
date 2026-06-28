@@ -16,7 +16,8 @@ public struct ScannedFile: Equatable {
     public var lastAssistantTs: Double?
     /// away_summary 的时间戳（nil = 无 away_summary 记录）
     public var lastAwayTs: Double?
-    public var hasRecentQueueOp: Bool
+    /// 尾部最后一条 queue-operation 的 timestamp epoch（nil = 无 queue-op）
+    public var lastQueueOpTs: Double?
     public var lastConversationTs: Double?
     public var entrypoint: String?
     public var promptSource: String?
@@ -33,7 +34,7 @@ public struct ScannedFile: Equatable {
         lastAssistantStopReason: String? = nil,
         lastAssistantTs: Double? = nil,
         lastAwayTs: Double? = nil,
-        hasRecentQueueOp: Bool = false,
+        lastQueueOpTs: Double? = nil,
         lastConversationTs: Double? = nil,
         entrypoint: String? = nil,
         promptSource: String? = nil,
@@ -49,7 +50,7 @@ public struct ScannedFile: Equatable {
         self.lastAssistantStopReason = lastAssistantStopReason
         self.lastAssistantTs = lastAssistantTs
         self.lastAwayTs = lastAwayTs
-        self.hasRecentQueueOp = hasRecentQueueOp
+        self.lastQueueOpTs = lastQueueOpTs
         self.lastConversationTs = lastConversationTs
         self.entrypoint = entrypoint
         self.promptSource = promptSource
@@ -140,6 +141,8 @@ public enum JSONLSessionScanner {
         let key = SessionKey(agent: "claude", root: f.root, sessionId: f.sessionId)
         let displayTitle = f.title ?? f.lastPrompt
 
+        // I1 修复：queue-operation 时间窗口判断（在有 now 的 scanner 侧做）
+        let recentQueueOp = f.lastQueueOpTs.map { now - $0 < runningWindow } ?? false
         let derived: ScanState
         // AI-M2: away 比较用时间戳（lastAwayTs > lastAssistantTs），非布尔
         let awayIsLatest = (f.lastAwayTs ?? -1) > (f.lastAssistantTs ?? -1)
@@ -149,11 +152,11 @@ public enum JSONLSessionScanner {
         } else if f.lastAssistantStopReason == "end_turn" || f.lastAssistantStopReason == "stop_sequence" {
             // 说完轮到你；age 已被过滤保证 < idleWindow，无需再判，直接 waitingStop
             derived = .waitingStop
-        } else if f.lastAssistantStopReason == "tool_use" || f.hasRecentQueueOp {
-            // 工具调用中：按 runningWindow 窗口区分 running / waitingStop
+        } else if f.lastAssistantStopReason == "tool_use" || recentQueueOp {
+            // 工具调用中（tool_use 或近期 queue-op），按 runningWindow 窗口区分
             derived = age < runningWindow ? .running : .waitingStop
         } else {
-            // mtime 兜底：同 tool_use 分支，按 runningWindow 区分
+            // mtime 兜底：按 runningWindow 区分
             derived = age < runningWindow ? .running : .waitingStop
         }
 

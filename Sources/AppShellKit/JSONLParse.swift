@@ -41,15 +41,19 @@ public enum JSONLParse {
         // 4. 提取字段
         let iso = ISO8601DateFormatter()
         iso.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+        // M1 修复：无小数秒（如 "2026-06-28T10:00:00Z"）兜底解析
+        let isoNoFrac = ISO8601DateFormatter()
+        isoNoFrac.formatOptions = [.withInternetDateTime]
 
         func epochFrom(_ s: String?) -> Double? {
             guard let s = s else { return nil }
-            return iso.date(from: s)?.timeIntervalSince1970
+            if let d = iso.date(from: s) { return d.timeIntervalSince1970 }
+            return isoNoFrac.date(from: s)?.timeIntervalSince1970
         }
 
         var sessionId: String? = nil
         var cwd: String? = nil
-        var hasRecentQueueOp = false
+        var lastQueueOpTs: Double? = nil
         var lastConversationTs: Double? = nil
         var lastAwayTs: Double? = nil
         var entrypoint: String? = nil      // sdk-cli 优先；否则取首个非空值
@@ -80,7 +84,10 @@ public enum JSONLParse {
             case "ai-title":
                 aiTitle = obj["aiTitle"] as? String
             case "queue-operation":
-                hasRecentQueueOp = true
+                // I1 修复：记录 ts 而非布尔，由 scanner 侧做时间窗口判断
+                if let ts = epochFrom(obj["timestamp"] as? String) {
+                    lastQueueOpTs = ts
+                }
             default:
                 break
             }
@@ -165,7 +172,7 @@ public enum JSONLParse {
             lastAssistantStopReason: lastAssistantStopReason,
             lastAssistantTs: lastAssistantTs,
             lastAwayTs: lastAwayTs,
-            hasRecentQueueOp: hasRecentQueueOp,
+            lastQueueOpTs: lastQueueOpTs,
             lastConversationTs: lastConversationTs,
             entrypoint: entrypoint,
             promptSource: promptSource,

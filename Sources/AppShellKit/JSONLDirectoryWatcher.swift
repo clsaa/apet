@@ -72,7 +72,7 @@ public final class JSONLDirectoryWatcher {
         root: String,
         now: @escaping () -> Double,
         scanner: DirectoryScanning = DefaultDirectoryScanner(),
-        parse: @escaping (String) -> ScannedFile? = { JSONLParse.parse(path: $0, root: "") },
+        parse: @escaping (String) -> ScannedFile?,
         emit: @escaping (ScanResult) -> Void,
         runningWindow: Double = 120,
         idleWindow: Double = 1800
