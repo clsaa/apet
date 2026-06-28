@@ -95,6 +95,8 @@ final class MenuBarController: NSObject {
     private var popover: NSPopover?
     /// Hosting controller retained for rootView live-updates.
     private var panelHosting: NSHostingController<PanelRootView>?
+    /// Guard: only one "无法跳转" alert at a time (prevents rapid-click alert stacking).
+    private var isShowingTapAlert = false
 
     // MARK: - Init
 
@@ -269,13 +271,17 @@ final class MenuBarController: NSObject {
             // .targetGone  — osascript ran but the session tab no longer exists.
             // .unsupported — no terminal info at all (e.g. jsonl-inferred session).
             if result == .targetGone || result == .unsupported {
-                await MainActor.run {
+                await MainActor.run { [weak self] in
+                    guard let self, !self.isShowingTapAlert else { return } // 防连击叠加阻塞弹窗（Task9 评审 Important）
+                    self.isShowingTapAlert = true
                     let alert = NSAlert()
                     alert.messageText = "无法跳转到会话"
-                    alert.informativeText = "会话窗口可能已关闭。"
+                    // .targetGone=窗口已关；.unsupported=无终端信息（如 jsonl 推断会话）。文案兼顾两者。
+                    alert.informativeText = "无法跳转到会话终端（可能已关闭，或终端信息不可用）。"
                     alert.alertStyle = .informational
                     alert.addButton(withTitle: "好的")
                     alert.runModal()
+                    self.isShowingTapAlert = false
                 }
             }
         }

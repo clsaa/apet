@@ -135,6 +135,14 @@ final class SessionRowMapperTests: XCTestCase {
         XCTAssertTrue(row.isInferred)
     }
 
+    // MARK: - TC-ROWMAP-INFER-005  jsonl + waiting(.attention) → isInferred true（防御性：当前生产不可达，守护未来）
+
+    func test_jsonl_waitingAttention_isInferred() {
+        var s = makeSession(state: .waiting(.attention))
+        s.source = .jsonl
+        XCTAssertTrue(SessionRowMapper.make(s).isInferred)
+    }
+
     // MARK: - TC-ROWMAP-INFER-002  hook + waiting(.stop) → isInferred false
 
     func test_hook_waitingStop_notInferred() {
