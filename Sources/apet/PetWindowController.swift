@@ -353,7 +353,21 @@ final class PetWindowController: NSObject {
             width: 1,
             height: 1
         )
-        p.show(relativeTo: anchor, of: contentView, preferredEdge: .maxY)
+        // 弹出后下一 runloop 校验是否真的显示——LSUIElement 背景 App 锚到刚激活的非 key
+        // 窗口偶发吞首击。未显示且有剩余次数则重试（PopoverShowPlanner），已显示则不再 show
+        // （杜绝 double-show）。最多 2 次。
+        let planner = PopoverShowPlanner()
+        func attemptShow(_ attempt: Int) {
+            p.show(relativeTo: anchor, of: contentView, preferredEdge: .maxY)
+            DispatchQueue.main.async { [weak self] in
+                guard let self, let live = self.popover, live === p else { return }
+                switch planner.planAfterOpen(isShownNow: live.isShown, attempt: attempt, maxAttempts: 2) {
+                case .ok, .giveUp: break
+                case .retry:       attemptShow(attempt + 1)
+                }
+            }
+        }
+        attemptShow(1)
     }
 }
 
@@ -383,7 +397,10 @@ private final class DragDetectorView: NSView {
 
     private var dragStartLocation: NSPoint = .zero
     private var windowOriginAtDragStart: NSPoint = .zero
-    private var hasDragged = false
+    // 累积拖动过程中两轴的最大绝对位移，交给 ClickDragClassifier 判定，
+    // 避免"拖出去又拖回原点"被误判为点击。
+    private var maxAbsDx: CGFloat = 0
+    private var maxAbsDy: CGFloat = 0
     // 8pt：4pt 太小，正常点击（尤其触控板）的微小抖动会被误判成拖动→保存位置而不弹面板（点击修复）。
     private let dragThreshold: CGFloat = 8
 
@@ -396,16 +413,16 @@ private final class DragDetectorView: NSView {
     override func mouseDown(with event: NSEvent) {
         dragStartLocation = NSEvent.mouseLocation
         windowOriginAtDragStart = window?.frame.origin ?? .zero
-        hasDragged = false
+        maxAbsDx = 0
+        maxAbsDy = 0
     }
 
     override func mouseDragged(with event: NSEvent) {
         let current = NSEvent.mouseLocation
         let dx = current.x - dragStartLocation.x
         let dy = current.y - dragStartLocation.y
-        if abs(dx) >= dragThreshold || abs(dy) >= dragThreshold {
-            hasDragged = true
-        }
+        maxAbsDx = max(maxAbsDx, abs(dx))
+        maxAbsDy = max(maxAbsDy, abs(dy))
         window?.setFrameOrigin(NSPoint(
             x: windowOriginAtDragStart.x + dx,
             y: windowOriginAtDragStart.y + dy
@@ -413,10 +430,9 @@ private final class DragDetectorView: NSView {
     }
 
     override func mouseUp(with event: NSEvent) {
-        if hasDragged {
-            onDragEnded?()
-        } else {
-            onClicked?()
+        switch ClickDragClassifier.classify(maxAbsDx: maxAbsDx, maxAbsDy: maxAbsDy, threshold: dragThreshold) {
+        case .drag:  onDragEnded?()
+        case .click: onClicked?()
         }
     }
 
