@@ -14,6 +14,9 @@ final class AppCoordinator {
     let eventsPath: String
     let logPath: String
 
+    /// apet-managed hook marker written into settings.json. 必须与 PreferencesView.hookMarker 一致。
+    static let hookMarker = "apet-1"
+
     private let configStore: ConfigStore
     private var config: AppConfig
 
@@ -126,6 +129,18 @@ final class AppCoordinator {
             mb.summaryProvider = { [weak self] in
                 (running: self?.store?.summary().runningCount ?? 0,
                  waiting: self?.store?.summary().waitingCount ?? 0)
+            }
+            // Fix 6：面板感知 hook 是否已装——任一 data root 的 settings.json 含 apet marker 即视为已启用。
+            mb.hookInstalledProvider = { [weak self] in
+                guard let self else { return false }
+                let installer = HookInstaller()
+                for root in self.config.dataRoots {
+                    let url = URL(fileURLWithPath: root.path).appendingPathComponent("settings.json")
+                    if (try? installer.isInstalled(settingsURL: url, marker: AppCoordinator.hookMarker)) == true {
+                        return true
+                    }
+                }
+                return false
             }
             menuBar = mb
             petWindow = pw
@@ -298,10 +313,9 @@ final class AppCoordinator {
                 // ⚠️ 绝不调用 notificationService.consider（jsonl 不发通知，架构-B1）
 
             case .stale:
-                // 文件消失/过期：仅 jsonl 来源的会话才打灰（hook 会话由 hook 路径或定时器管理）
-                if store.sessions[key]?.source == .jsonl {
-                    changed = !store.markStaleSession(key, now: now).isEmpty
-                }
+                // 文件消失/过期：仅 jsonl 来源的会话才打灰（hook 会话由 hook 路径或定时器管理）。
+                // Fix 4：守卫逻辑收敛到 store.markStaleSessionIfJSONL（便于单测、保证 hook 不被降级）。
+                changed = !store.markStaleSessionIfJSONL(key, now: now).isEmpty
             }
 
             // 仅在 store 真有变更时刷新 UI（避免每 8s 对未变会话空算，Task8 评审 Minor#1）

@@ -215,4 +215,51 @@ final class JSONLDirectoryWatcherTests: XCTestCase {
         let states = emitted.compactMap { stateOf($0) }
         XCTAssertEqual(states, [.stale, .running])
     }
+
+    /// Fix 3（幽灵会话对账）：round1 running → round2 文件变 .ignore(tooOld)（消失）
+    /// → 扫尾应补发一条 .stale，使曾上屏的会话被打灰。
+    /// 预期 emit 序列：[.running, .stale]
+    func test_running_then_gone_emits_stale() {
+        var emitted: [ScanResult] = []
+        var callCount = 0
+
+        let watcher = JSONLDirectoryWatcher(
+            projectsDir: "/fake",
+            root: "/r",
+            now: { 1000.0 },
+            scanner: MockScanner(paths: ["/fake/ghost.jsonl"]),
+            parse: { _ in
+                callCount += 1
+                if callCount == 1 {
+                    // tool_use fresh（age=20 < 120）→ running
+                    return makeRunningFile(sessionId: "sess-ghost")
+                } else {
+                    // 文件已极旧：effectiveTs=-1000, now=1000 → age=2000 >= idleWindow(1800)
+                    // → scan 返回 .ignore(.tooOld)，本轮不再 observe 该 key
+                    return ScannedFile(
+                        sessionId: "sess-ghost",
+                        root: "/r",
+                        cwd: "/proj",
+                        mtime: -1000.0,
+                        lastAssistantStopReason: "tool_use",
+                        lastConversationTs: -1000.0
+                    )
+                }
+            },
+            emit: { emitted.append($0) },
+            runningWindow: 120,
+            idleWindow: 1800
+        )
+
+        watcher.scanOnce() // #1: emit running
+        watcher.scanOnce() // #2: ignore(tooOld) → 扫尾对账补发 stale
+
+        let states = emitted.compactMap { stateOf($0) }
+        XCTAssertEqual(states, [.running, .stale])
+
+        // 对账后 key 应被移出 lastEmitted：再扫一次仍 tooOld，不应重复补 stale
+        watcher.scanOnce() // #3: 依旧消失，但已无基线 → 不再 emit
+        XCTAssertEqual(emitted.compactMap { stateOf($0) }, [.running, .stale],
+                       "幽灵 key 已清出基线，重复扫描不应再次补 stale")
+    }
 }

@@ -146,14 +146,21 @@ public enum JSONLSessionScanner {
         let derived: ScanState
         // AI-M2: away 比较用时间戳（lastAwayTs > lastAssistantTs），非布尔
         let awayIsLatest = (f.lastAwayTs ?? -1) > (f.lastAssistantTs ?? -1)
-        if awayIsLatest {
+        // Fix 7（真实 bug）：recentQueueOp 优先级提到最高。
+        // 近期 queue-operation 表示用户刚入队新指令，会话即将/正在继续——
+        // 即使末条 assistant 是 end_turn/stop_sequence，也应判为 running（待办未消化完），
+        // 否则会出现"刚排队就被打成 waitingStop"的误报。
+        if recentQueueOp {
+            // 近期入队：按 runningWindow 窗口区分（盖过 end_turn/stop_sequence）
+            derived = age < runningWindow ? .running : .waitingStop
+        } else if awayIsLatest {
             // 用户离开后无新 assistant 消息 → stale
             derived = .stale
         } else if f.lastAssistantStopReason == "end_turn" || f.lastAssistantStopReason == "stop_sequence" {
             // 说完轮到你；age 已被过滤保证 < idleWindow，无需再判，直接 waitingStop
             derived = .waitingStop
-        } else if f.lastAssistantStopReason == "tool_use" || recentQueueOp {
-            // 工具调用中（tool_use 或近期 queue-op），按 runningWindow 窗口区分
+        } else if f.lastAssistantStopReason == "tool_use" {
+            // 工具调用中，按 runningWindow 窗口区分
             derived = age < runningWindow ? .running : .waitingStop
         } else {
             // mtime 兜底：按 runningWindow 区分

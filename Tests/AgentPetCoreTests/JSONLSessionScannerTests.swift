@@ -359,4 +359,18 @@ extension JSONLSessionScannerTests {
         let f = base { $0.lastQueueOpTs = 800 }  // now=1200, now-800=400 ≥ 120
         assertState(f, now: 1200, .waitingStop)
     }
+
+    // Fix 7（真实 bug）：recentQueueOp 优先级高于 end_turn。
+    // end_turn + 近期 queue-op（lastQueueOpTs=now-50）→ running（入队盖过 end_turn）。
+    // mtime=1000, now=1000 → age=0 < 120 → running。
+    func test_recentQueueOp_overrides_end_turn_isRunning() {
+        let f = base { $0.lastAssistantStopReason = "end_turn"; $0.lastQueueOpTs = 950 }
+        assertState(f, now: 1000, .running)
+    }
+
+    // 对照（既有约束保持）：end_turn 无 queue-op → waitingStop（recentQueueOp=false 走 end_turn 分支）。
+    func test_end_turn_without_queueOp_stays_waitingStop() {
+        let f = base { $0.lastAssistantStopReason = "end_turn"; $0.mtime = 1000 }
+        assertState(f, now: 1010, .waitingStop)
+    }
 }

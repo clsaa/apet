@@ -41,6 +41,9 @@ final class JSONLParseTests: XCTestCase {
         XCTAssertNotNil(f.lastAwayTs)
         XCTAssertNotNil(f.lastAssistantTs)
         XCTAssertGreaterThan(f.lastAwayTs!, f.lastAssistantTs!)
+        // Fix 8：away_summary 是带 timestamp 的对话行，也应更新 lastConversationTs。
+        // 该 away 行是文件末行，故 lastConversationTs 应等于 lastAwayTs。
+        XCTAssertEqual(f.lastConversationTs!, f.lastAwayTs!)
     }
 
     /// stop_reason==null → lastAssistantStopReason==nil

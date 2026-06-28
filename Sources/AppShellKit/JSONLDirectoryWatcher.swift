@@ -92,6 +92,8 @@ public final class JSONLDirectoryWatcher {
     /// 执行一次扫描：枚举文件 → parse → scan → 滞回 → 差分 emit。
     public func scanOnce() {
         let paths = scanner.jsonlFiles(under: projectsDir)
+        // Fix 3: 记录本轮真正产生 .observe 的 key，用于扫尾对账幽灵会话。
+        var observedKeys: Set<SessionKey> = []
         for path in paths {
             guard let file = parse(path) else { continue }
 
@@ -108,6 +110,7 @@ public final class JSONLDirectoryWatcher {
                 continue
 
             case .observe(let rawState, let key, let cwd, let title):
+                observedKeys.insert(key)
                 // 滞回：running → waitingStop 需连续 ≥2 次才翻转
                 let effState: ScanState
                 if rawState == .waitingStop, lastEmitted[key] == .running {
@@ -133,6 +136,19 @@ public final class JSONLDirectoryWatcher {
                     lastEmitted[key] = effState
                 }
             }
+        }
+
+        // Fix 3（真实 bug）：幽灵会话对账。
+        // 上一轮曾 emit 过 running/waitingStop、但本轮文件已变 .ignore（如 tooOld）或消失（不再被枚举），
+        // 主动补发一条 .stale 让面板/桌宠打灰，并清出 lastEmitted（同源消失只打一次灰）。
+        let ghostKeys = lastEmitted.compactMap { (key, state) -> SessionKey? in
+            guard !observedKeys.contains(key) else { return nil }
+            return (state == .running || state == .waitingStop) ? key : nil
+        }
+        for key in ghostKeys {
+            emit(.observe(state: .stale, key: key, cwd: nil, title: nil))
+            lastEmitted.removeValue(forKey: key)
+            quietStreak.removeValue(forKey: key)
         }
     }
 

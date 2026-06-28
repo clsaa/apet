@@ -9,6 +9,9 @@ import AppShellKit
 private struct PanelRootView: View {
     let rows: [SessionRowModel]
     let petVisible: Bool
+    /// Fix 6: whether the hook is already installed for any data root.
+    /// When `true`, the panel surfaces "已启用" instead of the call-to-action button.
+    let hookInstalled: Bool
     let onTap: (String) -> Void
     let onTogglePet: () -> Void
     let onOpenPreferences: () -> Void
@@ -46,19 +49,30 @@ private struct PanelRootView: View {
             .padding(.horizontal, 10)
             .padding(.vertical, 2)
 
-            // Part D: 低调常驻增强入口——让只看面板的用户也知道有精确跳转/通知可开启。
-            Button {
-                onOpenPreferences()
-            } label: {
-                Label("开启精确跳转/通知…", systemImage: "bolt.badge.a.fill")
+            // Part D / Fix 6: 常驻增强入口。
+            // hook 已装 → 显示"已启用"状态（不再引导）；未装 → 显示可点击的开启入口。
+            if hookInstalled {
+                Label("精确跳转/通知：已启用", systemImage: "bolt.badge.a.fill")
                     .frame(maxWidth: .infinity)
                     .padding(.vertical, 2)
+                    .foregroundStyle(Color.green.opacity(0.7))
+                    .font(.caption)
+                    .padding(.horizontal, 10)
+                    .padding(.vertical, 2)
+            } else {
+                Button {
+                    onOpenPreferences()
+                } label: {
+                    Label("开启精确跳转/通知…", systemImage: "bolt.badge.a.fill")
+                        .frame(maxWidth: .infinity)
+                        .padding(.vertical, 2)
+                }
+                .buttonStyle(.plain)
+                .foregroundStyle(Color.accentColor.opacity(0.6))
+                .font(.caption)
+                .padding(.horizontal, 10)
+                .padding(.vertical, 2)
             }
-            .buttonStyle(.plain)
-            .foregroundStyle(Color.accentColor.opacity(0.6))
-            .font(.caption)
-            .padding(.horizontal, 10)
-            .padding(.vertical, 2)
 
             // 退出
             Button {
@@ -100,6 +114,9 @@ final class MenuBarController: NSObject {
     var onOpenPreferences: (() -> Void)?
     /// Returns the current running + waiting counts for the right-click menu summary row.
     var summaryProvider: (() -> (running: Int, waiting: Int))?
+    /// Fix 6: returns whether the precise-jump/notifications hook is installed for any data root.
+    /// Injected by AppCoordinator; when nil or `false`, the panel shows the call-to-action button.
+    var hookInstalledProvider: (() -> Bool)?
 
     // MARK: - State
 
@@ -178,12 +195,13 @@ final class MenuBarController: NSObject {
         return PanelRootView(
             rows: rows,
             petVisible: petVisibilityProvider?() ?? false,
+            hookInstalled: hookInstalledProvider?() ?? false,
             onTap: { [weak self] id in self?.handleSessionTap(id: id) },
             onTogglePet: { [weak self] in
                 self?.onTogglePet?()
                 // Re-render the panel so the button label flips immediately.
                 self?.panelHosting?.rootView = self?.makePanelRootView() ?? PanelRootView(
-                    rows: [], petVisible: false,
+                    rows: [], petVisible: false, hookInstalled: false,
                     onTap: { _ in }, onTogglePet: {}, onOpenPreferences: {}, onQuit: {}
                 )
             },
@@ -276,9 +294,10 @@ final class MenuBarController: NSObject {
         }) else { return }
 
         let terminal = session.terminal
-        // Part C: jsonl-inferred sessions have no terminal info at all.
+        // Part C / Fix 2: jsonl-inferred sessions are identified by their process-internal
+        // source tag (硬约束 #9：用 session.source == .jsonl 判定来源，不用 terminal == nil 当代理).
         // Capture before going off-main so we can check it in the alert block.
-        let isJsonlSession = (terminal == nil)
+        let isJsonlSession = (session.source == .jsonl)
         let fs = focusService
         // Dismiss the popover before the off-main focus attempt.
         popover?.performClose(nil)

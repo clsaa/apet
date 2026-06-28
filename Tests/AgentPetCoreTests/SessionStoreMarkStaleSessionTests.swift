@@ -125,4 +125,44 @@ final class SessionStoreMarkStaleSessionTests: XCTestCase {
         XCTAssertEqual(store.sessions[keyJson]?.state, .running, "jsonl 不被打灰")
         XCTAssertEqual(store.sessions[keyHook]?.state, .stale, "hook 正常被打灰")
     }
+
+    // MARK: - Fix 4: markStaleSessionIfJSONL 来源守卫
+
+    /// TC-MSS-FUNC-005：hook 来源会话调用 markStaleSessionIfJSONL → 返回 []，状态保持 running
+    func test_markStaleSessionIfJSONL_skips_hook_source() {
+        let store = SessionStore()
+        _ = store.apply(makeEvent(eventId: "e1", kind: .busy, source: .hook),
+                        seq: 1, now: 100, replay: false)
+        let key = SessionKey(agent: "claude", root: "/r", sessionId: "s")
+        XCTAssertEqual(store.sessions[key]?.state, .running, "前置：hook 会话为 running")
+
+        let changes = store.markStaleSessionIfJSONL(key, now: 200)
+
+        XCTAssertEqual(changes, [], "hook 来源应返回 []，不打灰")
+        XCTAssertEqual(store.sessions[key]?.state, .running, "hook 会话状态保持 running")
+    }
+
+    /// TC-MSS-FUNC-006：jsonl 来源会话调用 markStaleSessionIfJSONL → 置为 stale
+    func test_markStaleSessionIfJSONL_marks_jsonl_source() {
+        let store = SessionStore()
+        _ = store.apply(makeEvent(eventId: "e1", kind: .busy, source: .jsonl),
+                        seq: 1, now: 100, replay: false)
+        let key = SessionKey(agent: "claude", root: "/r", sessionId: "s")
+        XCTAssertEqual(store.sessions[key]?.state, .running, "前置：jsonl 会话为 running")
+
+        let changes = store.markStaleSessionIfJSONL(key, now: 200)
+
+        XCTAssertEqual(changes, [.upserted(key)], "jsonl 来源应返回 .upserted")
+        XCTAssertEqual(store.sessions[key]?.state, .stale, "jsonl 会话被打灰为 stale")
+        XCTAssertEqual(store.sessions[key]?.lastActiveAt, 200, "lastActiveAt 刷新为 now")
+    }
+
+    /// TC-MSS-PARAM-002：不存在的 key → []（无来源可判）
+    func test_markStaleSessionIfJSONL_missing_key_noop() {
+        let store = SessionStore()
+        let key = SessionKey(agent: "ghost", root: "/r", sessionId: "x")
+
+        XCTAssertEqual(store.markStaleSessionIfJSONL(key, now: 100), [],
+                       "不存在的 key 返回 []")
+    }
 }

@@ -15,6 +15,8 @@ private struct HookRowView: View {
     let hookMarker: String
     let runnerPath: String
     let onRemove: () -> Void
+    /// Fix 5：安装/卸载成功后回调，让上层刷新配置健康面板（hook 状态会变）。
+    let onChanged: () -> Void
 
     @State private var isInstalled: Bool = false
     @State private var showInstallConfirm: Bool = false
@@ -161,6 +163,7 @@ private struct HookRowView: View {
         do {
             try installer.install(into: settingsURL, runnerPath: command, marker: hookMarker)
             isInstalled = true
+            onChanged()   // Fix 5：通知上层刷新健康面板
         } catch {
             errorText = "安装失败：\(error.localizedDescription)"
         }
@@ -173,6 +176,7 @@ private struct HookRowView: View {
         do {
             try installer.uninstall(from: settingsURL, marker: hookMarker)
             isInstalled = false
+            onChanged()   // Fix 5：通知上层刷新健康面板
         } catch {
             errorText = "卸载失败：\(error.localizedDescription)"
         }
@@ -262,6 +266,10 @@ struct PreferencesView: View {
                     runnerPath: runnerPath,
                     onRemove: {
                         config.dataRoots.removeAll { $0.path == root.path }
+                    },
+                    onChanged: {
+                        // Fix 5：装/卸 hook 后重置 healthRefreshID，触发 .task(id:) 重跑健康刷新。
+                        healthRefreshID = UUID()
                     }
                 )
             }
