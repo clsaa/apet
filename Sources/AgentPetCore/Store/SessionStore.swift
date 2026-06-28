@@ -200,6 +200,21 @@ extension SessionStore {
         return changes
     }
 
+    /// 把所有 waiting 且未确认的会话一并标记已读（红→黄），聚合广播变更。用于面板"全部已读"。
+    /// 仅 .waiting 且未 acknowledged 的会话生效；无符合会话时返回 []（不广播）。
+    @discardableResult
+    public func acknowledgeAll() -> [StoreChange] {
+        var changes: [StoreChange] = []
+        for key in sessions.keys {
+            guard var session = sessions[key], case .waiting = session.state, !session.acknowledged else { continue }
+            session.acknowledged = true
+            sessions[key] = session
+            changes.append(.upserted(key))
+        }
+        if !changes.isEmpty { emit(changes, replay: false) }
+        return changes
+    }
+
     /// 已读（黄）会话超过阈值后自动转灰（闲置）。
     /// 遍历 waiting+acknowledged 会话，凡 now - lastActiveAt > readGrayAfter → 置 stale，acknowledged 重置为 false。
     /// 未超阈值、非 acknowledged、非 waiting 的会话一律 no-op。

@@ -37,6 +37,8 @@ final class PetWindowController: NSObject {
     /// 这是**不依赖状态栏图标**的首选项入口（状态栏图标可能被刘海/菜单栏溢出区藏住，
     /// 那样用户就只剩这条路）。由 AppCoordinator 注入。
     var onOpenPreferences: (() -> Void)?
+    /// 面板「全部标记已读」回调，由 AppCoordinator 注入 store.acknowledgeAll。
+    var onAcknowledgeAll: (() -> Void)?
 
     // MARK: - Dependencies
 
@@ -337,7 +339,8 @@ final class PetWindowController: NSObject {
             rows: rows,
             hotkeyHint: hotkeyHint,
             onTap: { [weak self] id in self?.handleSessionTap(id: id) },
-            onOpenPreferences: { [weak self] in self?.onOpenPreferences?() }
+            onOpenPreferences: { [weak self] in self?.onOpenPreferences?() },
+            onAcknowledgeAll: { [weak self] in self?.onAcknowledgeAll?() }
         )
         let p = NSPopover()
         p.contentViewController = panelVC
@@ -453,11 +456,25 @@ private struct PetPanelRootView: View {
     let hotkeyHint: String?
     let onTap: (String) -> Void
     let onOpenPreferences: () -> Void
+    let onAcknowledgeAll: () -> Void
 
     var body: some View {
         VStack(spacing: 0) {
             SessionPanel(rows: rows, onTap: onTap, hotkeyHint: hotkeyHint)
             Divider()
+            if !rows.isEmpty {
+                Button {
+                    onAcknowledgeAll()
+                } label: {
+                    Label("全部标记已读", systemImage: "checkmark.circle")
+                        .frame(maxWidth: .infinity)
+                        .padding(.vertical, 4)
+                }
+                .buttonStyle(.plain)
+                .foregroundStyle(.secondary)
+                .padding(.horizontal, 10)
+                .padding(.top, 4)
+            }
             Button {
                 onOpenPreferences()
             } label: {
@@ -482,25 +499,29 @@ private final class SessionPanelHostController: NSViewController {
     private let hotkeyHint: String?
     private let onTap: (String) -> Void
     private let onOpenPreferences: () -> Void
+    private let onAcknowledgeAll: () -> Void
     private var hostingController: NSHostingController<PetPanelRootView>?
 
     init(
         rows: [SessionRowModel],
         hotkeyHint: String?,
         onTap: @escaping (String) -> Void,
-        onOpenPreferences: @escaping () -> Void
+        onOpenPreferences: @escaping () -> Void,
+        onAcknowledgeAll: @escaping () -> Void
     ) {
         self.rows = rows
         self.hotkeyHint = hotkeyHint
         self.onTap = onTap
         self.onOpenPreferences = onOpenPreferences
+        self.onAcknowledgeAll = onAcknowledgeAll
         super.init(nibName: nil, bundle: nil)
     }
 
     required init?(coder: NSCoder) { fatalError("init(coder:) not supported") }
 
     private func makeRoot() -> PetPanelRootView {
-        PetPanelRootView(rows: rows, hotkeyHint: hotkeyHint, onTap: onTap, onOpenPreferences: onOpenPreferences)
+        PetPanelRootView(rows: rows, hotkeyHint: hotkeyHint, onTap: onTap,
+                         onOpenPreferences: onOpenPreferences, onAcknowledgeAll: onAcknowledgeAll)
     }
 
     override func loadView() {

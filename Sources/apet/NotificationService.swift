@@ -27,6 +27,8 @@ final class NotificationService: NSObject {
     /// Returns the current DND window; called on `@MainActor` inside `consider`.
     /// Defaults to a disabled window so the service is a drop-in replacement for existing callers.
     private let dndProvider: () -> DNDWindow
+    /// 点击通知时把对应会话标记已读（红→黄）。默认空，由 AppCoordinator 注入 store.acknowledge。
+    private let onAcknowledge: (SessionKey) -> Void
 
     // MARK: - Init
 
@@ -34,12 +36,14 @@ final class NotificationService: NSObject {
         cooldown: Double = 60.0,
         focusService: TerminalFocusService,
         sessionLookup: @escaping (SessionKey) -> Session?,
-        dndProvider: @escaping () -> DNDWindow = { DNDWindow(enabled: false, startMin: 0, endMin: 0) }
+        dndProvider: @escaping () -> DNDWindow = { DNDWindow(enabled: false, startMin: 0, endMin: 0) },
+        onAcknowledge: @escaping (SessionKey) -> Void = { _ in }
     ) {
         self.gate = NotificationGate(cooldown: cooldown)
         self.focusService = focusService
         self.sessionLookup = sessionLookup
         self.dndProvider = dndProvider
+        self.onAcknowledge = onAcknowledge
         super.init()
     }
 
@@ -161,24 +165,30 @@ extension NotificationService: UNUserNotificationCenterDelegate {
         didReceive response: UNNotificationResponse,
         withCompletionHandler completionHandler: @escaping () -> Void
     ) {
-        let userInfo = response.notification.request.content.userInfo
-        guard
-            let agent     = userInfo["agent"]     as? String,
-            let root      = userInfo["root"]      as? String,
-            let sessionId = userInfo["sessionId"] as? String
-        else {
+        let rawInfo = response.notification.request.content.userInfo
+        let stringInfo = rawInfo as? [String: Any] ?? [:]
+        // 纯函数决策（可单测）：合法 userInfo → [.acknowledge(key), .focus(key)]；缺字段 → []。
+        let actions = NotificationClickResolver.resolve(userInfo: stringInfo)
+        guard !actions.isEmpty else {
             completionHandler()
             return
         }
-        let key = SessionKey(agent: agent, root: root, sessionId: sessionId)
 
         // Hop to MainActor to access @MainActor-isolated state, then hop OFF for the blocking
         // osascript call so we never stall the main thread (Fix I-1).
         Task { @MainActor in
-            let terminal = self.sessionLookup(key)?.terminal
-            let fs = self.focusService
-            Task.detached {
-                _ = fs.focus(terminal)
+            for action in actions {
+                switch action {
+                case .acknowledge(let key):
+                    // B1：看完通知即标记已读（红→黄），与点列表/全部已读路径一致。
+                    self.onAcknowledge(key)
+                case .focus(let key):
+                    let terminal = self.sessionLookup(key)?.terminal
+                    let fs = self.focusService
+                    Task.detached {
+                        _ = fs.focus(terminal)
+                    }
+                }
             }
             completionHandler()
         }
