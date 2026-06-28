@@ -84,15 +84,18 @@ final class PetStateTests: XCTestCase {
 
     // MARK: - H3-7: PetSummary.badgeCount
 
-    /// 1 running + 1 waiting(.attention) → badgeCount == attentionCount == 1
-    func test_badgeCount_prefers_attention_over_waiting() {
+    /// 1 running + 1 waiting(.stop) + 1 waiting(.attention)，ack=0 → badgeCount == waitingCount - ack == 2
+    /// MINOR-2: 新公式 max(0, waitingCount - acknowledgedCount)；已读后角标随之下降
+    func test_badgeCount_equals_unread_waiting() {
         let s = SessionStore()
         push(s, "E1", .sessionStart, sid: "A", seq: 1)   // running
         push(s, "E2", .stop,         sid: "B", seq: 2)   // waiting(.stop)
         push(s, "E3", .attention,    sid: "C", seq: 3)   // waiting(.attention)
         let sum = s.summary()
         XCTAssertEqual(sum.attentionCount, 1)
-        XCTAssertEqual(sum.badgeCount, 1)
+        XCTAssertEqual(sum.waitingCount, 2)
+        XCTAssertEqual(sum.acknowledgedCount, 0)
+        XCTAssertEqual(sum.badgeCount, 2, "未读 waiting 数 = waitingCount - acknowledgedCount")
     }
 
     /// 1 running + 2 waiting(.stop) → badgeCount == waitingCount == 2（无 attention）

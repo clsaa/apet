@@ -40,14 +40,14 @@ final class MenuBarPresenterTests: XCTestCase {
         XCTAssertNil(p.badge)
     }
 
-    /// busy, 1 running + 2 waiting (1 attention) → .green, badge = "1" (badgeCount = attentionCount)
-    func testBusyWithAttentionWaitingGivesBadgeEqualToAttentionCount() {
-        // badgeCount = attentionCount (1) because attention > 0
+    /// busy, 1 running + 2 waiting(含 1 attention)，ack=0 → .green, badge = "2" (badgeCount = waiting - ack = 2)
+    func testBusyWithAttentionWaitingGivesBadgeEqualToUnreadWaiting() {
+        // MINOR-2: badgeCount = max(0, waitingCount - acknowledgedCount) = max(0, 2 - 0) = 2
         let p = MenuBarPresenter.make(from: summary(
             state: .busy, running: 1, waiting: 2, attention: 1))
         XCTAssertEqual(p.symbolName, "pawprint.fill")
         XCTAssertEqual(p.tint, .green)
-        XCTAssertEqual(p.badge, "1")
+        XCTAssertEqual(p.badge, "2")
     }
 
     /// calling, attentionCount 1 → "pawprint.fill", .orange, badge = "1"

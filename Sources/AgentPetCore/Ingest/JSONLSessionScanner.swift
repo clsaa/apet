@@ -163,8 +163,13 @@ public enum JSONLSessionScanner {
             // 工具调用中，按 runningWindow 窗口区分
             derived = age < runningWindow ? .running : .waitingStop
         } else {
-            // mtime 兜底：按 runningWindow 区分
-            derived = age < runningWindow ? .running : .waitingStop
+            // mtime 兜底：若从未有过 assistant 回合（刚启动、等用户第一条输入）→ stale
+            // 有过 assistant 回合但无明确 stop_reason → 按 runningWindow 区分
+            if f.lastAssistantTs == nil {
+                derived = .stale
+            } else {
+                derived = age < runningWindow ? .running : .waitingStop
+            }
         }
 
         return .observe(state: derived, key: key, cwd: f.cwd, title: displayTitle)

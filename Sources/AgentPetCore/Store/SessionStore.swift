@@ -69,6 +69,8 @@ public final class SessionStore {
         let stateChanged = newState2 != session.state
 
         session.state = newState2
+        // 会话重新活跃（变 running）→ 已读失效，回到正常循环（红→黄态清除）。
+        if newState2 == .running { session.acknowledged = false }
         session.lastSeq = seq
         session.lastActiveAt = now
         sessions[key] = session
@@ -176,9 +178,44 @@ extension SessionStore {
         case .running, .waiting: break
         }
         session.state = .stale
+        session.acknowledged = false   // MAJOR-1: 清除 acknowledged，防止幽灵已读态
         session.lastActiveAt = now
         sessions[key] = session
         let changes: [StoreChange] = [.upserted(key)]
+        emit(changes, replay: false)
+        return changes
+    }
+
+    /// 把指定 waiting（停下等你/完成）会话标记为"已读"（红→黄）。
+    /// 仅当 state 为 .waiting(...) 时生效：置 acknowledged=true、广播 .upserted、返回变更；
+    /// running/stale/ended/不存在一律 no-op 返回 []。用于用户从面板点开会话跳转终端后。
+    @discardableResult
+    public func acknowledge(key: SessionKey) -> [StoreChange] {
+        guard var session = sessions[key] else { return [] }
+        guard case .waiting = session.state else { return [] }
+        session.acknowledged = true
+        sessions[key] = session
+        let changes: [StoreChange] = [.upserted(key)]
+        emit(changes, replay: false)
+        return changes
+    }
+
+    /// 已读（黄）会话超过阈值后自动转灰（闲置）。
+    /// 遍历 waiting+acknowledged 会话，凡 now - lastActiveAt > readGrayAfter → 置 stale，acknowledged 重置为 false。
+    /// 未超阈值、非 acknowledged、非 waiting 的会话一律 no-op。
+    @discardableResult
+    public func ageReadToStale(now: Double, readGrayAfter: Double) -> [StoreChange] {
+        var changes: [StoreChange] = []
+        for (key, var session) in sessions {
+            guard case .waiting = session.state, session.acknowledged else { continue }
+            if now - session.lastActiveAt > readGrayAfter {
+                session.state = .stale
+                session.acknowledged = false
+                session.lastActiveAt = now   // MINOR-4: 刷新时间戳，避免会话立即被 reap 淘汰
+                sessions[key] = session
+                changes.append(.upserted(key))
+            }
+        }
         emit(changes, replay: false)
         return changes
     }
@@ -207,17 +244,21 @@ extension SessionStore {
     }
 
     public func summary() -> PetSummary {
-        var running = 0, waiting = 0, attention = 0, stale = 0
+        var running = 0, waiting = 0, attention = 0, stale = 0, acknowledged = 0
         for s in sessions.values {
             switch s.state {
             case .running: running += 1
-            case .waiting(let r): waiting += 1; if r == .attention { attention += 1 }
+            case .waiting(let r):
+                waiting += 1
+                if r == .attention { attention += 1 }
+                if s.acknowledged { acknowledged += 1 }
             case .stale: stale += 1
             case .ended: break
             }
         }
         let state: PetState = running > 0 ? .busy : (waiting > 0 ? .calling : .idle)
         return PetSummary(state: state, runningCount: running, waitingCount: waiting,
-                          attentionCount: attention, staleCount: stale)
+                          attentionCount: attention, staleCount: stale,
+                          acknowledgedCount: acknowledged)
     }
 }

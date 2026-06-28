@@ -153,10 +153,10 @@ final class JSONLSessionScannerTests: XCTestCase {
         let now: Double = 1_001_799
         let f = makeFile(mtime: 1_000_000) // age = 1799 < 1800
         // age < idleWindow 且无 subagent/synthetic/blacklist → observe
-        // 无 stopReason, age=1799 ≥ runningWindow(120) → waitingStop（mtime 兜底分支）
+        // 无 stopReason, 无 lastAssistantTs → else 兜底 → stale（精修 1：刚启动无 assistant 回合）
         XCTAssertEqual(
             JSONLSessionScanner.scan(f, now: now, idleWindow: 1800),
-            .observe(state: .waitingStop,
+            .observe(state: .stale,
                      key: SessionKey(agent: "claude", root: "/Users/x/.claude", sessionId: "sess-1"),
                      cwd: "/Users/x/project", title: "My Session")
         )
@@ -199,11 +199,11 @@ final class JSONLSessionScannerTests: XCTestCase {
     func test_effectiveTs_nilLastConversationTs_fallsBackToMtime() {
         let now: Double = 1_001_799
         // lastConversationTs=nil → effectiveTs=mtime=1_000_000 → age=1799 < 1800 → observe
-        // 无 stopReason, age=1799 ≥ runningWindow(120) → waitingStop（mtime 兜底分支）
+        // 无 stopReason, 无 lastAssistantTs → else 兜底 → stale（精修 1：刚启动无 assistant 回合）
         let f = makeFile(mtime: 1_000_000, lastConversationTs: nil)
         XCTAssertEqual(
             JSONLSessionScanner.scan(f, now: now, idleWindow: 1800),
-            .observe(state: .waitingStop,
+            .observe(state: .stale,
                      key: SessionKey(agent: "claude", root: "/Users/x/.claude", sessionId: "sess-1"),
                      cwd: "/Users/x/project", title: "My Session")
         )
@@ -217,8 +217,8 @@ final class JSONLSessionScannerTests: XCTestCase {
         guard case .observe(let state, let key, _, _) = result else {
             return XCTFail("Expected .observe, got \(result)")
         }
-        // age=60 < runningWindow(120), 无 stopReason → mtime 兜底 → running
-        XCTAssertEqual(state, .running)
+        // 无 stopReason, 无 lastAssistantTs → else 兜底 → stale（精修 1：刚启动无 assistant 回合）
+        XCTAssertEqual(state, .stale)
         XCTAssertEqual(key, SessionKey(agent: "claude", root: "/Users/x/.claude", sessionId: "abc-123"))
     }
 
@@ -264,8 +264,8 @@ final class JSONLSessionScannerTests: XCTestCase {
         guard case .observe(let state, _, _, _) = result else {
             return XCTFail("Expected .observe")
         }
-        // Task 5: 真实派生——无 stopReason, age=60 < runningWindow(120) → mtime 兜底 → running
-        XCTAssertEqual(state, .running)
+        // 精修 1：无 stopReason, 无 lastAssistantTs → else 兜底 → stale（刚启动无 assistant 回合）
+        XCTAssertEqual(state, .stale)
     }
 }
 
@@ -354,10 +354,10 @@ extension JSONLSessionScannerTests {
 
     // I1 修复：旧 queue-op（now-ts ≥ runningWindow=120）不触发 running
     // lastQueueOpTs=800, now=1200, diff=400 ≥ 120 → recentQueueOp=false
-    // effectiveTs=min(1000, nil)=1000, age=200 ≥ 120 → waitingStop（else 分支）
+    // 无 stopReason, 无 lastAssistantTs → else 兜底 → stale（精修 1：刚启动无 assistant 回合）
     func test_oldQueueOp_beyondRunningWindow_doesNotForceRunning() {
         let f = base { $0.lastQueueOpTs = 800 }  // now=1200, now-800=400 ≥ 120
-        assertState(f, now: 1200, .waitingStop)
+        assertState(f, now: 1200, .stale)
     }
 
     // Fix 7（真实 bug）：recentQueueOp 优先级高于 end_turn。
@@ -372,5 +372,20 @@ extension JSONLSessionScannerTests {
     func test_end_turn_without_queueOp_stays_waitingStop() {
         let f = base { $0.lastAssistantStopReason = "end_turn"; $0.mtime = 1000 }
         assertState(f, now: 1010, .waitingStop)
+    }
+
+    // 精修 1（新增）：刚启动、mtime 新鲜、无任何 assistant 回合 → stale（不绿）。
+    // 场景：Claude Code 新开、等用户第一条输入。mtime=now、无 stopReason、无 lastAssistantTs。
+    func test_freshLaunch_noAssistantTurn_isStale() {
+        let now: Double = 1_000_060
+        // age=60 < runningWindow(120)，文件很新，但从未产生 assistant 回合
+        let f = makeFile(mtime: 1_000_000)  // lastAssistantTs 默认 nil
+        XCTAssertEqual(
+            JSONLSessionScanner.scan(f, now: now),
+            .observe(state: .stale,
+                     key: SessionKey(agent: "claude", root: "/Users/x/.claude", sessionId: "sess-1"),
+                     cwd: "/Users/x/project", title: "My Session"),
+            "刚启动无 assistant 回合应为 stale，不应误判为 running"
+        )
     }
 }

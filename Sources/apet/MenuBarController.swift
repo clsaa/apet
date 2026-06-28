@@ -117,6 +117,8 @@ final class MenuBarController: NSObject {
     /// Fix 6: returns whether the precise-jump/notifications hook is installed for any data root.
     /// Injected by AppCoordinator; when nil or `false`, the panel shows the call-to-action button.
     var hookInstalledProvider: (() -> Bool)?
+    /// 用户点开一个会话（跳转终端）后回调，AppCoordinator 据此把会话标记为"已读"（红→黄）。
+    var onAcknowledge: ((SessionKey) -> Void)?
 
     // MARK: - State
 
@@ -292,6 +294,9 @@ final class MenuBarController: NSObject {
         guard let session = currentSessions.first(where: {
             "\($0.key.agent)|\($0.key.root)|\($0.key.sessionId)" == id
         }) else { return }
+
+        // 用户点开会话 → 标记已读（红→黄）。仅对 waiting 态生效（acknowledge 内部守卫）。
+        onAcknowledge?(session.key)
 
         let terminal = session.terminal
         // Part C / Fix 2: jsonl-inferred sessions are identified by their process-internal
