@@ -137,6 +137,16 @@ final class AppCoordinator {
             }
             // Activate the app once so AppKit delivers window-order events properly.
             NSApp.activate(ignoringOtherApps: true)
+
+            // ── 首启引导（just-in-time，非 headless 模式专属）──────────────────────
+            // 用 UserDefaults 持久化"已展示"标志，避免 AppConfig 改动；
+            // key 固定为 "apet.onboardingShown" 便于测试环境重置。
+            let onboardingKey = "apet.onboardingShown"
+            let onboardingShown = UserDefaults.standard.bool(forKey: onboardingKey)
+            OnboardingWindow.showIfFirstRun(onboardingShown: onboardingShown) {
+                UserDefaults.standard.set(true, forKey: onboardingKey)
+            }
+            // ──────────────────────────────────────────────────────────────────────
         }
 
         // 3. Register change handler: log every store mutation + refresh menu bar

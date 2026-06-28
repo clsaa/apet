@@ -161,6 +161,38 @@ public struct HookInstaller {
         return "env AGENTPET_OUT=\(q(eventsPath)) AGENTPET_ROOT=\(q(rootPath)) \(q(scriptPath))"
     }
 
+    // MARK: - Preview builder
+
+    /// Returns a human-readable preview of the hook entries that *would* be written into
+    /// `settings.json` — without touching any file.
+    ///
+    /// The preview includes:
+    /// - The script filename (last path component of `scriptPath`)
+    /// - The full shell command string
+    /// - All six hook event names that apet installs into
+    ///
+    /// This is a pure function: it has no side effects and writes nothing to disk.
+    ///
+    /// - Parameters:
+    ///   - scriptPath: Absolute path to `apet-emit-event.sh`.
+    ///   - eventsPath: Absolute path to the events NDJSON file.
+    ///   - rootPath:   Absolute path to the data root (Claude profile directory).
+    /// - Returns: A multi-line UTF-8 string suitable for display in a confirmation UI.
+    public static func previewLines(scriptPath: String, eventsPath: String, rootPath: String) -> String {
+        let command = hookCommand(scriptPath: scriptPath, eventsPath: eventsPath, rootPath: rootPath)
+        let scriptName = URL(fileURLWithPath: scriptPath).lastPathComponent
+        var lines: [String] = [
+            "Hook 预览（\(scriptName)）：",
+            "命令：\(command)",
+            "",
+            "将挂载到以下事件：",
+        ]
+        for event in hookEvents {
+            lines.append("  • \(event)")
+        }
+        return lines.joined(separator: "\n")
+    }
+
     // MARK: - Private helpers
 
     /// Reads and deserialises the JSON file at `url` as a top-level dictionary.
