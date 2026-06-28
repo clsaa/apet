@@ -400,12 +400,10 @@ private final class DragDetectorView: NSView {
 
     private var dragStartLocation: NSPoint = .zero
     private var windowOriginAtDragStart: NSPoint = .zero
-    // 累积拖动过程中两轴的最大绝对位移，交给 ClickDragClassifier 判定，
-    // 避免"拖出去又拖回原点"被误判为点击。
-    private var maxAbsDx: CGFloat = 0
-    private var maxAbsDy: CGFloat = 0
+    // 累积两轴最大绝对位移并判定点击/拖动（纯逻辑下沉 AgentPetCore，可单测）。
+    private var dragAccumulator = DragAccumulator()
     // 8pt：4pt 太小，正常点击（尤其触控板）的微小抖动会被误判成拖动→保存位置而不弹面板（点击修复）。
-    private let dragThreshold: CGFloat = 8
+    private let dragThreshold: Double = 8
 
     override init(frame: NSRect) {
         super.init(frame: frame)
@@ -416,16 +414,14 @@ private final class DragDetectorView: NSView {
     override func mouseDown(with event: NSEvent) {
         dragStartLocation = NSEvent.mouseLocation
         windowOriginAtDragStart = window?.frame.origin ?? .zero
-        maxAbsDx = 0
-        maxAbsDy = 0
+        dragAccumulator.reset()
     }
 
     override func mouseDragged(with event: NSEvent) {
         let current = NSEvent.mouseLocation
         let dx = current.x - dragStartLocation.x
         let dy = current.y - dragStartLocation.y
-        maxAbsDx = max(maxAbsDx, abs(dx))
-        maxAbsDy = max(maxAbsDy, abs(dy))
+        dragAccumulator.accumulate(dx: Double(dx), dy: Double(dy))
         window?.setFrameOrigin(NSPoint(
             x: windowOriginAtDragStart.x + dx,
             y: windowOriginAtDragStart.y + dy
@@ -433,7 +429,7 @@ private final class DragDetectorView: NSView {
     }
 
     override func mouseUp(with event: NSEvent) {
-        switch ClickDragClassifier.classify(maxAbsDx: maxAbsDx, maxAbsDy: maxAbsDy, threshold: dragThreshold) {
+        switch dragAccumulator.gesture(threshold: dragThreshold) {
         case .drag:  onDragEnded?()
         case .click: onClicked?()
         }

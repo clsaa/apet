@@ -9,7 +9,9 @@ public enum SessionAction: Equatable {
 }
 
 public enum NotificationClickResolver {
-    public static func resolve(userInfo: [String: Any]) -> [SessionAction] {
+    /// 接收 `[AnyHashable: Any]`（UNNotification.userInfo 的真实类型），内部按 String 键取值——
+    /// 把"`[AnyHashable:Any]→[String:Any]` 转型"这一步纳入可测范围（架构评审 M-1）。
+    public static func resolve(userInfo: [AnyHashable: Any]) -> [SessionAction] {
         guard let agent = userInfo["agent"] as? String,
               let root = userInfo["root"] as? String,
               let sessionId = userInfo["sessionId"] as? String else { return [] }

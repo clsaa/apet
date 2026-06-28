@@ -15,4 +15,12 @@ final class PopoverShowPlannerTests: XCTestCase {
     func test_planAfterOpen_giveUp_whenAttemptsExhausted() {
         XCTAssertEqual(planner.planAfterOpen(isShownNow: false, attempt: 2, maxAttempts: 2), .giveUp)
     }
+    // TC-B2-FUNC-08 已显示压倒次数耗尽：isShown 优先于 giveUp
+    func test_planAfterOpen_ok_whenShownEvenIfAttemptsExhausted() {
+        XCTAssertEqual(planner.planAfterOpen(isShownNow: true, attempt: 2, maxAttempts: 2), .ok)
+    }
+    // TC-B2-ERR-09 attempt 越界仍 giveUp，不重试
+    func test_planAfterOpen_giveUp_whenAttemptBeyondMax() {
+        XCTAssertEqual(planner.planAfterOpen(isShownNow: false, attempt: 3, maxAttempts: 2), .giveUp)
+    }
 }

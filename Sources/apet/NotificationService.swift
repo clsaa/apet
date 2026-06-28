@@ -166,9 +166,8 @@ extension NotificationService: UNUserNotificationCenterDelegate {
         withCompletionHandler completionHandler: @escaping () -> Void
     ) {
         let rawInfo = response.notification.request.content.userInfo
-        let stringInfo = rawInfo as? [String: Any] ?? [:]
         // 纯函数决策（可单测）：合法 userInfo → [.acknowledge(key), .focus(key)]；缺字段 → []。
-        let actions = NotificationClickResolver.resolve(userInfo: stringInfo)
+        let actions = NotificationClickResolver.resolve(userInfo: rawInfo)
         guard !actions.isEmpty else {
             completionHandler()
             return
