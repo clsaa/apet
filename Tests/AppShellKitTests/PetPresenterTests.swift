@@ -133,4 +133,27 @@ final class PetPresenterTests: XCTestCase {
         XCTAssertEqual(p.readCount, 2)
         XCTAssertEqual(p.doneCount, 0)
     }
+
+    // MARK: - 精修 2：idleCount 等于 staleCount
+
+    /// idleCount == staleCount；即便为 0 也有值
+    func test_idleCount_equalsStaleCount() {
+        let p = PetPresenter.make(from: PetSummary(
+            state: .idle, runningCount: 0, waitingCount: 0, attentionCount: 0, staleCount: 3))
+        XCTAssertEqual(p.idleCount, 3, "idleCount 应等于 staleCount")
+    }
+
+    /// staleCount==0 时 idleCount==0
+    func test_idleCount_zeroWhenNoStale() {
+        let p = PetPresenter.make(from: PetSummary(
+            state: .busy, runningCount: 1, waitingCount: 0, attentionCount: 0, staleCount: 0))
+        XCTAssertEqual(p.idleCount, 0)
+    }
+
+    /// busy 状态下 idleCount 仍正确传递
+    func test_idleCount_propagatedInBusyState() {
+        let p = PetPresenter.make(from: PetSummary(
+            state: .busy, runningCount: 2, waitingCount: 1, attentionCount: 0, staleCount: 5))
+        XCTAssertEqual(p.idleCount, 5)
+    }
 }

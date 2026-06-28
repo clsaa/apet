@@ -19,9 +19,11 @@ public struct PetPresentation: Equatable {
     public let doneCount: Int
     /// "已读"会话数（黄点）= acknowledgedCount，即便为 0。
     public let readCount: Int
+    /// "闲置"会话数（灰点）= staleCount，即便为 0。
+    public let idleCount: Int
 
     public init(assetState: String, badge: String?, bubble: String?, emphasize: Bool,
-                runningCount: Int = 0, doneCount: Int = 0, readCount: Int = 0) {
+                runningCount: Int = 0, doneCount: Int = 0, readCount: Int = 0, idleCount: Int = 0) {
         self.assetState = assetState
         self.badge = badge
         self.bubble = bubble
@@ -29,6 +31,7 @@ public struct PetPresentation: Equatable {
         self.runningCount = runningCount
         self.doneCount = doneCount
         self.readCount = readCount
+        self.idleCount = idleCount
     }
 }
 
@@ -46,6 +49,7 @@ public enum PetPresenter {
         let running = summary.runningCount
         let read = summary.acknowledgedCount
         let done = summary.waitingCount + summary.attentionCount - summary.acknowledgedCount
+        let idle = summary.staleCount
 
         switch summary.state {
         case .idle:
@@ -56,7 +60,8 @@ public enum PetPresenter {
                 emphasize: false,
                 runningCount: running,
                 doneCount: done,
-                readCount: read
+                readCount: read,
+                idleCount: idle
             )
         case .busy:
             return PetPresentation(
@@ -66,7 +71,8 @@ public enum PetPresenter {
                 emphasize: emphasize,
                 runningCount: running,
                 doneCount: done,
-                readCount: read
+                readCount: read,
+                idleCount: idle
             )
         case .calling:
             let bubble = "\(summary.badgeCount) 个等你"
@@ -77,7 +83,8 @@ public enum PetPresenter {
                 emphasize: emphasize,
                 runningCount: running,
                 doneCount: done,
-                readCount: read
+                readCount: read,
+                idleCount: idle
             )
         }
     }
