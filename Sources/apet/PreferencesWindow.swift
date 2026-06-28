@@ -3,6 +3,16 @@ import SwiftUI
 import AppShellKit
 import UserNotifications
 
+// MARK: - Notification names
+
+extension Notification.Name {
+    /// Posted by ``PreferencesWindowController/refreshConfig(_:)`` when the
+    /// selected pet changes from outside (e.g. after ``applyPetClosure`` fires in AppCoordinator).
+    /// ``PreferencesView`` observes this to update only `config.selectedPet` in-place,
+    /// preserving other unsaved @State edits (MAJOR-1 fix).
+    static let apetSelectedPetChanged = Notification.Name("apet.selectedPetChanged")
+}
+
 // MARK: - HookRowView
 
 /// Per-data-root hook install/uninstall row with gated confirmation.
@@ -39,9 +49,21 @@ private struct HookRowView: View {
                         .font(.system(.body, design: .monospaced))
                         .lineLimit(1)
                         .truncationMode(.middle)
-                    Text(root.agent)
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
+                    HStack(spacing: 4) {
+                        Text(root.agent)
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                        // MAJOR-2: 显示「自动发现」徽标，让用户知道此根是 apet 自动加入的
+                        if root.isAutoDiscovered {
+                            Text("自动发现")
+                                .font(.caption2)
+                                .padding(.horizontal, 4)
+                                .padding(.vertical, 1)
+                                .background(Color.accentColor.opacity(0.15))
+                                .foregroundStyle(Color.accentColor)
+                                .cornerRadius(3)
+                        }
+                    }
                 }
                 Spacer(minLength: 8)
                 Button(action: onRemove) {
@@ -266,7 +288,7 @@ struct PreferencesView: View {
 
     /// apet-managed hook marker written into settings.json. Never change once shipped
     /// (it is the key used to identify and cleanly remove apet entries).
-    private let hookMarker = "apet-1"
+    private let hookMarker = HookConstants.marker   // 单一事实源（M2-E）
 
     /// Path to the hook runner script installed inside the app bundle.
     private var runnerPath: String {
@@ -278,9 +300,18 @@ struct PreferencesView: View {
     @State private var newRootPath = ""
     @State private var saveError: String?
 
+    // MARK: - 宠物上传控制器（可选；headless / 测试时为 nil）
+    private let uploadController: PetUploadController?
+    private let customStore: CustomPetStore?
+
     // MARK: - 快捷键录制状态
     @State private var isRecordingHotKey = false
     @StateObject private var hotKeyRecorder = HotKeyRecorder()
+
+    // MARK: - 免打扰预设选择
+    /// 当前选中的免打扰预设（"lateNight" / "work" / "custom"）。
+    /// 独立于 config 值存储，避免"自定义→预设"来回跳动时丢失自定义值。
+    @State private var dndPreset: String
 
     // MARK: - Health panel state (Part B)
     @State private var notifStatusForHealth: NotificationStatus = .notDetermined
@@ -290,10 +321,24 @@ struct PreferencesView: View {
     /// Changing this UUID forces `.task(id:)` to re-run `refreshHealthStatus`.
     @State private var healthRefreshID = UUID()
 
-    init(config: AppConfig, configStore: ConfigStore, onSave: @escaping (AppConfig) -> Void) {
+    init(
+        config: AppConfig,
+        configStore: ConfigStore,
+        onSave: @escaping (AppConfig) -> Void,
+        uploadController: PetUploadController? = nil,
+        customStore: CustomPetStore? = nil
+    ) {
         _config = State(initialValue: config)
         self.configStore = configStore
         self.onSave = onSave
+        self.uploadController = uploadController
+        self.customStore = customStore
+        // Derive the initial preset tag from saved config values.
+        let initPreset: String
+        if config.dndStartMin == 1380 && config.dndEndMin == 420 { initPreset = "lateNight" }
+        else if config.dndStartMin == 540 && config.dndEndMin == 1080 { initPreset = "work" }
+        else { initPreset = "custom" }
+        _dndPreset = State(initialValue: initPreset)
     }
 
     var body: some View {
@@ -322,6 +367,15 @@ struct PreferencesView: View {
             // 离开时若还在录制状态，自动停止，避免 monitor 泄漏
             hotKeyRecorder.stop()
         }
+        // MAJOR-1: 当 applyPetClosure 从外部（首选项之外）改变宠物时，
+        // 更新 @State config.selectedPet，防止旧快照在"保存"时覆盖新选择的宠物。
+        // 只更新 selectedPet 字段，保留其他正在编辑中的设置。
+        .onReceive(
+            NotificationCenter.default.publisher(for: .apetSelectedPetChanged)
+        ) { note in
+            guard let pet = note.userInfo?["selectedPet"] as? String else { return }
+            config.selectedPet = pet
+        }
     }
 
     // MARK: - Sections
@@ -342,7 +396,11 @@ struct PreferencesView: View {
                     hookMarker: hookMarker,
                     runnerPath: runnerPath,
                     onRemove: {
+                        // 移除数据根：同时加入 excludedRoots 防止自动发现再次加入（M2-B）。
                         config.dataRoots.removeAll { $0.path == root.path }
+                        if !config.excludedRoots.contains(root.path) {
+                            config.excludedRoots.append(root.path)
+                        }
                     },
                     onChanged: {
                         // Fix 5：装/卸 hook 后重置 healthRefreshID，触发 .task(id:) 重跑健康刷新。
@@ -390,11 +448,61 @@ struct PreferencesView: View {
                     .font(.subheadline)
                     .foregroundStyle(.secondary)
                 Picker("通知模式", selection: $config.notifyMode) {
-                    Text("仅等待关注时提醒").tag("attentionOnly")
-                    Text("每次会话完成都提醒").tag("everyStop")
+                    Text("需关注才响").tag("attentionOnly")
+                    Text("每轮结束都响").tag("everyStop")
                 }
                 .pickerStyle(.segmented)
                 .labelsHidden()
+            }
+
+            // ── 免打扰 ───────────────────────────────────────────────────────
+            VStack(alignment: .leading, spacing: 8) {
+                Text("免打扰")
+                    .font(.subheadline)
+                    .foregroundStyle(.secondary)
+
+                Toggle("开启免打扰（静音时段内不弹 OS 通知）", isOn: $config.dndEnabled)
+
+                if config.dndEnabled {
+                    // 时段预设
+                    Picker("时段预设", selection: $dndPreset) {
+                        Text("深夜 23:00–07:00").tag("lateNight")
+                        Text("工作 09:00–18:00").tag("work")
+                        Text("自定义").tag("custom")
+                    }
+                    .pickerStyle(.segmented)
+                    .labelsHidden()
+                    .onChange(of: dndPreset, perform: { preset in
+                        switch preset {
+                        case "lateNight": config.dndStartMin = 1380; config.dndEndMin = 420
+                        case "work":      config.dndStartMin = 540;  config.dndEndMin = 1080
+                        default:          break   // custom: keep current values
+                        }
+                    })
+
+                    // 自定义起止时分（仅在"自定义"时展开）
+                    if dndPreset == "custom" {
+                        dndTimePicker(
+                            label: "开始",
+                            totalMin: Binding(
+                                get: { config.dndStartMin },
+                                set: { config.dndStartMin = $0 }
+                            )
+                        )
+                        dndTimePicker(
+                            label: "结束",
+                            totalMin: Binding(
+                                get: { config.dndEndMin },
+                                set: { config.dndEndMin = $0 }
+                            )
+                        )
+                    }
+
+                    // 动态说明文字：跨午夜 vs 当天
+                    Text(Self.dndHintText(startMin: config.dndStartMin, endMin: config.dndEndMin))
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
             }
 
             // ── 呼出面板快捷键 ───────────────────────────────────────────────
@@ -498,17 +606,164 @@ struct PreferencesView: View {
         }
     }
 
+    // MARK: - DND helpers
+
+    /// Format total minutes-since-midnight as "HH:mm".
+    private static func formatMinutes(_ m: Int) -> String {
+        String(format: "%02d:%02d", m / 60, m % 60)
+    }
+
+    /// Build the dynamic hint text shown under the DND toggle.
+    private static func dndHintText(startMin: Int, endMin: Int) -> String {
+        let s = formatMinutes(startMin)
+        let e = formatMinutes(endMin)
+        return startMin > endMin
+            ? "每天 \(s) 至次日 \(e) 静音"
+            : "\(s)–\(e) 静音"
+    }
+
+    /// Single start/end time row using two Pickers (hour + minute in 5-min steps).
+    private func dndTimePicker(label: String, totalMin: Binding<Int>) -> some View {
+        HStack(spacing: 6) {
+            Text(label + "：")
+                .frame(minWidth: 36, alignment: .leading)
+            Picker("", selection: Binding(
+                get: { totalMin.wrappedValue / 60 },
+                set: { totalMin.wrappedValue = $0 * 60 + (totalMin.wrappedValue % 60) }
+            )) {
+                ForEach(0..<24, id: \.self) { h in
+                    Text(String(format: "%02d", h)).tag(h)
+                }
+            }
+            .labelsHidden()
+            .frame(width: 58)
+            Text("时")
+            Picker("", selection: Binding(
+                get: { (totalMin.wrappedValue % 60) / 5 * 5 },   // snap to 5-min grid
+                set: { totalMin.wrappedValue = (totalMin.wrappedValue / 60) * 60 + $0 }
+            )) {
+                ForEach([0, 5, 10, 15, 20, 25, 30, 35, 40, 45, 50, 55], id: \.self) { m in
+                    Text(String(format: "%02d", m)).tag(m)
+                }
+            }
+            .labelsHidden()
+            .frame(width: 58)
+            Text("分")
+        }
+    }
+
     private var petSection: some View {
         VStack(alignment: .leading, spacing: 12) {
             Label("宠物形象", systemImage: "pawprint")
                 .font(.headline)
 
+            // ── 内置宠物 ─────────────────────────────────────────────────────────
             Picker("选择宠物", selection: $config.selectedPet) {
                 Text("🐕 柴犬（Shiba）").tag("shiba")
                 Text("🐩 比熊（Bichon）").tag("bichon")
             }
             .pickerStyle(.radioGroup)
+
+            // ── 已上传自定义宠物 ─────────────────────────────────────────────────
+            if let store = customStore {
+                let ids = store.list()
+                if !ids.isEmpty {
+                    Divider()
+                    Text("已上传照片")
+                        .font(.subheadline)
+                        .foregroundStyle(.secondary)
+
+                    ForEach(ids, id: \.self) { id in
+                        customPetRow(id: id, store: store)
+                    }
+                }
+            }
+
+            // ── 上传照片按钮 ─────────────────────────────────────────────────────
+            Button("上传照片…") {
+                uploadController?.upload()
+            }
+            .buttonStyle(.bordered)
+            .help("上传一张宠物照片（PNG / JPG），可自动抠图去除背景")
         }
+    }
+
+    @ViewBuilder
+    private func customPetRow(id: String, store: CustomPetStore) -> some View {
+        let hasCutout = FileManager.default.fileExists(atPath: store.cutoutPath(id: id))
+        let isSelected = config.selectedPet == "custom:\(id)"
+        // MAJOR-4: 优先展示抠图缩略图，无则退回原图缩略图（24×24 pt）。
+        let thumbPath = hasCutout ? store.cutoutPath(id: id) : store.originalPath(id: id)
+        let thumbImage = NSImage(contentsOfFile: thumbPath)
+
+        HStack(spacing: 8) {
+            // ── 24×24 缩略图 ──────────────────────────────────────────────────────
+            if let img = thumbImage {
+                Image(nsImage: img)
+                    .resizable()
+                    .scaledToFill()
+                    .frame(width: 24, height: 24)
+                    .clipShape(Circle())
+                    .overlay(
+                        Circle()
+                            .stroke(Color(nsColor: .separatorColor), lineWidth: 0.5)
+                    )
+            } else {
+                // 图片还未生成时显示占位符
+                Circle()
+                    .fill(Color(nsColor: .controlBackgroundColor))
+                    .frame(width: 24, height: 24)
+                    .overlay(
+                        Image(systemName: "pawprint")
+                            .font(.system(size: 10))
+                            .foregroundStyle(.secondary)
+                    )
+            }
+
+            // ── 状态描述 ─────────────────────────────────────────────────────────
+            VStack(alignment: .leading, spacing: 2) {
+                Text(hasCutout ? "✓ 已抠图" : "⚠ 使用原图")
+                    .font(.caption)
+                    .foregroundStyle(hasCutout ? .primary : .secondary)
+                Text(id)
+                    .font(.system(.caption2, design: .monospaced))
+                    .foregroundStyle(.tertiary)
+                    .lineLimit(1)
+                    .truncationMode(.middle)
+            }
+
+            Spacer()
+
+            // MAJOR-4: 当前选中的宠物显示对勾
+            if isSelected {
+                Image(systemName: "checkmark")
+                    .foregroundStyle(Color.accentColor)
+                    .font(.system(size: 12, weight: .semibold))
+            }
+
+            Button("设为当前") {
+                uploadController?.setCurrent(id: id)
+            }
+            .controlSize(.small)
+            .buttonStyle(.bordered)
+
+            // MINOR-8: macOS 13 无 Vision，灰掉"重新抠图"按钮
+            if #available(macOS 14.0, *) {
+                Button("重新抠图") {
+                    uploadController?.recutout(id: id)
+                }
+                .controlSize(.small)
+                .buttonStyle(.bordered)
+                .help("重新运行 Vision 抠图（macOS 14+，失败时保持当前宠物不变）")
+            } else {
+                Button("重新抠图") {}
+                    .controlSize(.small)
+                    .buttonStyle(.bordered)
+                    .disabled(true)
+                    .help("需要 macOS 14 或更新版本")
+            }
+        }
+        .padding(.vertical, 2)
     }
 
     // MARK: - Part B: Config health section
@@ -789,7 +1044,13 @@ final class PreferencesWindowController: NSWindowController {
 
     private var hostingController: NSHostingController<PreferencesView>?
 
-    init(config: AppConfig, configStore: ConfigStore, onSave: @escaping (AppConfig) -> Void) {
+    init(
+        config: AppConfig,
+        configStore: ConfigStore,
+        onSave: @escaping (AppConfig) -> Void,
+        uploadController: PetUploadController? = nil,
+        customStore: CustomPetStore? = nil
+    ) {
         let window = NSWindow(
             contentRect: NSRect(x: 0, y: 0, width: 520, height: 520),
             styleMask: [.titled, .closable, .resizable, .miniaturizable],
@@ -802,7 +1063,13 @@ final class PreferencesWindowController: NSWindowController {
 
         super.init(window: window)
 
-        let view = PreferencesView(config: config, configStore: configStore, onSave: onSave)
+        let view = PreferencesView(
+            config: config,
+            configStore: configStore,
+            onSave: onSave,
+            uploadController: uploadController,
+            customStore: customStore
+        )
         let hc = NSHostingController(rootView: view)
         hostingController = hc
         window.contentViewController = hc
@@ -814,5 +1081,19 @@ final class PreferencesWindowController: NSWindowController {
     func show() {
         window?.makeKeyAndOrderFront(nil)
         NSApp.activate(ignoringOtherApps: true)
+    }
+
+    /// Notify the hosted ``PreferencesView`` that `selectedPet` has changed from outside
+    /// (e.g. the user picked a custom pet via the "设为当前" button, which calls
+    /// `applyPetClosure` in AppCoordinator, which in turn calls `refreshConfig`).
+    ///
+    /// ``PreferencesView`` listens via `.onReceive` and updates only `config.selectedPet`,
+    /// leaving other in-progress edits intact (MAJOR-1 fix).
+    func refreshConfig(_ newConfig: AppConfig) {
+        NotificationCenter.default.post(
+            name: .apetSelectedPetChanged,
+            object: nil,
+            userInfo: ["selectedPet": newConfig.selectedPet]
+        )
     }
 }

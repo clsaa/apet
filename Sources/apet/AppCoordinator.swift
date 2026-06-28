@@ -1,5 +1,6 @@
 import Foundation
 import AppKit
+@preconcurrency import UserNotifications
 import AgentPetCore
 import AppShellKit
 
@@ -14,8 +15,8 @@ final class AppCoordinator {
     let eventsPath: String
     let logPath: String
 
-    /// apet-managed hook marker written into settings.json. 必须与 PreferencesView.hookMarker 一致。
-    static let hookMarker = "apet-1"
+    /// apet-managed hook marker；单一事实源 HookConstants.marker（消除重复字面量，M2-E）。
+    static let hookMarker = HookConstants.marker
 
     private let configStore: ConfigStore
     private var config: AppConfig
@@ -38,12 +39,17 @@ final class AppCoordinator {
     private var reapTimer: DispatchSourceTimer?
     private var isStopped = false
 
-    private var jsonlWatcher: JSONLDirectoryWatcher?
+    private var jsonlWatchers: [JSONLDirectoryWatcher] = []
     private var hotKeyManager: HotKeyManager?
     /// 进程内单调计数器，用于 jsonl 合成事件的唯一 eventId（替代 UUID，防 seenEventIds 慢泄漏）。
     private var jsonlSeqCounter: Int = 0
 
     private var preferencesController: PreferencesWindowController?
+
+    /// Shared custom-pet store (created once when not headless; nil in headless mode).
+    private var customStore: CustomPetStore?
+    /// Controls the upload → cutout → apply-pet flow; nil in headless mode.
+    private var uploadController: PetUploadController?
 
     // MARK: - Derived config helpers
 
@@ -88,30 +94,66 @@ final class AppCoordinator {
         self.store = sessionStore
         self.ingestor = ingestor
 
-        // ─── 2a. Setup JSONL directory watcher ───────────────────────────────────
+        // ─── 2a. Setup JSONL directory watchers（多 root 并行，M2-B）──────────────
         // 共享同一 NDJSONIngestor（唯一 seq 源）；source=.jsonl；replay=false；不接 NotificationService。
-        // config.dataRoots 是 [DataRoot]，取第一个 path（默认 ~/.claude）作为 dataRoot（架构-B1/M4）。
-        // ⚠️ 仅在此创建 watcher；seed 扫描(scanOnce) + start 推迟到 change handler 注册与 hook replay 之后
+        // ⚠️ 仅在此创建 watchers；seed 扫描(scanOnce) + start 推迟到 change handler 注册与 hook replay 之后
         //    （Step 4 末），否则 seed 事件在 handler 注册前发射 → 当前会话不会立即上屏（Task8 评审 I#1）。
-        let dataRoot = config.dataRoots.first?.path
-            ?? FileManager.default.homeDirectoryForCurrentUser
-                .appendingPathComponent(".claude").path
-        let projectsDir = (dataRoot as NSString).appendingPathComponent("projects")
-        let watcher = JSONLDirectoryWatcher(
-            projectsDir: projectsDir,
-            root: dataRoot,
-            now: { Date().timeIntervalSince1970 },
-            parse: { JSONLParse.parse(path: $0, root: dataRoot) },
-            emit: { [weak self] result in self?.applyScanResult(result) }
+
+        // 通过 DataRootDiscovery 合并"已配置 roots"与"自动发现 roots"（M2-B）。
+        // config.dataRoots 中的路径已经是 absolute expanded path（defaults 用 .path），直接传入。
+        let home = FileManager.default.homeDirectoryForCurrentUser.path
+        let disc = DataRootDiscovery.discover(
+            home: home,
+            existing: config.dataRoots,
+            excluded: config.excludedRoots,
+            fileOps: RealFileOps()
         )
-        self.jsonlWatcher = watcher
+
+        // 知情同意 + 持久化：自动发现的新 root 追加到 config 并持久化，避免每次启动重复发现。
+        // M2-B Fix MAJOR-2：标记 isAutoDiscovered=true，供首选项面板显示"自动发现"徽标；
+        //                   同时发一条系统通知（懒授权：已授权才发，不向未授权用户强制弹请求）。
+        if !disc.newlyDiscovered.isEmpty {
+            let newRoots = disc.newlyDiscovered.map { root -> DataRoot in
+                var r = root
+                r.isAutoDiscovered = true
+                return r
+            }
+            config.dataRoots.append(contentsOf: newRoots)
+            try? configStore.save(config)
+            let count = disc.newlyDiscovered.count
+            appendToLog("[info] 自动发现并加入 \(count) 个 Claude profile，可在首选项移除\n")
+            sendDiscoveryNotification(count: count)
+        }
+
+        for root in disc.roots {
+            let rootPath = root.path
+            let projectsDir = (rootPath as NSString).appendingPathComponent("projects")
+            let w = JSONLDirectoryWatcher(
+                projectsDir: projectsDir,
+                root: rootPath,
+                now: { Date().timeIntervalSince1970 },
+                parse: { JSONLParse.parse(path: $0, root: rootPath) },
+                emit: { [weak self] result in self?.applyScanResult(result) }
+            )
+            jsonlWatchers.append(w)
+        }
         // ──────────────────────────────────────────────────────────────────────────
         // 2b. Create and start NotificationService (safe to call before replay).
         // Single shared TerminalFocusService instance injected into both consumers (Fix M-3).
         let focusService = TerminalFocusService()
-        let ns = NotificationService(focusService: focusService, sessionLookup: { [weak self] key in
-            self?.store?.sessions[key]
-        })
+        let ns = NotificationService(
+            focusService: focusService,
+            sessionLookup: { [weak self] key in self?.store?.sessions[key] },
+            // Closure reads the latest config each time it is called (after applyConfig), so
+            // DND changes take effect on the very next notification without a restart.
+            dndProvider: { [weak self] in
+                DNDWindow(
+                    enabled:  self?.config.dndEnabled   ?? false,
+                    startMin: self?.config.dndStartMin  ?? 0,
+                    endMin:   self?.config.dndEndMin    ?? 0
+                )
+            }
+        )
         notificationService = ns
         ns.start()
 
@@ -119,7 +161,38 @@ final class AppCoordinator {
         if !headless {
             let isCompact = config.displayMode == "compact"
             let mb = MenuBarController(focusService: focusService)
-            let pw = PetWindowController(focusService: focusService, pet: config.selectedPet, compact: isCompact)
+            // Build a shared CustomPetStore; rootDir under ~/Library/Application Support/AgentPet/pets-custom.
+            let appSupport = (NSHomeDirectory() as NSString)
+                .appendingPathComponent("Library/Application Support/AgentPet")
+            let petsCustomDir = (appSupport as NSString).appendingPathComponent("pets-custom")
+            let customStore = CustomPetStore(
+                rootDir: petsCustomDir,
+                fileOps: RealFileOps(),
+                idProvider: { UUID().uuidString }
+            )
+            self.customStore = customStore
+
+            // Wire up the applyPet callback: updates live pet window + persists config.
+            // Fix MAJOR-1：保存完毕后通知首选项窗口刷新 selectedPet，防止旧快照在"保存"时覆盖新宠物。
+            let applyPetClosure: (PetKind) -> Void = { [weak self] kind in
+                guard let self else { return }
+                self.petWindow?.applyPet(kind)
+                self.config.selectedPet = Self.petKindToString(kind)
+                try? self.configStore.save(self.config)
+                self.preferencesController?.refreshConfig(self.config)
+            }
+            self.uploadController = PetUploadController(
+                store: customStore,
+                applyPet: applyPetClosure
+            )
+
+            let initialSelection = PetSelection.parse(config.selectedPet)
+            let pw = PetWindowController(
+                focusService: focusService,
+                selection: initialSelection,
+                customStore: customStore,
+                compact: isCompact
+            )
             mb.petVisibilityProvider = { [weak pw] in pw?.isVisible ?? false }
             mb.onTogglePet = { [weak pw] in
                 guard let pw else { return }
@@ -218,8 +291,8 @@ final class AppCoordinator {
 
         // 4b. jsonl seed：change handler 已注册、hook replay 已完成后再种子扫描，
         //     使当前正在跑的会话立即上屏（hook 的 ended 终态仍保护，不被 jsonl 复活）。
-        watcher.scanOnce()          // seed（replay=false；jsonl 不接 NotificationService，天然静默）
-        watcher.start(every: 8)     // 每 8 秒定期扫描，queue:.main
+        jsonlWatchers.forEach { $0.scanOnce() }     // seed（replay=false；jsonl 不接 NotificationService，天然静默）
+        jsonlWatchers.forEach { $0.start(every: 8) } // 每 8 秒定期扫描，queue:.main
 
         // 5. Live file watch via DispatchSource
         openWatchSource()
@@ -253,8 +326,8 @@ final class AppCoordinator {
         }
         reapTimer?.cancel()
         reapTimer = nil
-        jsonlWatcher?.stop()
-        jsonlWatcher = nil
+        jsonlWatchers.forEach { $0.stop() }
+        jsonlWatchers.removeAll()
         hotKeyManager?.unregister()
         hotKeyManager = nil
     }
@@ -274,7 +347,9 @@ final class AppCoordinator {
             configStore: configStore,
             onSave: { [weak self] newConfig in
                 self?.applyConfig(newConfig)
-            }
+            },
+            uploadController: uploadController,
+            customStore: customStore
         )
         preferencesController = pc
         pc.show()
@@ -299,7 +374,7 @@ final class AppCoordinator {
                 pw.setVisible(shouldShow)
             }
             // Apply selected pet sprite immediately (Fix I-2).
-            pw.applyPet(newConfig.selectedPet)
+            pw.applyPet(PetSelection.parse(newConfig.selectedPet))
             // Apply compact mode immediately.
             pw.applyCompact(newConfig.displayMode == "compact")
         }
@@ -314,6 +389,16 @@ final class AppCoordinator {
         let hint = newConfig.panelHotKey.displayString + " 打开/关闭"
         menuBar?.hotkeyHint = hint
         petWindow?.hotkeyHint = hint
+    }
+
+    // MARK: - Private: helpers
+
+    /// Converts a ``PetKind`` to the string form stored in ``AppConfig.selectedPet``.
+    private static func petKindToString(_ kind: PetKind) -> String {
+        switch kind {
+        case .builtin(let name): return name
+        case .custom(let id):   return "custom:\(id)"
+        }
     }
 
     // MARK: - Private: panel toggle (hot key target)
@@ -349,7 +434,7 @@ final class AppCoordinator {
                 let kind: EventKind = (state == .running) ? .busy : .stop
                 var ev = AgentEvent(
                     v: 1,
-                    eventId: "jsonl:\(key.sessionId):\(jsonlSeqCounter)",
+                    eventId: "jsonl:\((key.root as NSString).lastPathComponent):\(key.sessionId):\(jsonlSeqCounter)",
                     agent: key.agent,
                     kind: kind,
                     sessionId: key.sessionId,
@@ -468,6 +553,37 @@ final class AppCoordinator {
                 }
             } catch {
                 self.appendToLog("[error] eager drain: \(error)\n")
+            }
+        }
+    }
+
+    // MARK: - Private: discovery notification (MAJOR-2)
+
+    /// 自动发现新 Claude profile 时发一条系统通知，告知用户已纳入监控。
+    ///
+    /// 策略：懒授权——仅在用户已授权时发送；若尚未授权，静默跳过，不弹权限请求。
+    /// （session 事件通知才会触发 just-in-time 授权请求）。
+    private func sendDiscoveryNotification(count: Int) {
+        guard Bundle.main.bundleIdentifier != nil else { return }
+        let center = UNUserNotificationCenter.current()
+        center.getNotificationSettings { settings in
+            switch settings.authorizationStatus {
+            case .authorized, .provisional, .ephemeral:
+                break   // 已授权，可以发
+            default:
+                return  // 未授权 / 被拒绝 → 静默跳过，不弹请求
+            }
+            let content = UNMutableNotificationContent()
+            content.title = "apet 发现 \(count) 个 Claude profile"
+            content.body  = "已加入监控，可在首选项移除"
+            content.sound = .default
+            let request = UNNotificationRequest(
+                identifier: "apet.discovery.\(UUID().uuidString)",
+                content: content,
+                trigger: nil
+            )
+            Task { @MainActor in
+                center.add(request) { _ in }
             }
         }
     }

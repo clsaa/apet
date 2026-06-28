@@ -7,7 +7,11 @@ import AppShellKit
 /// Pure view driven by ``PetPresentation`` — no store access.
 struct PetView: View {
     let presentation: PetPresentation
-    let pet: String
+    /// Pre-resolved image passed in by ``PetWindowController``; avoids asset loading inside the view.
+    let resolvedImage: NSImage?
+    /// When `true` the pet image is clipped to a circle (photo pets).
+    /// Built-in PNG sprites are rendered unclipped to preserve transparent shapes.
+    var isCustomPet: Bool = false
     /// 精简条模式：仅渲染 countChip，不显示宠物图、气泡、呼吸动画。
     /// 窗口尺寸由 ``PetWindowController`` 根据此标志调整。
     var compact: Bool = false
@@ -86,11 +90,18 @@ struct PetView: View {
 
     @ViewBuilder
     private var petImage: some View {
-        let nsImage = PetAssetLoader.image(pet: pet, assetState: presentation.assetState)
-        Image(nsImage: nsImage)
+        let fallback = NSImage(systemSymbolName: "pawprint.fill",
+                               accessibilityDescription: "pet") ?? NSImage()
+        let nsImage = resolvedImage ?? fallback
+        let img = Image(nsImage: nsImage)
             .resizable()
             .interpolation(.high)
             .frame(width: 96, height: 96)
+        if isCustomPet {
+            img.clipShape(Circle())
+        } else {
+            img
+        }
     }
 
     /// 常驻计数条（4 段）：🟢 在跑 · 🔴 未读 · 🟡 已读 · ⚪ 闲置。每段始终显示（即便为 0）。

@@ -122,6 +122,56 @@ final class AppConfigTests: XCTestCase {
         XCTAssertEqual(root.agent, "claude-code")
     }
 
+    /// MAJOR-2：旧版 JSON 中 DataRoot 没有 isAutoDiscovered 字段时，
+    /// 解码应成功（不抛 keyNotFound），且 isAutoDiscovered 默认为 false，
+    /// 同时 path / agent 等其他字段完整保留。
+    func test_DataRoot_decode_oldJson_withoutIsAutoDiscovered_defaults_false() throws {
+        // TC-AppConfig-PARAM-001: 旧 JSON DataRoot 无 isAutoDiscovered 字段的向后兼容
+        let oldJson = """
+        {
+          "agent": "claude-code",
+          "path": "/home/alice/.claude"
+        }
+        """
+        let data = oldJson.data(using: .utf8)!
+        let root = try JSONDecoder().decode(DataRoot.self, from: data)
+
+        XCTAssertEqual(root.path, "/home/alice/.claude",
+                       "path 字段应从旧 JSON 中正确解码")
+        XCTAssertEqual(root.agent, "claude-code",
+                       "agent 字段应从旧 JSON 中正确解码")
+        XCTAssertEqual(root.isAutoDiscovered, false,
+                       "旧 JSON 无 isAutoDiscovered 时应默认 false（向后兼容）")
+    }
+
+    /// MAJOR-2：isAutoDiscovered=true 能被正常 encode 并 round-trip decode 回 true。
+    func test_DataRoot_isAutoDiscovered_roundTrip() throws {
+        // TC-AppConfig-FUNC-001: DataRoot.isAutoDiscovered round-trip
+        let root = DataRoot(path: "/tmp/auto", agent: "claude-code", isAutoDiscovered: true)
+        let data = try JSONEncoder().encode(root)
+        let decoded = try JSONDecoder().decode(DataRoot.self, from: data)
+        XCTAssertEqual(decoded.path, "/tmp/auto")
+        XCTAssertEqual(decoded.isAutoDiscovered, true,
+                       "isAutoDiscovered=true 应能 encode 并 decode 回 true")
+    }
+
+    /// MAJOR-2：AppConfig 中含 isAutoDiscovered=true 的 DataRoot 能整体 round-trip。
+    func test_AppConfig_withAutoDiscoveredRoot_roundTrip() throws {
+        // TC-AppConfig-FUNC-002: AppConfig 含自动发现根 round-trip
+        let store = ConfigStore(url: configURL)
+        var cfg = AppConfig.defaults
+        cfg.dataRoots = [
+            DataRoot(path: "/home/alice/.claude", agent: "claude-code", isAutoDiscovered: false),
+            DataRoot(path: "/home/alice/.claude-profiles/work", agent: "claude-code", isAutoDiscovered: true),
+        ]
+        try store.save(cfg)
+        let loaded = store.load()
+        XCTAssertEqual(loaded.dataRoots.count, 2)
+        XCTAssertEqual(loaded.dataRoots[0].isAutoDiscovered, false)
+        XCTAssertEqual(loaded.dataRoots[1].isAutoDiscovered, true,
+                       "自动发现根的 isAutoDiscovered=true 应在 round-trip 后保留")
+    }
+
     // MARK: - 精修 3：readGrayAfterSec 字段
 
     /// defaults 中 readGrayAfterSec == 3600
@@ -215,5 +265,59 @@ final class AppConfigTests: XCTestCase {
         XCTAssertEqual(loaded.panelHotKey.keyCode, 12)
         XCTAssertEqual(loaded.panelHotKey.modifiers, 4096 | 256)
         XCTAssertEqual(loaded.panelHotKey.keyLabel, "Q")
+    }
+
+    // MARK: - M2 dndEnabled / dndStartMin / dndEndMin / excludedRoots 字段
+
+    /// 旧版 config.json（仅含原始 7 个必需字段，无可选字段）解码后：
+    /// 既有字段完整保留，4 个新字段全部取默认值。
+    func test_decode_oldJson_withoutDndAndExcluded_keepsSettings_defaults() throws {
+        let oldJson = """
+        {
+          "dataRoots": [{"agent": "claude-code", "path": "/tmp/root"}],
+          "displayMode": "menuBarOnly",
+          "endedAfterSec": 7200,
+          "notifyMode": "everyStop",
+          "selectedPet": "bichon",
+          "staleAfterSec": 300,
+          "waitingEndedAfterSec": 3600
+        }
+        """
+        let data = oldJson.data(using: .utf8)!
+        let config = try JSONDecoder().decode(AppConfig.self, from: data)
+
+        // 既有字段完整保留
+        XCTAssertEqual(config.selectedPet, "bichon",       "selectedPet 应保留")
+        XCTAssertEqual(config.notifyMode, "everyStop",     "notifyMode 应保留")
+        XCTAssertEqual(config.displayMode, "menuBarOnly",  "displayMode 应保留")
+        XCTAssertEqual(config.dataRoots.first?.path, "/tmp/root", "dataRoots 应保留")
+        XCTAssertEqual(config.staleAfterSec, 300,          "staleAfterSec 应保留")
+        XCTAssertEqual(config.endedAfterSec, 7200,         "endedAfterSec 应保留")
+        XCTAssertEqual(config.waitingEndedAfterSec, 3600,  "waitingEndedAfterSec 应保留")
+        // 可选字段也应取默认值
+        XCTAssertEqual(config.readGrayAfterSec, 3600,      "旧 json 无此字段时应默认 3600")
+        XCTAssertEqual(config.panelHotKey, HotKeyConfig.defaultPanel, "旧 json 无 panelHotKey 时应默认 .defaultPanel")
+
+        // M2 新字段 → 默认值
+        XCTAssertEqual(config.dndEnabled, false,           "旧 json 无 dndEnabled 时应默认 false")
+        XCTAssertEqual(config.dndStartMin, 0,              "旧 json 无 dndStartMin 时应默认 0")
+        XCTAssertEqual(config.dndEndMin, 0,                "旧 json 无 dndEndMin 时应默认 0")
+        XCTAssertEqual(config.excludedRoots, [],           "旧 json 无 excludedRoots 时应默认 []")
+    }
+
+    /// round-trip：dndEnabled/dndStartMin/dndEndMin/excludedRoots encode→decode 值完整保留。
+    func test_roundTrip_withDndAndExcluded() throws {
+        let store = ConfigStore(url: configURL)
+        var custom = AppConfig.defaults
+        custom.dndEnabled   = true
+        custom.dndStartMin  = 1380   // 23:00
+        custom.dndEndMin    = 420    // 07:00
+        custom.excludedRoots = ["/a/b"]
+        try store.save(custom)
+        let loaded = store.load()
+        XCTAssertEqual(loaded.dndEnabled,    true,    "dndEnabled 应 round-trip")
+        XCTAssertEqual(loaded.dndStartMin,   1380,    "dndStartMin 应 round-trip")
+        XCTAssertEqual(loaded.dndEndMin,     420,     "dndEndMin 应 round-trip")
+        XCTAssertEqual(loaded.excludedRoots, ["/a/b"], "excludedRoots 应 round-trip")
     }
 }

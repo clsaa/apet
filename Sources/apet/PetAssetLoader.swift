@@ -1,4 +1,6 @@
 import AppKit
+import AppShellKit
+import AgentPetCore
 
 // MARK: - PetAssetLoader
 
@@ -19,6 +21,32 @@ enum PetAssetLoader {
             ?? loadImage(pet: pet, state: "idle")
             ?? NSImage(systemSymbolName: "pawprint.fill", accessibilityDescription: "pet")
             ?? NSImage()
+    }
+
+    /// Return the best image for the given ``PetKind`` and asset state.
+    ///
+    /// - `.builtin(name)` — delegates to the existing PNG lookup via `image(pet:assetState:)`.
+    /// - `.custom(id)` — loads the image from `customStore?.imagePath(id:)`.
+    ///   Falls back to the SF Symbol "pawprint.fill" when the path is missing or the
+    ///   store is nil.
+    static func image(
+        selection: PetKind,
+        assetState: String,
+        customStore: CustomPetStore?
+    ) -> NSImage {
+        switch selection {
+        case .builtin(let name):
+            return image(pet: name, assetState: assetState)
+        case .custom(let id):
+            if let store = customStore,
+               let path = store.imagePath(id: id),
+               let nsImage = NSImage(contentsOfFile: path) {
+                return nsImage
+            }
+            // Fallback: SF Symbol when custom image is missing or store unavailable.
+            return NSImage(systemSymbolName: "pawprint.fill", accessibilityDescription: "pet")
+                ?? NSImage()
+        }
     }
 
     // MARK: - Private
