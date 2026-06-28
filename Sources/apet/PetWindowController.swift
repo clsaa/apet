@@ -34,6 +34,9 @@ final class PetWindowController: NSObject {
 
     private let focusService: TerminalFocusService
 
+    /// 用户点开一个会话（跳转终端）后回调，AppCoordinator 据此把会话标记为"已读"（红→黄）。
+    var onAcknowledge: ((SessionKey) -> Void)?
+
     // MARK: - Init
 
     /// - Parameters:
@@ -103,6 +106,8 @@ final class PetWindowController: NSObject {
         guard let session = currentSessions.first(where: {
             "\($0.key.agent)|\($0.key.root)|\($0.key.sessionId)" == id
         }) else { return }
+        // 用户点开会话 → 标记已读（红→黄）。仅对 waiting 态生效（acknowledge 内部守卫）。
+        onAcknowledge?(session.key)
         let terminal = session.terminal
         let fs = focusService
         // osascript blocks; run off main thread (same pattern as MenuBarController / Fix B2).

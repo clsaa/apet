@@ -142,6 +142,13 @@ final class AppCoordinator {
                 }
                 return false
             }
+            // 点开会话 → 标记已读（红→黄）。acknowledge 内部 emit 变更，
+            // 已注册的 changeHandler 会随之刷新 menuBar/petWindow，无需手动刷新。
+            let ack: (SessionKey) -> Void = { [weak self] key in
+                self?.store?.acknowledge(key: key)
+            }
+            mb.onAcknowledge = ack
+            pw.onAcknowledge = ack
             menuBar = mb
             petWindow = pw
 

@@ -64,7 +64,8 @@ struct PetView: View {
             .frame(width: 96, height: 96)
     }
 
-    /// 常驻计数条：🟢 在跑 · 🔴 完成。即便都是 0 也显示，让用户一眼看到全局而不必点开面板。
+    /// 常驻计数条：🟢 在跑 · 🔴 未读 · 🟡 已读。即便都是 0 也显示运行/未读，让用户一眼看到全局。
+    /// 黄段（已读）仅在 readCount>0 时出现，避免常态噪声。
     @ViewBuilder
     private var countChip: some View {
         HStack(spacing: 8) {
@@ -80,13 +81,21 @@ struct PetView: View {
                     .font(.system(size: 11, weight: .semibold))
                     .foregroundColor(.primary)
             }
+            if presentation.readCount > 0 {
+                HStack(spacing: 3) {
+                    Circle().fill(Color.yellow).frame(width: 7, height: 7)
+                    Text("\(presentation.readCount)")
+                        .font(.system(size: 11, weight: .semibold))
+                        .foregroundColor(.primary)
+                }
+            }
         }
         .padding(.horizontal, 8)
         .padding(.vertical, 3)
         .background(
             Capsule().fill(Color(NSColor.windowBackgroundColor).opacity(0.9)).shadow(radius: 2)
         )
-        .help("绿=进行中 · 红=停下等你/完成")
+        .help("绿=进行中 · 红=停下等你/未读 · 黄=已读")
     }
 
     @ViewBuilder
