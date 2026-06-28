@@ -83,6 +83,17 @@ private struct SessionRowCell: View {
                             .lineLimit(1)
                     }
 
+                    if row.isInferred {
+                        Text("推断")
+                            .font(.system(size: 10, weight: .medium))
+                            .padding(.horizontal, 5)
+                            .padding(.vertical, 1)
+                            .background(Color.secondary.opacity(0.15))
+                            .cornerRadius(4)
+                            .foregroundStyle(.secondary)
+                            .lineLimit(1)
+                    }
+
                     if row.activateOnly {
                         Text("仅激活")
                             .font(.system(size: 10))
@@ -106,12 +117,16 @@ private struct SessionRowCell: View {
     }
 
     private var dotColor: Color {
+        let base: Color
         switch row.dot {
-        case .running:     return .green
-        case .attention:   return .orange
-        case .doneWaiting: return .red
-        case .stale:       return .gray
+        case .running:     base = .green
+        case .attention:   base = .orange
+        case .doneWaiting: base = .red
+        case .stale:       base = .gray
         }
+        // Inferred (jsonl waiting) rows get a muted dot so they don't look as urgent
+        // as hook-sourced sessions where we have live confirmation of the state.
+        return row.isInferred ? base.opacity(0.45) : base
     }
 }
 

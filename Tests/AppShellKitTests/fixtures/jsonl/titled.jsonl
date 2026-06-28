@@ -1,0 +1,4 @@
+{"type":"last-prompt","lastPrompt":"help me write the alarm","sessionId":"aaaa0005-0000-0000-0000-000000000005"}
+{"type":"user","cwd":"/Users/test/proj5","sessionId":"aaaa0005-0000-0000-0000-000000000005","timestamp":"2026-06-28T04:00:00.000Z","isSidechain":false,"entrypoint":"cli","version":"1.0.0"}
+{"type":"assistant","cwd":"/Users/test/proj5","sessionId":"aaaa0005-0000-0000-0000-000000000005","timestamp":"2026-06-28T04:01:00.000Z","isSidechain":false,"entrypoint":"cli","version":"1.0.0","message":{"role":"assistant","content":[{"type":"text","text":"Here is the alarm implementation."}],"stop_reason":"end_turn"}}
+{"type":"custom-title","customTitle":"devix-alarm","sessionId":"aaaa0005-0000-0000-0000-000000000005"}

@@ -345,4 +345,65 @@ final class HookInstallerTests: XCTestCase {
         XCTAssertTrue(writtenCommand.contains(script),
                       "Written command must contain script path")
     }
+
+    // MARK: - Test 14: previewLines contains scriptName and "Stop" (pure function, no file write)
+
+    func testPreviewLinesContainsScriptNameAndStopEvent() {
+        let scriptPath = "/usr/local/bin/apet-emit-event.sh"
+        let eventsPath = "/Library/Application Support/AgentPet/events.ndjson"
+        let rootPath   = "/Users/alice/.claude"
+
+        let preview = HookInstaller.previewLines(
+            scriptPath: scriptPath,
+            eventsPath: eventsPath,
+            rootPath: rootPath
+        )
+
+        // Must contain the script's filename (last path component)
+        XCTAssertTrue(preview.contains("apet-emit-event.sh"),
+                      "previewLines must contain the script basename")
+
+        // Must contain at least one hook event with "Stop" in its name
+        XCTAssertTrue(preview.contains("Stop"),
+                      "previewLines must contain 'Stop' hook event name")
+    }
+
+    // MARK: - Test 15: previewLines does NOT write any file (pure function)
+
+    func testPreviewLinesDoesNotWriteAnyFile() {
+        let tmpDir = FileManager.default.temporaryDirectory.path
+        let unique = UUID().uuidString
+        let scriptPath = "\(tmpDir)/apet-emit-event-\(unique).sh"
+        let eventsPath = "\(tmpDir)/events-\(unique).ndjson"
+        let rootPath   = "\(tmpDir)/claude-\(unique)"
+
+        _ = HookInstaller.previewLines(
+            scriptPath: scriptPath,
+            eventsPath: eventsPath,
+            rootPath: rootPath
+        )
+
+        // None of these paths should have been created
+        XCTAssertFalse(FileManager.default.fileExists(atPath: scriptPath),
+                       "previewLines must not create the script file")
+        XCTAssertFalse(FileManager.default.fileExists(atPath: eventsPath),
+                       "previewLines must not create the events file")
+        XCTAssertFalse(FileManager.default.fileExists(atPath: rootPath),
+                       "previewLines must not create the root directory")
+    }
+
+    // MARK: - Test 16: previewLines contains all 6 hook event names
+
+    func testPreviewLinesContainsAllSixHookEvents() {
+        let preview = HookInstaller.previewLines(
+            scriptPath: "/usr/local/bin/apet-emit-event.sh",
+            eventsPath: "/tmp/events.ndjson",
+            rootPath: "/Users/alice/.claude"
+        )
+
+        for event in hookEvents {
+            XCTAssertTrue(preview.contains(event),
+                          "previewLines must mention hook event '\(event)'")
+        }
+    }
 }

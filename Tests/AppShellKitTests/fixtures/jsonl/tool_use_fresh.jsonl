@@ -1,0 +1,3 @@
+{"type":"last-prompt","lastPrompt":"run the test suite","sessionId":"aaaa0006-0000-0000-0000-000000000006"}
+{"type":"user","cwd":"/Users/test/proj6","sessionId":"aaaa0006-0000-0000-0000-000000000006","timestamp":"2026-06-28T05:00:00.000Z","isSidechain":false,"entrypoint":"cli","version":"1.0.0"}
+{"type":"assistant","cwd":"/Users/test/proj6","sessionId":"aaaa0006-0000-0000-0000-000000000006","timestamp":"2026-06-28T05:01:00.000Z","isSidechain":false,"entrypoint":"cli","version":"1.0.0","message":{"role":"assistant","content":[{"type":"tool_use","id":"toolu_abc01","name":"Bash","input":{"command":"swift test"}}],"stop_reason":"tool_use"}}

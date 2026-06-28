@@ -40,16 +40,15 @@ final class NotificationService: NSObject {
 
     // MARK: - Lifecycle
 
-    /// Request notification authorisation and register as delegate.
+    /// Register as delegate. Authorisation is requested lazily on first delivery (Fix 1),
+    /// so we never prompt the user until there is an actual notification to show.
     /// No-ops gracefully in headless / non-bundled environments (e.g. `--smoke`, `swift run`).
     func start() {
         // `UNUserNotificationCenter.current()` aborts if there is no app bundle.
         guard Bundle.main.bundleIdentifier != nil else { return }
         let center = UNUserNotificationCenter.current()
         center.delegate = self
-        center.requestAuthorization(options: [.alert, .sound]) { _, _ in
-            // Ignore the result; we simply try — user can grant later via System Settings.
-        }
+        // Note: no requestAuthorization here — deferred to `deliver(_:)` on first banner.
     }
 
     // MARK: - Public API
@@ -92,8 +91,38 @@ final class NotificationService: NSObject {
             content: un,
             trigger: nil    // deliver immediately
         )
-        UNUserNotificationCenter.current().add(request) { _ in
-            // Silently ignore delivery errors (e.g. no authorisation).
+        deliver(request)
+    }
+
+    // MARK: - Private: lazy-authorised delivery (Fix 1)
+
+    /// Deliver `request`, requesting authorisation lazily on first use.
+    ///
+    /// - `.notDetermined`: prompt via `requestAuthorization`, then deliver only if granted.
+    /// - `.denied`: skip delivery entirely (no banner, no error).
+    /// - otherwise (authorised / provisional / ephemeral): deliver.
+    ///
+    /// `getNotificationSettings` / `requestAuthorization` completion handlers arrive on a
+    /// system-managed queue; we hop back to `@MainActor` before touching `UNUserNotificationCenter.add`.
+    private func deliver(_ request: UNNotificationRequest) {
+        let center = UNUserNotificationCenter.current()
+        center.getNotificationSettings { settings in
+            switch settings.authorizationStatus {
+            case .denied:
+                // User explicitly declined — do not deliver, do not re-prompt.
+                return
+            case .notDetermined:
+                center.requestAuthorization(options: [.alert, .sound]) { granted, _ in
+                    guard granted else { return }
+                    Task { @MainActor in
+                        center.add(request) { _ in }
+                    }
+                }
+            default:
+                Task { @MainActor in
+                    center.add(request) { _ in }
+                }
+            }
         }
     }
 }

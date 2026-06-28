@@ -62,15 +62,18 @@ public struct AgentEvent: Equatable {
     public var reason: WaitingReason?
     public var message: String?
     public var ts: String
+    /// 进程内来源标记（不进 wire）。hook 实时事件默认 .hook；jsonl 合成事件由调用方置 .jsonl。
+    public var source: SessionSource
 
     public init(v: Int, eventId: String, seq: Int? = nil, agent: String, kind: EventKind,
                 sessionId: String, root: String, cwd: String? = nil, title: String? = nil,
                 terminal: TerminalRef? = nil, notify: NotifyClass? = nil,
-                reason: WaitingReason? = nil, message: String? = nil, ts: String) {
+                reason: WaitingReason? = nil, message: String? = nil, ts: String,
+                source: SessionSource = .hook) {
         self.v = v; self.eventId = eventId; self.seq = seq; self.agent = agent
         self.kind = kind; self.sessionId = sessionId; self.root = root; self.cwd = cwd
         self.title = title; self.terminal = terminal; self.notify = notify
-        self.reason = reason; self.message = message; self.ts = ts
+        self.reason = reason; self.message = message; self.ts = ts; self.source = source
     }
 
     /// 解析单行 NDJSON。坏行/解析失败返回 nil（绝不抛）。设计 §9。

@@ -9,6 +9,9 @@ import AppShellKit
 private struct PanelRootView: View {
     let rows: [SessionRowModel]
     let petVisible: Bool
+    /// Fix 6: whether the hook is already installed for any data root.
+    /// When `true`, the panel surfaces "已启用" instead of the call-to-action button.
+    let hookInstalled: Bool
     let onTap: (String) -> Void
     let onTogglePet: () -> Void
     let onOpenPreferences: () -> Void
@@ -33,11 +36,11 @@ private struct PanelRootView: View {
             .padding(.top, 6)
             .padding(.bottom, 2)
 
-            // 首选项…
+            // 首选项…（齿轮入口）
             Button {
                 onOpenPreferences()
             } label: {
-                Text("首选项…")
+                Label("首选项…", systemImage: "gearshape")
                     .frame(maxWidth: .infinity)
                     .padding(.vertical, 3)
             }
@@ -45,6 +48,31 @@ private struct PanelRootView: View {
             .foregroundStyle(.secondary)
             .padding(.horizontal, 10)
             .padding(.vertical, 2)
+
+            // Part D / Fix 6: 常驻增强入口。
+            // hook 已装 → 显示"已启用"状态（不再引导）；未装 → 显示可点击的开启入口。
+            if hookInstalled {
+                Label("精确跳转/通知：已启用", systemImage: "bolt.badge.a.fill")
+                    .frame(maxWidth: .infinity)
+                    .padding(.vertical, 2)
+                    .foregroundStyle(Color.green.opacity(0.7))
+                    .font(.caption)
+                    .padding(.horizontal, 10)
+                    .padding(.vertical, 2)
+            } else {
+                Button {
+                    onOpenPreferences()
+                } label: {
+                    Label("开启精确跳转/通知…", systemImage: "bolt.badge.a.fill")
+                        .frame(maxWidth: .infinity)
+                        .padding(.vertical, 2)
+                }
+                .buttonStyle(.plain)
+                .foregroundStyle(Color.accentColor.opacity(0.6))
+                .font(.caption)
+                .padding(.horizontal, 10)
+                .padding(.vertical, 2)
+            }
 
             // 退出
             Button {
@@ -84,6 +112,11 @@ final class MenuBarController: NSObject {
     var onTogglePet: (() -> Void)?
     /// Invoked when the user taps 首选项…; AppCoordinator shows the preferences window.
     var onOpenPreferences: (() -> Void)?
+    /// Returns the current running + waiting counts for the right-click menu summary row.
+    var summaryProvider: (() -> (running: Int, waiting: Int))?
+    /// Fix 6: returns whether the precise-jump/notifications hook is installed for any data root.
+    /// Injected by AppCoordinator; when nil or `false`, the panel shows the call-to-action button.
+    var hookInstalledProvider: (() -> Bool)?
 
     // MARK: - State
 
@@ -93,6 +126,10 @@ final class MenuBarController: NSObject {
     private var popover: NSPopover?
     /// Hosting controller retained for rootView live-updates.
     private var panelHosting: NSHostingController<PanelRootView>?
+    /// Guard: only one "无法跳转" alert at a time (prevents rapid-click alert stacking).
+    private var isShowingTapAlert = false
+    /// Part C: throttles just-in-time hook hints to at most once per session, capped globally.
+    private var hookHintThrottle = HookHintThrottle()
 
     // MARK: - Init
 
@@ -119,7 +156,9 @@ final class MenuBarController: NSObject {
         guard let button = statusItem.button else { return }
         button.action = #selector(statusButtonClicked(_:))
         button.target = self
-        // No NSMenu — left-click routes to our action and we show an NSPopover instead.
+        // Listen for both left and right mouse-up so we can route right-click to NSMenu.
+        button.sendAction(on: [.leftMouseUp, .rightMouseUp])
+        // Keep statusItem.menu nil — assigning it would intercept left-clicks permanently.
         statusItem.menu = nil
     }
 
@@ -156,12 +195,13 @@ final class MenuBarController: NSObject {
         return PanelRootView(
             rows: rows,
             petVisible: petVisibilityProvider?() ?? false,
+            hookInstalled: hookInstalledProvider?() ?? false,
             onTap: { [weak self] id in self?.handleSessionTap(id: id) },
             onTogglePet: { [weak self] in
                 self?.onTogglePet?()
                 // Re-render the panel so the button label flips immediately.
                 self?.panelHosting?.rootView = self?.makePanelRootView() ?? PanelRootView(
-                    rows: [], petVisible: false,
+                    rows: [], petVisible: false, hookInstalled: false,
                     onTap: { _ in }, onTogglePet: {}, onOpenPreferences: {}, onQuit: {}
                 )
             },
@@ -197,9 +237,53 @@ final class MenuBarController: NSObject {
 
     /// AppKit delivers this on the main thread; `nonisolated` satisfies the `@objc` requirement,
     /// and we hop back to `@MainActor` immediately (same pattern as the existing B2 fix).
+    /// Right-click routes to the standard NSMenu; left-click routes to the popover.
     @objc nonisolated func statusButtonClicked(_ sender: AnyObject) {
+        // AppKit 保证此处在主线程；在让渡给 Swift concurrency 前同步捕获事件类型，
+        // 避免 Task 执行时 NSApp.currentEvent 已被替换的时序漏洞（Task2 评审 Important）。
+        let isRightClick = NSApp.currentEvent?.type == .rightMouseUp
         Task { @MainActor [weak self] in
+            if isRightClick {
+                self?.showRightClickMenu()
+                return
+            }
             self?.showPopover()
+        }
+    }
+
+    private func showRightClickMenu() {
+        guard let button = statusItem.button else { return }
+        let s = summaryProvider?() ?? (running: 0, waiting: 0)
+        let menu = NSMenu()
+        for row in MenuBarMenuModel.rows(runningCount: s.running, waitingCount: s.waiting) {
+            if row.command == .sessionSummary {
+                let it = NSMenuItem(title: row.title, action: nil, keyEquivalent: "")
+                it.isEnabled = false
+                menu.addItem(it)
+                menu.addItem(.separator())
+                continue
+            }
+            let it = NSMenuItem(
+                title: row.title,
+                action: #selector(handleMenuCommand(_:)),
+                keyEquivalent: row.shortcut ?? ""
+            )
+            it.target = self
+            it.representedObject = row.command
+            menu.addItem(it)
+        }
+        button.highlight(true)
+        menu.popUp(positioning: nil, at: NSPoint(x: 0, y: button.bounds.height + 4), in: button)
+        button.highlight(false)
+    }
+
+    @objc private func handleMenuCommand(_ sender: NSMenuItem) {
+        guard let cmd = sender.representedObject as? MenuCommand else { return }
+        switch cmd {
+        case .preferences:   onOpenPreferences?()
+        case .quit:          NSApplication.shared.terminate(nil)
+        case .about:         NSApp.orderFrontStandardAboutPanel(nil)
+        case .sessionSummary: break
         }
     }
 
@@ -210,13 +294,40 @@ final class MenuBarController: NSObject {
         }) else { return }
 
         let terminal = session.terminal
+        // Part C / Fix 2: jsonl-inferred sessions are identified by their process-internal
+        // source tag (硬约束 #9：用 session.source == .jsonl 判定来源，不用 terminal == nil 当代理).
+        // Capture before going off-main so we can check it in the alert block.
+        let isJsonlSession = (session.source == .jsonl)
         let fs = focusService
+        // Dismiss the popover before the off-main focus attempt.
+        popover?.performClose(nil)
+
         // Off-main — osascript blocks (Fix I-1 / B2 pattern).
         Task.detached {
-            _ = fs.focus(terminal)
+            let result = fs.focus(terminal)
+            // Inform the user when the terminal window can't be reached.
+            // .targetGone  — osascript ran but the session tab no longer exists.
+            // .unsupported — no terminal info at all (e.g. jsonl-inferred session).
+            if result == .targetGone || result == .unsupported {
+                await MainActor.run { [weak self] in
+                    guard let self, !self.isShowingTapAlert else { return } // 防连击叠加阻塞弹窗（Task9 评审 Important）
+                    self.isShowingTapAlert = true
+                    let alert = NSAlert()
+                    alert.messageText = "无法跳转到会话"
+                    // .targetGone=窗口已关；.unsupported=无终端信息（如 jsonl 推断会话）。文案兼顾两者。
+                    var infoText = "无法跳转到会话终端（可能已关闭，或终端信息不可用）。"
+                    // Part C: just-in-time hook hint — only for jsonl-inferred sessions,
+                    // throttled to once per session and capped globally by HookHintThrottle.
+                    if isJsonlSession && self.hookHintThrottle.shouldHint(sessionKey: id) {
+                        infoText += "\n\n💡 安装 Hook 可精确跳到这个 tab（会改 settings.json，自动备份/一键卸载）→ 在「首选项」中开启。"
+                    }
+                    alert.informativeText = infoText
+                    alert.alertStyle = .informational
+                    alert.addButton(withTitle: "好的")
+                    alert.runModal()
+                    self.isShowingTapAlert = false
+                }
+            }
         }
-
-        // Dismiss the popover after the user taps.
-        popover?.performClose(nil)
     }
 }

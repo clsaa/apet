@@ -17,7 +17,9 @@ macOS 原生 App（Swift / SwiftUI / AppKit，背景常驻 `LSUIElement`，无 D
 
 ## 状态
 
-✅ **M1 完成并可本地运行**：核心引擎 + App 壳全部实现，**201 个单元测试全绿**，经两轮 5 视角面板评审 + 三轮硬化。桌宠已验证可显示在桌面（CGWindowList onscreen=true）。
+✅ **M1 + M1.5 完成并可本地运行**：**309 个单元测试全绿**，多轮 5 视角面板评审 + 硬化。桌宠已验证在桌面（CGWindowList onscreen=true）。
+
+✨ **M1.5 开箱即用**：**不装 hook**，靠只读扫描 `~/.claude/projects/**.jsonl` 就能看到所有 Claude Code 会话——**包括当前正在跑的会话**（E2E 实测：当前会话显示绿点）。叠加常规 macOS 体验：菜单栏**右键标准菜单** + 左键面板（底部齿轮）、精简首启引导 + 隐私承诺、配置健康面板、hook/通知授权 **just-in-time**（用到时才问）。
 
 剩余为**上线人工门**（见下）。
 
@@ -37,21 +39,27 @@ apet (可执行, @MainActor GUI)
 Resources/apet-emit-event.sh  ← Claude hook 调用，把事件写进 events.ndjson
 ```
 
-数据流：Claude hook → `apet-emit-event.sh` 追加 `events.ndjson` → AppCoordinator(FSEvents) → SessionStore → 宠物/菜单栏/通知；点击 → TerminalFocusService 跳终端。
+数据流（两路融合，同一 SessionStore）：
+- **hook 实时**：Claude hook → `apet-emit-event.sh` 追加 `events.ndjson` → AppCoordinator(FSEvents) → SessionStore（精确终端跳转 + OS 通知）。
+- **jsonl 兜底**（M1.5，零配置）：`JSONLDirectoryWatcher` 扫 `~/.claude/projects/**.jsonl` →（内容信号 stop_reason/away_summary 派生状态、`SessionSource.jsonl` 标记、replay=false 不发通知）→ 同一 NDJSONIngestor（唯一 seq 源）→ SessionStore → 面板/桌宠。
+- 点击 → TerminalFocusService 跳终端（jsonl 会话无终端引用时降级"激活"并提示）。
 
 ## 构建 / 运行
 
 ```bash
 # 单元测试
-swift test                       # 201 tests
+swift test                       # 309 tests
 
 # 打包成 .app（unsigned，本地可运行）
 bash scripts/package-app.sh      # 产出 ./AgentPet.app
-open AgentPet.app                # 启动：菜单栏出现图标 + 桌面右下角出现宠物
+open AgentPet.app                # 启动：菜单栏图标 + 桌面右下角宠物 + 首次启动弹精简引导
 
-# 接入 Claude Code（让宠物收到事件）
-# 在 App 首选项 →「Hook 安装」对某个数据根点「安装」(会先展示 settings.json diff + 备份说明，确认后才写入)
-# 之后在该 profile 下跑 Claude Code，事件就会驱动宠物
+# 零配置即用：无需任何设置，App 自动只读扫描 ~/.claude/projects 显示所有会话（含当前在跑的）。
+#   菜单栏图标【右键】= 标准菜单（首选项/关于/退出）；【左键】= 会话面板（底部齿轮进首选项）。
+
+# 可选增强（精确跳回终端 tab + OS 通知）——用到时 App 会提示，或主动去：
+#   首选项 →「Hook 安装」对某个数据根点「安装」(先展示将写入 settings.json 的条目预览 + 自动备份，确认后才写)
+#   之后该 profile 下跑 Claude Code，hook 事件驱动精确跳转与通知
 ```
 
 需要 Xcode（XCTest + SwiftUI）。Swift 6.x 工具链；包固定 `swift-tools-version:5.9`。
@@ -68,13 +76,14 @@ open AgentPet.app                # 启动：菜单栏出现图标 + 桌面右下
 | 文档 | 路径 |
 |---|---|
 | 设计 v2（含红队对抗评审加固） | `docs/superpowers/specs/2026-06-27-apet-design.md` |
-| 核心引擎实现计划 | `docs/superpowers/plans/2026-06-27-apet-m1-core.md` |
-| App 壳实现计划 | `docs/superpowers/plans/2026-06-28-apet-m1-app-shell.md` |
-| 5 视角面板评审报告 ×2 | `docs/superpowers/specs/2026-06-28-panel*-review-*.md` |
+| M1.5 设计（jsonl兜底+常规体验，§13 二轮面板评审） | `docs/superpowers/specs/2026-06-28-apet-onboarding-jsonl-menubar-design.md` |
+| 各里程碑实现计划 | `docs/superpowers/plans/` |
+| 5 视角面板评审报告 | `docs/superpowers/specs/2026-06-28-panel*-review-*.md` |
 
 ## 路线图
 
-- **M1**（本期，完成）：核心引擎 + 可运行 App 壳 + iTerm2 跳转 + 通知 + 内置宠物 + 多数据根 + 门控 hook 安装。
+- **M1**（完成）：核心引擎 + 可运行 App 壳 + iTerm2 跳转 + 通知 + 内置宠物 + 多数据根 + 门控 hook 安装。
+- **M1.5**（本期，完成）：jsonl 兜底（零配置看到会话含当前在跑的）+ 右键菜单 + 首启引导 + 配置健康 + just-in-time 授权。
 - **M2**：上传照片+一键抠图、通知免打扰/会话静音、Terminal/Warp 精确跳转、内存驱逐落地、PostToolUse busy 心跳。
 - **M3**：进程探活合成 session_end、subagent 折叠、STALE 视觉强化、签名公证。
 - **M4**：公开契约 JSON Schema + 校验器 + 第三方样例（Qoder）。

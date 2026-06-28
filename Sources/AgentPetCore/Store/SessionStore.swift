@@ -43,7 +43,7 @@ public final class SessionStore {
             let finalInitialSt: SessionState = (replay && initialSt == .running) ? .stale : initialSt
             let s = Session(key: key, state: finalInitialSt, cwd: event.cwd,
                             title: event.title, terminal: event.terminal,
-                            lastSeq: seq, lastActiveAt: now)
+                            lastSeq: seq, lastActiveAt: now, source: event.source)
             sessions[key] = s
             return [.upserted(key)]
         }
@@ -58,6 +58,8 @@ public final class SessionStore {
         if let cwd = event.cwd { session.cwd = cwd }
         if let title = event.title { session.title = title }
         if let terminal = event.terminal { session.terminal = terminal }
+        // 来源合并：hook 一旦标记不被 jsonl 降级（hook 更精确）。
+        session.source = (session.source == .hook) ? .hook : event.source
 
         let newState = nextState(from: session.state, event: event)
         // 回放历史时，被 kill 的会话只有 session_start/busy 无 session_end，会重建成 RUNNING 绿点幽灵。
@@ -140,6 +142,8 @@ extension SessionStore {
         for (key, var session) in sessions {
             switch session.state {
             case .running:
+                // jsonl 会话生命周期由后续 watcher 驱动，不被定时器打灰（架构-B3）
+                guard session.source != .jsonl else { break }
                 if now - session.lastActiveAt > timeout {
                     session.state = .stale
                     sessions[key] = session
@@ -149,6 +153,33 @@ extension SessionStore {
                 break
             }
         }
+        return changes
+    }
+
+    /// Fix 4：仅当目标会话来源为 `.jsonl` 时才打灰，否则返回 []（不动 hook 会话）。
+    /// 抽出此守卫便于单测，并保证 hook 会话生命周期不被 jsonl watcher 的 .stale 信号误降级
+    /// （硬约束 #9：hook 一旦标记不被 jsonl 降级；#10：hook 生命周期 just-in-time，不由 watcher 驱动）。
+    @discardableResult
+    public func markStaleSessionIfJSONL(_ key: SessionKey, now: Double) -> [StoreChange] {
+        guard sessions[key]?.source == .jsonl else { return [] }
+        return markStaleSession(key, now: now)
+    }
+
+    /// 定向把指定 key 的会话置为 stale（running/waiting → stale）。
+    /// ended/stale 属终态或已达目标状态，返回 []；key 不存在同样返回 []。
+    /// 用于 jsonl watcher 检测会话消失时主动打灰，区别于定时 markStale（架构-B3）。
+    @discardableResult
+    public func markStaleSession(_ key: SessionKey, now: Double) -> [StoreChange] {
+        guard var session = sessions[key] else { return [] }
+        switch session.state {
+        case .ended, .stale: return []
+        case .running, .waiting: break
+        }
+        session.state = .stale
+        session.lastActiveAt = now
+        sessions[key] = session
+        let changes: [StoreChange] = [.upserted(key)]
+        emit(changes, replay: false)
         return changes
     }
 

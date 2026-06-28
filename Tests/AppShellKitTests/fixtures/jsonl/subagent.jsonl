@@ -1,0 +1,3 @@
+{"type":"last-prompt","lastPrompt":"handle sub task","sessionId":"aaaa0007-0000-0000-0000-000000000007"}
+{"type":"user","cwd":"/Users/test/proj","sessionId":"aaaa0007-0000-0000-0000-000000000007","timestamp":"2026-06-28T06:00:00.000Z","isSidechain":true,"entrypoint":"cli","version":"1.0.0"}
+{"type":"assistant","cwd":"/Users/test/proj","sessionId":"aaaa0007-0000-0000-0000-000000000007","timestamp":"2026-06-28T06:01:00.000Z","isSidechain":true,"entrypoint":"cli","version":"1.0.0","message":{"role":"assistant","content":[{"type":"text","text":"Working on sub task."}],"stop_reason":"end_turn"}}
