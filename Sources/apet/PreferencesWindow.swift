@@ -459,13 +459,15 @@ struct PreferencesView: View {
                     .foregroundStyle(.green)
             }
         case .degraded(let reason):
+            // 两种 degraded 原因（jsonl 数据源不可用 / 通知被拒）都是真正的故障——
+            // 用红色而非橙色，与"只有真失败才红❌"的产品决策一致（Task12 评审 Important，产品-m8）。
             VStack(alignment: .leading, spacing: 6) {
                 HStack(spacing: 6) {
-                    Image(systemName: "exclamationmark.triangle.fill")
-                        .foregroundStyle(.orange)
+                    Image(systemName: "exclamationmark.circle.fill")
+                        .foregroundStyle(.red)
                     Text("配置需要关注：\(reason)")
                         .font(.subheadline)
-                        .foregroundStyle(.orange)
+                        .foregroundStyle(.red)
                 }
                 if case .denied = notifStatusForHealth {
                     Button("打开系统通知设置") {
