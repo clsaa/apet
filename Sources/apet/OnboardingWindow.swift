@@ -134,11 +134,14 @@ private struct OnboardingView: View {
 
 /// 托管 ``OnboardingView`` 的 NSWindow 控制器
 @MainActor
-final class OnboardingWindowController: NSWindowController {
+final class OnboardingWindowController: NSWindowController, NSWindowDelegate {
 
     private var hostingController: NSHostingController<OnboardingView>?
+    /// 完成回调（Optional 实现幂等：按钮"知道了"与点 × 关窗都只触发一次）。
+    private var completion: (() -> Void)?
 
-    init(onDone: @escaping () -> Void) {
+    init(onComplete: @escaping () -> Void) {
+        self.completion = onComplete
         let window = NSWindow(
             contentRect: NSRect(x: 0, y: 0, width: 440, height: 320),
             styleMask: [.titled, .closable],
@@ -150,8 +153,10 @@ final class OnboardingWindowController: NSWindowController {
         window.isReleasedWhenClosed = false
 
         super.init(window: window)
+        window.delegate = self
 
-        let view = OnboardingView(onDone: onDone)
+        // 按钮"知道了"也走同一幂等 complete()，与 × 关窗统一。
+        let view = OnboardingView(onDone: { [weak self] in self?.complete() })
         let hc = NSHostingController(rootView: view)
         hostingController = hc
         window.contentViewController = hc
@@ -162,6 +167,19 @@ final class OnboardingWindowController: NSWindowController {
     func show() {
         window?.makeKeyAndOrderFront(nil)
         NSApp.activate(ignoringOtherApps: true)
+    }
+
+    /// 幂等完成：触发一次 completion 并关窗。按钮与 × 两条路径都汇聚于此（Task11 评审 Important）。
+    private func complete() {
+        guard let c = completion else { return }
+        completion = nil
+        c()
+        window?.close()
+    }
+
+    /// 点 × 关窗也置首启标志，避免下次启动重复弹窗。
+    func windowWillClose(_ notification: Notification) {
+        complete()
     }
 }
 
@@ -192,8 +210,8 @@ enum OnboardingWindow {
     ///
     /// - Parameter onDone: 用户点击"知道了"后的回调。
     static func show(onDone: @escaping () -> Void) {
+        // onComplete 由控制器在按钮/× 任一路径幂等触发一次；这里只负责释放强引用 + 转发 onDone。
         let wc = OnboardingWindowController {
-            OnboardingWindow.controller?.window?.close()
             OnboardingWindow.controller = nil
             onDone()
         }
