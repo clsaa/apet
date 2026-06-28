@@ -353,7 +353,11 @@ struct PreferencesView: View {
                     hookMarker: hookMarker,
                     runnerPath: runnerPath,
                     onRemove: {
+                        // 移除数据根：同时加入 excludedRoots 防止自动发现再次加入（M2-B）。
                         config.dataRoots.removeAll { $0.path == root.path }
+                        if !config.excludedRoots.contains(root.path) {
+                            config.excludedRoots.append(root.path)
+                        }
                     },
                     onChanged: {
                         // Fix 5：装/卸 hook 后重置 healthRefreshID，触发 .task(id:) 重跑健康刷新。
