@@ -278,6 +278,10 @@ struct PreferencesView: View {
     @State private var newRootPath = ""
     @State private var saveError: String?
 
+    // MARK: - 宠物上传控制器（可选；headless / 测试时为 nil）
+    private let uploadController: PetUploadController?
+    private let customStore: CustomPetStore?
+
     // MARK: - 快捷键录制状态
     @State private var isRecordingHotKey = false
     @StateObject private var hotKeyRecorder = HotKeyRecorder()
@@ -295,10 +299,18 @@ struct PreferencesView: View {
     /// Changing this UUID forces `.task(id:)` to re-run `refreshHealthStatus`.
     @State private var healthRefreshID = UUID()
 
-    init(config: AppConfig, configStore: ConfigStore, onSave: @escaping (AppConfig) -> Void) {
+    init(
+        config: AppConfig,
+        configStore: ConfigStore,
+        onSave: @escaping (AppConfig) -> Void,
+        uploadController: PetUploadController? = nil,
+        customStore: CustomPetStore? = nil
+    ) {
         _config = State(initialValue: config)
         self.configStore = configStore
         self.onSave = onSave
+        self.uploadController = uploadController
+        self.customStore = customStore
         // Derive the initial preset tag from saved config values.
         let initPreset: String
         if config.dndStartMin == 1380 && config.dndEndMin == 420 { initPreset = "lateNight" }
@@ -614,12 +626,76 @@ struct PreferencesView: View {
             Label("宠物形象", systemImage: "pawprint")
                 .font(.headline)
 
+            // ── 内置宠物 ─────────────────────────────────────────────────────────
             Picker("选择宠物", selection: $config.selectedPet) {
                 Text("🐕 柴犬（Shiba）").tag("shiba")
                 Text("🐩 比熊（Bichon）").tag("bichon")
             }
             .pickerStyle(.radioGroup)
+
+            // ── 已上传自定义宠物 ─────────────────────────────────────────────────
+            if let store = customStore {
+                let ids = store.list()
+                if !ids.isEmpty {
+                    Divider()
+                    Text("已上传照片")
+                        .font(.subheadline)
+                        .foregroundStyle(.secondary)
+
+                    ForEach(ids, id: \.self) { id in
+                        customPetRow(id: id, store: store)
+                    }
+                }
+            }
+
+            // ── 上传照片按钮 ─────────────────────────────────────────────────────
+            Button("上传照片…") {
+                uploadController?.upload()
+            }
+            .buttonStyle(.bordered)
+            .help("上传一张宠物照片（PNG / JPG），可自动抠图去除背景")
         }
+    }
+
+    @ViewBuilder
+    private func customPetRow(id: String, store: CustomPetStore) -> some View {
+        let hasCutout = FileManager.default.fileExists(atPath: store.cutoutPath(id: id))
+        HStack(spacing: 8) {
+            Image(
+                systemName: hasCutout
+                    ? "checkmark.circle.fill"
+                    : "exclamationmark.triangle.fill"
+            )
+            .foregroundStyle(hasCutout ? Color.green : Color.orange)
+            .frame(width: 16)
+
+            VStack(alignment: .leading, spacing: 2) {
+                Text(hasCutout ? "✓ 已抠图" : "⚠ 使用原图")
+                    .font(.caption)
+                    .foregroundStyle(hasCutout ? .primary : .secondary)
+                Text(id)
+                    .font(.system(.caption2, design: .monospaced))
+                    .foregroundStyle(.tertiary)
+                    .lineLimit(1)
+                    .truncationMode(.middle)
+            }
+
+            Spacer()
+
+            Button("设为当前") {
+                uploadController?.setCurrent(id: id)
+            }
+            .controlSize(.small)
+            .buttonStyle(.bordered)
+
+            Button("重新抠图") {
+                uploadController?.recutout(id: id)
+            }
+            .controlSize(.small)
+            .buttonStyle(.bordered)
+            .help("重新运行 Vision 抠图（macOS 14+，失败时保持当前宠物不变）")
+        }
+        .padding(.vertical, 2)
     }
 
     // MARK: - Part B: Config health section
@@ -900,7 +976,13 @@ final class PreferencesWindowController: NSWindowController {
 
     private var hostingController: NSHostingController<PreferencesView>?
 
-    init(config: AppConfig, configStore: ConfigStore, onSave: @escaping (AppConfig) -> Void) {
+    init(
+        config: AppConfig,
+        configStore: ConfigStore,
+        onSave: @escaping (AppConfig) -> Void,
+        uploadController: PetUploadController? = nil,
+        customStore: CustomPetStore? = nil
+    ) {
         let window = NSWindow(
             contentRect: NSRect(x: 0, y: 0, width: 520, height: 520),
             styleMask: [.titled, .closable, .resizable, .miniaturizable],
@@ -913,7 +995,13 @@ final class PreferencesWindowController: NSWindowController {
 
         super.init(window: window)
 
-        let view = PreferencesView(config: config, configStore: configStore, onSave: onSave)
+        let view = PreferencesView(
+            config: config,
+            configStore: configStore,
+            onSave: onSave,
+            uploadController: uploadController,
+            customStore: customStore
+        )
         let hc = NSHostingController(rootView: view)
         hostingController = hc
         window.contentViewController = hc

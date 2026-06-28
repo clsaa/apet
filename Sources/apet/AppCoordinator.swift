@@ -45,6 +45,11 @@ final class AppCoordinator {
 
     private var preferencesController: PreferencesWindowController?
 
+    /// Shared custom-pet store (created once when not headless; nil in headless mode).
+    private var customStore: CustomPetStore?
+    /// Controls the upload → cutout → apply-pet flow; nil in headless mode.
+    private var uploadController: PetUploadController?
+
     // MARK: - Derived config helpers
 
     /// Convert the string-encoded notifyMode into the typed enum consumed by NotificationDecider.
@@ -156,6 +161,20 @@ final class AppCoordinator {
                 fileOps: RealFileOps(),
                 idProvider: { UUID().uuidString }
             )
+            self.customStore = customStore
+
+            // Wire up the applyPet callback: updates live pet window + persists config.
+            let applyPetClosure: (PetKind) -> Void = { [weak self] kind in
+                guard let self else { return }
+                self.petWindow?.applyPet(kind)
+                self.config.selectedPet = Self.petKindToString(kind)
+                try? self.configStore.save(self.config)
+            }
+            self.uploadController = PetUploadController(
+                store: customStore,
+                applyPet: applyPetClosure
+            )
+
             let initialSelection = PetSelection.parse(config.selectedPet)
             let pw = PetWindowController(
                 focusService: focusService,
@@ -317,7 +336,9 @@ final class AppCoordinator {
             configStore: configStore,
             onSave: { [weak self] newConfig in
                 self?.applyConfig(newConfig)
-            }
+            },
+            uploadController: uploadController,
+            customStore: customStore
         )
         preferencesController = pc
         pc.show()
@@ -357,6 +378,16 @@ final class AppCoordinator {
         let hint = newConfig.panelHotKey.displayString + " 打开/关闭"
         menuBar?.hotkeyHint = hint
         petWindow?.hotkeyHint = hint
+    }
+
+    // MARK: - Private: helpers
+
+    /// Converts a ``PetKind`` to the string form stored in ``AppConfig.selectedPet``.
+    private static func petKindToString(_ kind: PetKind) -> String {
+        switch kind {
+        case .builtin(let name): return name
+        case .custom(let id):   return "custom:\(id)"
+        }
     }
 
     // MARK: - Private: panel toggle (hot key target)
