@@ -162,6 +162,16 @@ final class MenuBarController: NSObject {
         button.sendAction(on: [.leftMouseUp, .rightMouseUp])
         // Keep statusItem.menu nil — assigning it would intercept left-clicks permanently.
         statusItem.menu = nil
+        // 启动即可见：立即渲染 idle 态 pawprint 图标，避免首次 update() 调用前按钮为空白。
+        let idleSummary = PetSummary(
+            state: .idle,
+            runningCount: 0,
+            waitingCount: 0,
+            attentionCount: 0,
+            staleCount: 0,
+            acknowledgedCount: 0
+        )
+        applyPresentation(MenuBarPresenter.make(from: idleSummary))
     }
 
     // MARK: - Private: button appearance
