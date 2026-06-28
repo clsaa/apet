@@ -42,16 +42,29 @@ public struct AppConfig: Codable, Equatable {
     public var readGrayAfterSec: Double
     /// 呼出面板的全局快捷键配置。默认 ⌥⌘P。
     public var panelHotKey: HotKeyConfig
+    /// 免打扰模式开关。默认 false（不开启）。
+    public var dndEnabled: Bool
+    /// 免打扰开始时间（分钟，0 = 00:00）。默认 0。
+    public var dndStartMin: Int
+    /// 免打扰结束时间（分钟，0 = 00:00）。默认 0。
+    public var dndEndMin: Int
+    /// 从多 root 自动发现中排除的路径列表。默认空（不排除任何路径）。
+    public var excludedRoots: [String]
 
-    // CodingKeys：含 readGrayAfterSec / panelHotKey，供自定义 decoder 和 synthesized encoder 共同使用。
+    // CodingKeys：含全部字段，供自定义 decoder 和 synthesized encoder 共同使用。
     private enum CodingKeys: String, CodingKey {
         case dataRoots, displayMode, notifyMode, staleAfterSec, endedAfterSec,
-             waitingEndedAfterSec, selectedPet, readGrayAfterSec, panelHotKey
+             waitingEndedAfterSec, selectedPet, readGrayAfterSec, panelHotKey,
+             dndEnabled, dndStartMin, dndEndMin, excludedRoots
     }
 
     /// 自定义解码：旧版 config.json 缺少可选字段时用默认值，不丢失其他已有设置。
     /// - `readGrayAfterSec` 缺失 → 3600
     /// - `panelHotKey` 缺失 → `.defaultPanel`（⌥⌘P）
+    /// - `dndEnabled` 缺失 → false
+    /// - `dndStartMin` 缺失 → 0
+    /// - `dndEndMin` 缺失 → 0
+    /// - `excludedRoots` 缺失 → []
     public init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
         dataRoots            = try c.decode([DataRoot].self, forKey: .dataRoots)
@@ -63,6 +76,10 @@ public struct AppConfig: Codable, Equatable {
         selectedPet          = try c.decode(String.self,    forKey: .selectedPet)
         readGrayAfterSec     = try c.decodeIfPresent(Double.self,        forKey: .readGrayAfterSec) ?? 3600
         panelHotKey          = try c.decodeIfPresent(HotKeyConfig.self,  forKey: .panelHotKey) ?? .defaultPanel
+        dndEnabled           = try c.decodeIfPresent(Bool.self,          forKey: .dndEnabled)    ?? false
+        dndStartMin          = try c.decodeIfPresent(Int.self,           forKey: .dndStartMin)   ?? 0
+        dndEndMin            = try c.decodeIfPresent(Int.self,           forKey: .dndEndMin)     ?? 0
+        excludedRoots        = try c.decodeIfPresent([String].self,      forKey: .excludedRoots) ?? []
     }
 
     public init(
@@ -74,7 +91,11 @@ public struct AppConfig: Codable, Equatable {
         waitingEndedAfterSec: Double,
         selectedPet: String,
         readGrayAfterSec: Double = 3600,
-        panelHotKey: HotKeyConfig = .defaultPanel
+        panelHotKey: HotKeyConfig = .defaultPanel,
+        dndEnabled: Bool = false,
+        dndStartMin: Int = 0,
+        dndEndMin: Int = 0,
+        excludedRoots: [String] = []
     ) {
         self.dataRoots = dataRoots
         self.displayMode = displayMode
@@ -85,6 +106,10 @@ public struct AppConfig: Codable, Equatable {
         self.selectedPet = selectedPet
         self.readGrayAfterSec = readGrayAfterSec
         self.panelHotKey = panelHotKey
+        self.dndEnabled = dndEnabled
+        self.dndStartMin = dndStartMin
+        self.dndEndMin = dndEndMin
+        self.excludedRoots = excludedRoots
     }
 
     /// Factory that produces the out-of-the-box defaults.
@@ -103,7 +128,11 @@ public struct AppConfig: Codable, Equatable {
             waitingEndedAfterSec: 28800,
             selectedPet: "shiba",
             readGrayAfterSec: 3600,
-            panelHotKey: .defaultPanel
+            panelHotKey: .defaultPanel,
+            dndEnabled: false,
+            dndStartMin: 0,
+            dndEndMin: 0,
+            excludedRoots: []
         )
     }
 }

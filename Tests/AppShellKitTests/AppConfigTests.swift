@@ -216,4 +216,58 @@ final class AppConfigTests: XCTestCase {
         XCTAssertEqual(loaded.panelHotKey.modifiers, 4096 | 256)
         XCTAssertEqual(loaded.panelHotKey.keyLabel, "Q")
     }
+
+    // MARK: - M2 dndEnabled / dndStartMin / dndEndMin / excludedRoots 字段
+
+    /// 旧版 config.json（仅含原始 7 个必需字段，无可选字段）解码后：
+    /// 既有字段完整保留，4 个新字段全部取默认值。
+    func test_decode_oldJson_withoutDndAndExcluded_keepsSettings_defaults() throws {
+        let oldJson = """
+        {
+          "dataRoots": [{"agent": "claude-code", "path": "/tmp/root"}],
+          "displayMode": "menuBarOnly",
+          "endedAfterSec": 7200,
+          "notifyMode": "everyStop",
+          "selectedPet": "bichon",
+          "staleAfterSec": 300,
+          "waitingEndedAfterSec": 3600
+        }
+        """
+        let data = oldJson.data(using: .utf8)!
+        let config = try JSONDecoder().decode(AppConfig.self, from: data)
+
+        // 既有字段完整保留
+        XCTAssertEqual(config.selectedPet, "bichon",       "selectedPet 应保留")
+        XCTAssertEqual(config.notifyMode, "everyStop",     "notifyMode 应保留")
+        XCTAssertEqual(config.displayMode, "menuBarOnly",  "displayMode 应保留")
+        XCTAssertEqual(config.dataRoots.first?.path, "/tmp/root", "dataRoots 应保留")
+        XCTAssertEqual(config.staleAfterSec, 300,          "staleAfterSec 应保留")
+        XCTAssertEqual(config.endedAfterSec, 7200,         "endedAfterSec 应保留")
+        XCTAssertEqual(config.waitingEndedAfterSec, 3600,  "waitingEndedAfterSec 应保留")
+        // 可选字段也应取默认值
+        XCTAssertEqual(config.readGrayAfterSec, 3600,      "旧 json 无此字段时应默认 3600")
+        XCTAssertEqual(config.panelHotKey, HotKeyConfig.defaultPanel, "旧 json 无 panelHotKey 时应默认 .defaultPanel")
+
+        // M2 新字段 → 默认值
+        XCTAssertEqual(config.dndEnabled, false,           "旧 json 无 dndEnabled 时应默认 false")
+        XCTAssertEqual(config.dndStartMin, 0,              "旧 json 无 dndStartMin 时应默认 0")
+        XCTAssertEqual(config.dndEndMin, 0,                "旧 json 无 dndEndMin 时应默认 0")
+        XCTAssertEqual(config.excludedRoots, [],           "旧 json 无 excludedRoots 时应默认 []")
+    }
+
+    /// round-trip：dndEnabled/dndStartMin/dndEndMin/excludedRoots encode→decode 值完整保留。
+    func test_roundTrip_withDndAndExcluded() throws {
+        let store = ConfigStore(url: configURL)
+        var custom = AppConfig.defaults
+        custom.dndEnabled   = true
+        custom.dndStartMin  = 1380   // 23:00
+        custom.dndEndMin    = 420    // 07:00
+        custom.excludedRoots = ["/a/b"]
+        try store.save(custom)
+        let loaded = store.load()
+        XCTAssertEqual(loaded.dndEnabled,    true,    "dndEnabled 应 round-trip")
+        XCTAssertEqual(loaded.dndStartMin,   1380,    "dndStartMin 应 round-trip")
+        XCTAssertEqual(loaded.dndEndMin,     420,     "dndEndMin 应 round-trip")
+        XCTAssertEqual(loaded.excludedRoots, ["/a/b"], "excludedRoots 应 round-trip")
+    }
 }
