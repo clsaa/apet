@@ -21,6 +21,8 @@ final class PetUploadController {
     private let store: CustomPetStore
     /// AppCoordinator-supplied callback: updates live pet + writes config.selectedPet + saves.
     private let applyPet: (PetKind) -> Void
+    /// In-flight cutout task — cancelled before starting a new one (MINOR-6).
+    private var cutoutTask: Task<Void, Never>?
 
     init(store: CustomPetStore, applyPet: @escaping (PetKind) -> Void) {
         self.store = store
@@ -75,6 +77,12 @@ final class PetUploadController {
     // MARK: - Private helpers
 
     private func promptCutout(id: String) {
+        // MINOR-8: macOS 13 → Vision 不可用，跳过抠图对话框直接用原图。
+        guard #available(macOS 14.0, *) else {
+            applyPet(.custom(id: id))
+            return
+        }
+
         let alert = NSAlert()
         alert.messageText = "一键抠图？"
         alert.informativeText = """
@@ -96,8 +104,8 @@ final class PetUploadController {
             // User explicitly chose original — PetView circle-clips it (spec §3 用原图).
             applyPet(.custom(id: id))
         default:
-            // 取消：不更改当前宠物，已导入的图片仍保留（可从首选项管理）.
-            break
+            // MINOR-5: 取消时删除孤立的导入文件，避免出现无法被选取的僵尸记录。
+            try? store.delete(id: id)
         }
     }
 
@@ -105,7 +113,10 @@ final class PetUploadController {
     /// - On success: `applyPet(.custom(id:))`.
     /// - On failure: show `onFailureTitle` + error detail; **never call applyPet** (spec §3 产品B-1).
     private func runCutout(id: String, srcPath: String, dstPath: String, onFailureTitle: String) {
-        Task {
+        // MINOR-6: 取消上一个未完成的抠图任务，防止快速多次点击开启并发抠图。
+        cutoutTask?.cancel()
+        cutoutTask = Task { [weak self] in
+            guard let self else { return }
             let cutter = makeForegroundCutter()
             let result: Result<Void, CutoutError>
             do {
@@ -116,6 +127,8 @@ final class PetUploadController {
             } catch {
                 result = .failure(.inferenceFailure("\(error)"))
             }
+            // 任务被取消后不处理结果（避免向已取消任务的 id 调用 applyPet）。
+            guard !Task.isCancelled else { return }
             switch CutoutDecision.decide(result: result, cutoutPath: dstPath) {
             case .setAsPet:
                 applyPet(.custom(id: id))

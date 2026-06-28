@@ -78,6 +78,21 @@ final class PetWindowController: NSObject {
     /// Refresh the pet image and update the open popover (if any).
     func update(summary: PetSummary, sessions: [Session]) {
         let presentation = PetPresenter.make(from: summary)
+
+        // MINOR-9: guard rootView replacement when nothing changed.
+        // NSHostingView.rootView setter rebuilds the SwiftUI graph, resetting @State
+        // variables and producing a visible animation frame skip every 8 s (the jsonl
+        // watcher tick interval). Skip if both presentation and sessions are unchanged.
+        let sessionsChanged = sessions != currentSessions
+        guard presentation != currentPresentation || sessionsChanged else {
+            // Nothing changed — still update the popover if it is open.
+            if let popover, popover.isShown,
+               let panelVC = popover.contentViewController as? SessionPanelHostController {
+                panelVC.update(rows: sessions.map(SessionRowMapper.make))
+            }
+            return
+        }
+
         currentPresentation = presentation
         currentSessions = sessions
         let img = PetAssetLoader.image(

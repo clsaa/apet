@@ -71,7 +71,9 @@ final class NotificationService: NSObject {
         mode: NotifyMode,
         replay: Bool
     ) {
-        let now = Date().timeIntervalSince1970
+        // MINOR-7b: 合并为一个 Date() 调用，避免两次墙钟读取之间的微小漂移。
+        let nowDate = Date()
+        let now = nowDate.timeIntervalSince1970
         guard let content = gate.evaluate(event: event, session: session,
                                           mode: mode, replay: replay, now: now) else { return }
 
@@ -79,7 +81,7 @@ final class NotificationService: NSObject {
         // Time is obtained here (service boundary, same pattern as the `now` above) so that
         // the pure `shouldSuppress` function itself never touches system state.
         let cal = Calendar.current
-        let comps = cal.dateComponents([.hour, .minute], from: Date())
+        let comps = cal.dateComponents([.hour, .minute], from: nowDate)
         let nowMin = (comps.hour ?? 0) * 60 + (comps.minute ?? 0)
         if DNDWindow.shouldSuppress(dnd: dndProvider(), nowMinOfDay: nowMin) { return }
 

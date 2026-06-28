@@ -34,6 +34,10 @@ public func makeForegroundCutter() -> ForegroundCutter {
 @available(macOS 14.0, *)
 public struct VisionForegroundCutter: ForegroundCutter {
 
+    /// 共享 CIContext，避免每次 cutout 调用都重新初始化（MINOR-7a）。
+    /// `CIContext` 初始化会分配 GPU/Metal 资源，代价较高。
+    private static let sharedContext = CIContext()
+
     public init() {}
 
     public func cutout(srcPath: String, dstPath: String) async throws {
@@ -101,25 +105,36 @@ public struct VisionForegroundCutter: ForegroundCutter {
             )
         }
 
-        // ── Step 5: CVPixelBuffer → PNG data → disk ───────────────────────────────
-        // Any nil here is a system/disk issue, not a Vision inference problem.
+        // ── Step 5: CVPixelBuffer → PNG (orientation=up) → disk ─────────────────
+        // Use CGImageDestination instead of NSBitmapImageRep so we can embed
+        // kCGImagePropertyOrientation = .up in the output file.
+        //
+        // Vision corrected the pixels to display orientation in Step 2 (it receives
+        // the stored EXIF orientation and un-rotates the pixel buffer during inference).
+        // NSBitmapImageRep strips all metadata, leaving the PNG without an orientation tag.
+        // Image loaders that see no tag default to .up — but macOS uses the EXIF tag when
+        // present, so a portrait photo previously written with NSBitmapImageRep appeared
+        // sideways because the source file had orientation=6 (.right) copied through.
+        // Fix (MAJOR-3): write the PNG via CGImageDestination with orientation=1 (.up)
+        // so loaders know the pixels are already in display orientation. (Any nil below
+        // is a system/disk issue, not a Vision inference problem.)
         let ciImage = CIImage(cvPixelBuffer: pixelBuffer)
-        let ciContext = CIContext()
         // 显式 RGBA8 + sRGB：保住 alpha 通道，否则透明背景会被压成黑/白方块（安全评审 MAJ-1）。
         let rgbColorSpace = CGColorSpace(name: CGColorSpace.sRGB) ?? CGColorSpaceCreateDeviceRGB()
-        guard let resultCGImage = ciContext.createCGImage(
+        guard let resultCGImage = Self.sharedContext.createCGImage(
             ciImage, from: ciImage.extent, format: .RGBA8, colorSpace: rgbColorSpace
         ) else {
             throw CutoutError.outputWriteFailed("CIContext.createCGImage returned nil")
         }
-        let rep = NSBitmapImageRep(cgImage: resultCGImage)
-        guard let pngData = rep.representation(using: .png, properties: [:]) else {
-            throw CutoutError.outputWriteFailed("NSBitmapImageRep PNG representation returned nil")
+        let dstCFURL = URL(fileURLWithPath: dstPath) as CFURL
+        guard let dest = CGImageDestinationCreateWithURL(dstCFURL, "public.png" as CFString, 1, nil) else {
+            throw CutoutError.outputWriteFailed("CGImageDestinationCreateWithURL returned nil")
         }
-        do {
-            try pngData.write(to: URL(fileURLWithPath: dstPath), options: .atomic)
-        } catch {
-            throw CutoutError.outputWriteFailed("write PNG failed: \(error.localizedDescription)")
+        // Orientation 1 = .up: pixels are already in display orientation; no rotation needed.
+        let imgProps: [CFString: Any] = [kCGImagePropertyOrientation: CGImagePropertyOrientation.up.rawValue]
+        CGImageDestinationAddImage(dest, resultCGImage, imgProps as CFDictionary)
+        guard CGImageDestinationFinalize(dest) else {
+            throw CutoutError.outputWriteFailed("CGImageDestinationFinalize failed: \(dstPath)")
         }
     }
 }

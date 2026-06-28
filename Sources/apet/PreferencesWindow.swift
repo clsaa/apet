@@ -3,6 +3,16 @@ import SwiftUI
 import AppShellKit
 import UserNotifications
 
+// MARK: - Notification names
+
+extension Notification.Name {
+    /// Posted by ``PreferencesWindowController/refreshConfig(_:)`` when the
+    /// selected pet changes from outside (e.g. after ``applyPetClosure`` fires in AppCoordinator).
+    /// ``PreferencesView`` observes this to update only `config.selectedPet` in-place,
+    /// preserving other unsaved @State edits (MAJOR-1 fix).
+    static let apetSelectedPetChanged = Notification.Name("apet.selectedPetChanged")
+}
+
 // MARK: - HookRowView
 
 /// Per-data-root hook install/uninstall row with gated confirmation.
@@ -39,9 +49,21 @@ private struct HookRowView: View {
                         .font(.system(.body, design: .monospaced))
                         .lineLimit(1)
                         .truncationMode(.middle)
-                    Text(root.agent)
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
+                    HStack(spacing: 4) {
+                        Text(root.agent)
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                        // MAJOR-2: 显示「自动发现」徽标，让用户知道此根是 apet 自动加入的
+                        if root.isAutoDiscovered {
+                            Text("自动发现")
+                                .font(.caption2)
+                                .padding(.horizontal, 4)
+                                .padding(.vertical, 1)
+                                .background(Color.accentColor.opacity(0.15))
+                                .foregroundStyle(Color.accentColor)
+                                .cornerRadius(3)
+                        }
+                    }
                 }
                 Spacer(minLength: 8)
                 Button(action: onRemove) {
@@ -344,6 +366,15 @@ struct PreferencesView: View {
         .onDisappear {
             // 离开时若还在录制状态，自动停止，避免 monitor 泄漏
             hotKeyRecorder.stop()
+        }
+        // MAJOR-1: 当 applyPetClosure 从外部（首选项之外）改变宠物时，
+        // 更新 @State config.selectedPet，防止旧快照在"保存"时覆盖新选择的宠物。
+        // 只更新 selectedPet 字段，保留其他正在编辑中的设置。
+        .onReceive(
+            NotificationCenter.default.publisher(for: .apetSelectedPetChanged)
+        ) { note in
+            guard let pet = note.userInfo?["selectedPet"] as? String else { return }
+            config.selectedPet = pet
         }
     }
 
@@ -660,15 +691,36 @@ struct PreferencesView: View {
     @ViewBuilder
     private func customPetRow(id: String, store: CustomPetStore) -> some View {
         let hasCutout = FileManager.default.fileExists(atPath: store.cutoutPath(id: id))
-        HStack(spacing: 8) {
-            Image(
-                systemName: hasCutout
-                    ? "checkmark.circle.fill"
-                    : "exclamationmark.triangle.fill"
-            )
-            .foregroundStyle(hasCutout ? Color.green : Color.orange)
-            .frame(width: 16)
+        let isSelected = config.selectedPet == "custom:\(id)"
+        // MAJOR-4: 优先展示抠图缩略图，无则退回原图缩略图（24×24 pt）。
+        let thumbPath = hasCutout ? store.cutoutPath(id: id) : store.originalPath(id: id)
+        let thumbImage = NSImage(contentsOfFile: thumbPath)
 
+        HStack(spacing: 8) {
+            // ── 24×24 缩略图 ──────────────────────────────────────────────────────
+            if let img = thumbImage {
+                Image(nsImage: img)
+                    .resizable()
+                    .scaledToFill()
+                    .frame(width: 24, height: 24)
+                    .clipShape(Circle())
+                    .overlay(
+                        Circle()
+                            .stroke(Color(nsColor: .separatorColor), lineWidth: 0.5)
+                    )
+            } else {
+                // 图片还未生成时显示占位符
+                Circle()
+                    .fill(Color(nsColor: .controlBackgroundColor))
+                    .frame(width: 24, height: 24)
+                    .overlay(
+                        Image(systemName: "pawprint")
+                            .font(.system(size: 10))
+                            .foregroundStyle(.secondary)
+                    )
+            }
+
+            // ── 状态描述 ─────────────────────────────────────────────────────────
             VStack(alignment: .leading, spacing: 2) {
                 Text(hasCutout ? "✓ 已抠图" : "⚠ 使用原图")
                     .font(.caption)
@@ -682,18 +734,34 @@ struct PreferencesView: View {
 
             Spacer()
 
+            // MAJOR-4: 当前选中的宠物显示对勾
+            if isSelected {
+                Image(systemName: "checkmark")
+                    .foregroundStyle(Color.accentColor)
+                    .font(.system(size: 12, weight: .semibold))
+            }
+
             Button("设为当前") {
                 uploadController?.setCurrent(id: id)
             }
             .controlSize(.small)
             .buttonStyle(.bordered)
 
-            Button("重新抠图") {
-                uploadController?.recutout(id: id)
+            // MINOR-8: macOS 13 无 Vision，灰掉"重新抠图"按钮
+            if #available(macOS 14.0, *) {
+                Button("重新抠图") {
+                    uploadController?.recutout(id: id)
+                }
+                .controlSize(.small)
+                .buttonStyle(.bordered)
+                .help("重新运行 Vision 抠图（macOS 14+，失败时保持当前宠物不变）")
+            } else {
+                Button("重新抠图") {}
+                    .controlSize(.small)
+                    .buttonStyle(.bordered)
+                    .disabled(true)
+                    .help("需要 macOS 14 或更新版本")
             }
-            .controlSize(.small)
-            .buttonStyle(.bordered)
-            .help("重新运行 Vision 抠图（macOS 14+，失败时保持当前宠物不变）")
         }
         .padding(.vertical, 2)
     }
@@ -1013,5 +1081,19 @@ final class PreferencesWindowController: NSWindowController {
     func show() {
         window?.makeKeyAndOrderFront(nil)
         NSApp.activate(ignoringOtherApps: true)
+    }
+
+    /// Notify the hosted ``PreferencesView`` that `selectedPet` has changed from outside
+    /// (e.g. the user picked a custom pet via the "设为当前" button, which calls
+    /// `applyPetClosure` in AppCoordinator, which in turn calls `refreshConfig`).
+    ///
+    /// ``PreferencesView`` listens via `.onReceive` and updates only `config.selectedPet`,
+    /// leaving other in-progress edits intact (MAJOR-1 fix).
+    func refreshConfig(_ newConfig: AppConfig) {
+        NotificationCenter.default.post(
+            name: .apetSelectedPetChanged,
+            object: nil,
+            userInfo: ["selectedPet": newConfig.selectedPet]
+        )
     }
 }

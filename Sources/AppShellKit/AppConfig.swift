@@ -11,10 +11,27 @@ public struct DataRoot: Codable, Equatable, Identifiable {
     public var path: String
     /// Agent type string; currently always `"claude-code"`.
     public var agent: String
+    /// 是否由自动发现机制添加（非用户手动配置）。
+    /// 旧版 JSON 不含此字段时解码默认 false，保证向后兼容（M2-B Fix MAJOR-2）。
+    public var isAutoDiscovered: Bool
 
-    public init(path: String, agent: String = "claude-code") {
+    // 显式 CodingKeys：让自定义 init(from:) 与合成 encode(to:) 协同覆盖全部字段。
+    private enum CodingKeys: String, CodingKey {
+        case path, agent, isAutoDiscovered
+    }
+
+    public init(path: String, agent: String = "claude-code", isAutoDiscovered: Bool = false) {
         self.path = path
         self.agent = agent
+        self.isAutoDiscovered = isAutoDiscovered
+    }
+
+    /// 自定义解码：旧版 JSON 缺少 `isAutoDiscovered` 字段时默认 false，其余字段正常读取。
+    public init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        path             = try c.decode(String.self, forKey: .path)
+        agent            = try c.decode(String.self, forKey: .agent)
+        isAutoDiscovered = try c.decodeIfPresent(Bool.self, forKey: .isAutoDiscovered) ?? false
     }
 }
 

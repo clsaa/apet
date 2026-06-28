@@ -1,5 +1,6 @@
 import Foundation
 import AppKit
+@preconcurrency import UserNotifications
 import AgentPetCore
 import AppShellKit
 
@@ -109,11 +110,19 @@ final class AppCoordinator {
         )
 
         // 知情同意 + 持久化：自动发现的新 root 追加到 config 并持久化，避免每次启动重复发现。
+        // M2-B Fix MAJOR-2：标记 isAutoDiscovered=true，供首选项面板显示"自动发现"徽标；
+        //                   同时发一条系统通知（懒授权：已授权才发，不向未授权用户强制弹请求）。
         if !disc.newlyDiscovered.isEmpty {
-            config.dataRoots.append(contentsOf: disc.newlyDiscovered)
+            let newRoots = disc.newlyDiscovered.map { root -> DataRoot in
+                var r = root
+                r.isAutoDiscovered = true
+                return r
+            }
+            config.dataRoots.append(contentsOf: newRoots)
             try? configStore.save(config)
             let count = disc.newlyDiscovered.count
             appendToLog("[info] 自动发现并加入 \(count) 个 Claude profile，可在首选项移除\n")
+            sendDiscoveryNotification(count: count)
         }
 
         for root in disc.roots {
@@ -164,11 +173,13 @@ final class AppCoordinator {
             self.customStore = customStore
 
             // Wire up the applyPet callback: updates live pet window + persists config.
+            // Fix MAJOR-1：保存完毕后通知首选项窗口刷新 selectedPet，防止旧快照在"保存"时覆盖新宠物。
             let applyPetClosure: (PetKind) -> Void = { [weak self] kind in
                 guard let self else { return }
                 self.petWindow?.applyPet(kind)
                 self.config.selectedPet = Self.petKindToString(kind)
                 try? self.configStore.save(self.config)
+                self.preferencesController?.refreshConfig(self.config)
             }
             self.uploadController = PetUploadController(
                 store: customStore,
@@ -542,6 +553,37 @@ final class AppCoordinator {
                 }
             } catch {
                 self.appendToLog("[error] eager drain: \(error)\n")
+            }
+        }
+    }
+
+    // MARK: - Private: discovery notification (MAJOR-2)
+
+    /// 自动发现新 Claude profile 时发一条系统通知，告知用户已纳入监控。
+    ///
+    /// 策略：懒授权——仅在用户已授权时发送；若尚未授权，静默跳过，不弹权限请求。
+    /// （session 事件通知才会触发 just-in-time 授权请求）。
+    private func sendDiscoveryNotification(count: Int) {
+        guard Bundle.main.bundleIdentifier != nil else { return }
+        let center = UNUserNotificationCenter.current()
+        center.getNotificationSettings { settings in
+            switch settings.authorizationStatus {
+            case .authorized, .provisional, .ephemeral:
+                break   // 已授权，可以发
+            default:
+                return  // 未授权 / 被拒绝 → 静默跳过，不弹请求
+            }
+            let content = UNMutableNotificationContent()
+            content.title = "apet 发现 \(count) 个 Claude profile"
+            content.body  = "已加入监控，可在首选项移除"
+            content.sound = .default
+            let request = UNNotificationRequest(
+                identifier: "apet.discovery.\(UUID().uuidString)",
+                content: content,
+                trigger: nil
+            )
+            Task { @MainActor in
+                center.add(request) { _ in }
             }
         }
     }

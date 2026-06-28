@@ -122,6 +122,56 @@ final class AppConfigTests: XCTestCase {
         XCTAssertEqual(root.agent, "claude-code")
     }
 
+    /// MAJOR-2：旧版 JSON 中 DataRoot 没有 isAutoDiscovered 字段时，
+    /// 解码应成功（不抛 keyNotFound），且 isAutoDiscovered 默认为 false，
+    /// 同时 path / agent 等其他字段完整保留。
+    func test_DataRoot_decode_oldJson_withoutIsAutoDiscovered_defaults_false() throws {
+        // TC-AppConfig-PARAM-001: 旧 JSON DataRoot 无 isAutoDiscovered 字段的向后兼容
+        let oldJson = """
+        {
+          "agent": "claude-code",
+          "path": "/home/alice/.claude"
+        }
+        """
+        let data = oldJson.data(using: .utf8)!
+        let root = try JSONDecoder().decode(DataRoot.self, from: data)
+
+        XCTAssertEqual(root.path, "/home/alice/.claude",
+                       "path 字段应从旧 JSON 中正确解码")
+        XCTAssertEqual(root.agent, "claude-code",
+                       "agent 字段应从旧 JSON 中正确解码")
+        XCTAssertEqual(root.isAutoDiscovered, false,
+                       "旧 JSON 无 isAutoDiscovered 时应默认 false（向后兼容）")
+    }
+
+    /// MAJOR-2：isAutoDiscovered=true 能被正常 encode 并 round-trip decode 回 true。
+    func test_DataRoot_isAutoDiscovered_roundTrip() throws {
+        // TC-AppConfig-FUNC-001: DataRoot.isAutoDiscovered round-trip
+        let root = DataRoot(path: "/tmp/auto", agent: "claude-code", isAutoDiscovered: true)
+        let data = try JSONEncoder().encode(root)
+        let decoded = try JSONDecoder().decode(DataRoot.self, from: data)
+        XCTAssertEqual(decoded.path, "/tmp/auto")
+        XCTAssertEqual(decoded.isAutoDiscovered, true,
+                       "isAutoDiscovered=true 应能 encode 并 decode 回 true")
+    }
+
+    /// MAJOR-2：AppConfig 中含 isAutoDiscovered=true 的 DataRoot 能整体 round-trip。
+    func test_AppConfig_withAutoDiscoveredRoot_roundTrip() throws {
+        // TC-AppConfig-FUNC-002: AppConfig 含自动发现根 round-trip
+        let store = ConfigStore(url: configURL)
+        var cfg = AppConfig.defaults
+        cfg.dataRoots = [
+            DataRoot(path: "/home/alice/.claude", agent: "claude-code", isAutoDiscovered: false),
+            DataRoot(path: "/home/alice/.claude-profiles/work", agent: "claude-code", isAutoDiscovered: true),
+        ]
+        try store.save(cfg)
+        let loaded = store.load()
+        XCTAssertEqual(loaded.dataRoots.count, 2)
+        XCTAssertEqual(loaded.dataRoots[0].isAutoDiscovered, false)
+        XCTAssertEqual(loaded.dataRoots[1].isAutoDiscovered, true,
+                       "自动发现根的 isAutoDiscovered=true 应在 round-trip 后保留")
+    }
+
     // MARK: - 精修 3：readGrayAfterSec 字段
 
     /// defaults 中 readGrayAfterSec == 3600
