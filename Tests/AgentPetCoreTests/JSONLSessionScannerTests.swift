@@ -152,10 +152,11 @@ final class JSONLSessionScannerTests: XCTestCase {
     func test_age_belowIdleWindow_observesNotTooOld() {
         let now: Double = 1_001_799
         let f = makeFile(mtime: 1_000_000) // age = 1799 < 1800
-        // age < idleWindow 且无 subagent/synthetic/blacklist → 精确钉住 observe（占位 .stale）
+        // age < idleWindow 且无 subagent/synthetic/blacklist → observe
+        // 无 stopReason, age=1799 ≥ runningWindow(120) → waitingStop（mtime 兜底分支）
         XCTAssertEqual(
             JSONLSessionScanner.scan(f, now: now, idleWindow: 1800),
-            .observe(state: .stale,
+            .observe(state: .waitingStop,
                      key: SessionKey(agent: "claude", root: "/Users/x/.claude", sessionId: "sess-1"),
                      cwd: "/Users/x/project", title: "My Session")
         )
@@ -197,11 +198,12 @@ final class JSONLSessionScannerTests: XCTestCase {
 
     func test_effectiveTs_nilLastConversationTs_fallsBackToMtime() {
         let now: Double = 1_001_799
-        // lastConversationTs=nil → effectiveTs=mtime=1_000_000 → age=1799 < 1800 → observe（占位 .stale）
+        // lastConversationTs=nil → effectiveTs=mtime=1_000_000 → age=1799 < 1800 → observe
+        // 无 stopReason, age=1799 ≥ runningWindow(120) → waitingStop（mtime 兜底分支）
         let f = makeFile(mtime: 1_000_000, lastConversationTs: nil)
         XCTAssertEqual(
             JSONLSessionScanner.scan(f, now: now, idleWindow: 1800),
-            .observe(state: .stale,
+            .observe(state: .waitingStop,
                      key: SessionKey(agent: "claude", root: "/Users/x/.claude", sessionId: "sess-1"),
                      cwd: "/Users/x/project", title: "My Session")
         )
@@ -215,7 +217,8 @@ final class JSONLSessionScannerTests: XCTestCase {
         guard case .observe(let state, let key, _, _) = result else {
             return XCTFail("Expected .observe, got \(result)")
         }
-        XCTAssertEqual(state, .stale)
+        // age=60 < runningWindow(120), 无 stopReason → mtime 兜底 → running
+        XCTAssertEqual(state, .running)
         XCTAssertEqual(key, SessionKey(agent: "claude", root: "/Users/x/.claude", sessionId: "abc-123"))
     }
 
@@ -255,13 +258,84 @@ final class JSONLSessionScannerTests: XCTestCase {
         XCTAssertNil(title)
     }
 
-    func test_observe_stateIsAlwaysStale_placeholder() {
+    func test_observe_stateIsDerivedFromContent() {
         let f = makeFile(mtime: 1_000_000)
         let result = JSONLSessionScanner.scan(f, now: 1_000_060)
         guard case .observe(let state, _, _, _) = result else {
             return XCTFail("Expected .observe")
         }
-        // Task 4 placeholder: state is always .stale; Task 5 will derive real state
-        XCTAssertEqual(state, .stale)
+        // Task 5: 真实派生——无 stopReason, age=60 < runningWindow(120) → mtime 兜底 → running
+        XCTAssertEqual(state, .running)
+    }
+}
+
+// MARK: - Task 5: 状态矩阵（内容信号优先 + away 时间感知 + effectiveTs 漂移）
+extension JSONLSessionScannerTests {
+
+    /// 创建最小化 ScannedFile（mtime=1000，无 stop reason，无 away 信号）
+    private func base(_ configure: (inout ScannedFile) -> Void = { _ in }) -> ScannedFile {
+        var f = ScannedFile(
+            sessionId: "s1",
+            root: "/r",
+            cwd: "/project",
+            mtime: 1000
+        )
+        configure(&f)
+        return f
+    }
+
+    /// scan 后断言 .observe(state == expected)
+    private func assertState(
+        _ f: ScannedFile,
+        now: Double,
+        _ expected: ScanState,
+        file: StaticString = #file,
+        line: UInt = #line
+    ) {
+        let result = JSONLSessionScanner.scan(f, now: now)
+        guard case .observe(let state, _, _, _) = result else {
+            XCTFail("Expected .observe, got \(result)", file: file, line: line)
+            return
+        }
+        XCTAssertEqual(state, expected, file: file, line: line)
+    }
+
+    // away 晚于最后 assistant → stale（awayIsLatest=true 分支）
+    func test_away_after_last_assistant_is_stale() {
+        let f = base { $0.lastAssistantStopReason = "end_turn"; $0.lastAssistantTs = 1000; $0.lastAwayTs = 1005; $0.mtime = 1005 }
+        assertState(f, now: 1010, .stale)
+    }
+
+    // away 早于最后 assistant → awayIsLatest=false，按 tool_use 新鲜度判 running
+    func test_away_before_last_assistant_ignored() {
+        let f = base { $0.lastAssistantStopReason = "tool_use"; $0.lastAssistantTs = 1000; $0.lastAwayTs = 900; $0.mtime = 1000 }
+        assertState(f, now: 1010, .running)
+    }
+
+    // end_turn 近期（age=10 < idleWindow）→ waitingStop（无死分支，不检查 age）
+    func test_end_turn_recent_waitingStop() {
+        assertState(base { $0.lastAssistantStopReason = "end_turn"; $0.mtime = 1000 }, now: 1010, .waitingStop)
+    }
+
+    // tool_use 新鲜（age=50 < runningWindow=120）→ running
+    func test_tool_use_fresh_running() {
+        assertState(base { $0.lastAssistantStopReason = "tool_use"; $0.mtime = 1000 }, now: 1050, .running)
+    }
+
+    // 边界 age == runningWindow(120)：age < 120 为 false → waitingStop
+    func test_running_boundary_exact_is_waitingStop() {
+        assertState(base { $0.lastAssistantStopReason = "tool_use"; $0.mtime = 1000 }, now: 1120, .waitingStop)
+    }
+
+    // 边界 age == idleWindow(1800)：在过滤层已返回 .ignore(.tooOld)
+    func test_idle_boundary_exact_is_ignore_tooOld() {
+        let r = JSONLSessionScanner.scan(base { $0.lastAssistantStopReason = "tool_use"; $0.mtime = 1000 }, now: 1000 + 1800)
+        XCTAssertEqual(r, .ignore(.tooOld))
+    }
+
+    // effectiveTs 漂移：mtime=2000, lastConversationTs=1000, now=2000
+    // effectiveTs=min(2000,1000)=1000, age=1000 ≥ 120 → waitingStop
+    func test_mtime_drift_corrected() {
+        assertState(base { $0.lastAssistantStopReason = "tool_use"; $0.mtime = 2000; $0.lastConversationTs = 1000 }, now: 2000, .waitingStop)
     }
 }

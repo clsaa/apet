@@ -131,13 +131,32 @@ public enum JSONLSessionScanner {
         // 优先级 4：tooOld
         // effectiveTs = min(mtime, lastConversationTs ?? mtime)
         let effectiveTs = min(f.mtime, f.lastConversationTs ?? f.mtime)
-        if now - effectiveTs >= idleWindow {
+        let age = now - effectiveTs
+        if age >= idleWindow {
             return .ignore(.tooOld)
         }
 
-        // 过滤全未命中 → observe（状态 Task 5 补完，暂占位 .stale）
+        // 过滤全未命中 → 状态派生（内容信号优先 + away 时间感知 + effectiveTs 兜底）
         let key = SessionKey(agent: "claude", root: f.root, sessionId: f.sessionId)
         let displayTitle = f.title ?? f.lastPrompt
-        return .observe(state: .stale, key: key, cwd: f.cwd, title: displayTitle)
+
+        let derived: ScanState
+        // AI-M2: away 比较用时间戳（lastAwayTs > lastAssistantTs），非布尔
+        let awayIsLatest = (f.lastAwayTs ?? -1) > (f.lastAssistantTs ?? -1)
+        if awayIsLatest {
+            // 用户离开后无新 assistant 消息 → stale
+            derived = .stale
+        } else if f.lastAssistantStopReason == "end_turn" || f.lastAssistantStopReason == "stop_sequence" {
+            // 说完轮到你；age 已被过滤保证 < idleWindow，无需再判，直接 waitingStop
+            derived = .waitingStop
+        } else if f.lastAssistantStopReason == "tool_use" || f.hasRecentQueueOp {
+            // 工具调用中：按 runningWindow 窗口区分 running / waitingStop
+            derived = age < runningWindow ? .running : .waitingStop
+        } else {
+            // mtime 兜底：同 tool_use 分支，按 runningWindow 区分
+            derived = age < runningWindow ? .running : .waitingStop
+        }
+
+        return .observe(state: derived, key: key, cwd: f.cwd, title: displayTitle)
     }
 }
