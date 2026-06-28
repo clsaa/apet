@@ -121,9 +121,9 @@ final class PetWindowController: NSObject {
             let newOriginY = oldFrame.maxY - newSize.height
             w.setFrame(NSRect(origin: NSPoint(x: oldFrame.origin.x, y: newOriginY), size: newSize), display: true)
         }
-        // Resize all immediate subviews (hostingView + overlayView)
+        // Resize subviews（contentView 由 setFrame 自动填满，无需手动设——评审 MINOR-4；
+        // 子视图无 autoresizingMask 需显式 resize）。
         if let contentView = window?.contentView {
-            contentView.frame = NSRect(origin: .zero, size: newSize)
             for sub in contentView.subviews {
                 sub.frame = NSRect(origin: .zero, size: newSize)
             }
@@ -263,7 +263,8 @@ final class PetWindowController: NSObject {
         let p = NSPopover()
         p.contentViewController = panelVC
         p.behavior = .transient
-        p.contentSize = NSSize(width: 320, height: 400)
+        // 顶部快捷键提示约占 28px，有提示时加高，避免会话列表被截断（评审 MINOR-5）。
+        p.contentSize = NSSize(width: 320, height: hotkeyHint != nil ? 428 : 400)
         self.popover = p
 
         // Anchor to center of content view; let NSPopover pick the best edge

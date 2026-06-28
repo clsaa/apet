@@ -198,10 +198,13 @@ final class HotKeyRecorder: ObservableObject {
     private var monitor: Any?
 
     func start(onRecord: @escaping (HotKeyConfig) -> Void) {
+        stop()   // 防御：清掉可能残留的旧 monitor，避免重复 start 泄漏（评审 MAJOR-2）
         isRecording = true
         monitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { [weak self] event in
             let keyCode = UInt32(event.keyCode)
             let carbonMods = nsModifiersToCarbonModifiers(event.modifierFlags.rawValue)
+            // 必须带修饰键：裸键(空格/字母)注册成全局热键会接管所有 App 的该键输入（评审 MAJOR-1）。
+            guard carbonMods != 0 else { return event }   // 无修饰键 → 不录制、不消费
             let label = Self.keyLabel(from: event)
             onRecord(HotKeyConfig(keyCode: keyCode, modifiers: carbonMods, keyLabel: label))
             Task { @MainActor [weak self] in self?.stop() }
