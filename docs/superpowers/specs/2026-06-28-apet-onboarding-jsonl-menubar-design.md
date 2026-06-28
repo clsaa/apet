@@ -247,3 +247,26 @@ final class SeqAllocator { func next() -> Int }   // 进程内单调，owner 串
 | 产品-m8/用户-m8 | Minor | 健康面板 hook❌ 像故障 | §5.5：hook 未装=中性"可增强➕" |
 | AI-m3 | Minor | queue-operation 是正向活跃信号 | §5.1：hasRecentQueueOp→倾向 running |
 | 测试-m1/m2 | Minor | 窗口须入参；边界运算符/标题 trim | §5.1/§8：窗口注入；运算符方向钉死；标题截断 |
+
+## 13. 计划评审修订（v2.1，第二轮 5 视角面板对"实现计划"的发现，**以下决策 supersede 上文冲突处**）
+
+第二轮面板对实现计划做了对真实代码/真实 jsonl 数据的核对，修正了若干会导致"编译不过/运行期打死核心目标/解析假绿"的问题：
+
+| 来源 | 级别 | 问题 | 终决 |
+|------|------|------|------|
+| 架构-B1 | Blocker | seed `replay=true` 被 `applyInner` 强制 running→stale，当前会话首屏=灰非绿（打死头号目标）；且 jsonl 不接 NotificationService，本就不发通知 | **jsonl 合成事件一律 `replay=false`**；**jsonl 路径完全不接 NotificationService → 永不发 OS 通知**（天然静默，无需 replay）。**通知是 hook 专属能力**（零配置=仅面板/桌宠视觉；可靠完成/需关注通知须装 hook——即 just-in-time 卖点）。此决策同时消解 产品-B2(通知风暴)、产品-M2(通知标推断)、架构-m1 |
+| 架构-M3 + 产品-B1 | Blocker | `terminal==nil` 不能可靠区分 jsonl 来源（hook logscan/早期事件 terminal 也 nil）；且面板需把 jsonl 推断态渲染柔和+标"推断" | **新增进程内 `SessionSource {hook, jsonl}` 标记**：加到内存 `AgentEvent`（memberwise 默认 `.hook`，**不进 wire `decode`**，Equatable 兼容既有 205 测试）与 `Session`，经 `apply` 透传。来源判定、面板柔和渲染、markStale 跳过**一律用 `session.source == .jsonl`**，不再用 terminal==nil |
+| 架构-B3 | Blocker | reapTimer 每 60s `markStale`（staleAfterSec=600）+ 差分抑制重发冻结 lastActiveAt → jsonl running 600s 后被打灰且永不复活 | **`markStale` 跳过 `source == .jsonl` 会话**；jsonl 会话生命周期完全由 watcher 的 scanner 驱动 |
+| 架构-B2 + 测试-M3 | Blocker | 滞回放在无状态 scanner，与 watcher 差分耦合后无限缓冲、永不翻 waitingStop | **滞回移出 scanner**：scanner 纯函数返回 **raw** 状态（无 priorState 入参）；**watcher 持 `quietStreak[key]`**，running→waitingStop 需连续 2 次 quiet 才翻；测 `scanOnce()×3` |
+| AI-B1 | Blocker | `entrypoint`/`promptSource` 从 firstLine 取，真实 401 文件首行无此字段→sdk-cli 合成过滤永久失效 | **`entrypoint` 从 tail 任一对话行（assistant/user/attachment）顶层读**（每行都带，极稳）；**`promptSource` 从 tail `user` 行顶层读**；窗口内任一对话行 entrypoint==sdk-cli 即判合成。firstLine 仅作 title 兜底 |
+| AI-M2 | Major | `hasAwaySummary` 当窗口布尔且最先判→"曾 away 已恢复"误 stale | away_summary **时间感知**：仅当 last-away 的 ts > 末条 assistant 的 ts（即它是窗口内最后的有意义活动）才判 stale，否则忽略 |
+| AI-M3 | Major | 真正绑定窗口是 maxBytes（256KB）非行数；超大 attachment 行（最大实测 162KB）可能在够到末条 assistant 前耗尽窗口 | **maxBytes 提到 1MB**；若窗口内仍 `lastAssistantStopReason==nil`，落 mtime 兜底（完成态会话末条 assistant 普遍距 EOF 2–9 条，1MB 足够） |
+| 架构-M1 | Major | 计划 markStaleSession 字面用了不存在的 `fanOut` | 真实扇出方法名是 `emit`（以 SessionStore 现有代码为准） |
+| 架构-M2 + 测试-B1 | Major | 融合测试 sessionEnd 作首事件不建会话（applyInner 对不存在 key 收 sessionEnd 返回[]）→ jsonl busy 建 running，断言 .ended 必红 | 融合测试场景改 `sessionStart → sessionEnd → jsonl busy`，断言 .ended（"ended 恒胜"仅在会话已存在时成立，此为既有正确不变量） |
+| 架构-M4 | Major | watcher 定时回调线程未约束，@MainActor + SessionStore 非线程安全 | watcher 的 Scheduler/DispatchSource **固定 `queue: .main`** |
+| 测试-B2 | Blocker | Task2 把 idle 图标 pawprint→pawprint.fill 打红既有 MenuBarPresenterTests，且 idle 本就是 pawprint | **不改 idle 符号**（已是 pawprint，保留 idle 空心/busy 实心区分）；可发现性靠右键菜单 + 引导指认，不靠换符号 |
+| 测试-M5 + 产品-M1/m2 | Major | 首启检测/hook 提示去重/终端已关反馈等纯逻辑被"手动验证"掩盖；增强发现入口窄 | 抽 `OnboardingGate.shouldShow(config:)->Bool`、`HookHintThrottle`（仿 NotificationThrottle）做纯单测；`TerminalFocusService` 激活失败返回明确反馈"会话窗口可能已关闭"；面板/健康面板加一条低调常驻"开启精确跳转/通知"入口 |
+| AI-m4/m5/m6 + 测试-MINOR | Minor | timestamp 是 ISO8601 串需解析；标题 camelCase；isSidechain 主文件恒 false（靠 /subagents/ 目录排除，已做）；Task5 死分支/边界 | timestamp 用 `ISO8601DateFormatter(.withFractionalSeconds)` 解析成 epoch；标题读内层 `lastPrompt/customTitle/aiTitle`；subagent 靠 `/subagents/` 路径排除为主 + isSidechain/basename `agent-*.jsonl` 兜底；删 Task5 end_turn 死 `.stale` 分支、补 age==idleWindow 边界、ConfigHealth `.unreadable`、markStaleSession waiting→stale 测试 |
+| 架构-m2 | Minor | `seenEventIds` 按状态翻转慢泄漏，reap 不清 | jsonl 合成事件改"会话内单调计数"eventId（或 reap 驱逐会话时清其 jsonl eventId）；常驻 App 防慢泄漏 |
+
+> **核心一句（v2.1）**：jsonl = **零配置的面板/桌宠视觉来源，不碰通知、不碰 hook 会话生命周期**；用 `SessionSource.jsonl` 进程内标记把它与 hook 干净隔离；状态派生 raw（scanner）+ 滞回（watcher）分层；解析从**对话行**取 entrypoint、窗口 1MB、away 时间感知。通知与精确跳转仍是 hook 专属的 just-in-time 增强。
