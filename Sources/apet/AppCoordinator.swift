@@ -217,6 +217,7 @@ final class AppCoordinator {
             guard let self, let store = self.store else { return }
             let now = Date().timeIntervalSince1970
             _ = store.markStale(now: now, timeout: self.config.staleAfterSec)
+            _ = store.ageReadToStale(now: now, readGrayAfter: self.config.readGrayAfterSec)
             store.reap(now: now,
                        endedAfter: self.config.endedAfterSec,
                        waitingEndedAfter: self.config.waitingEndedAfterSec)

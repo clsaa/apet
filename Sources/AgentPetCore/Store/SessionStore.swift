@@ -199,6 +199,25 @@ extension SessionStore {
         return changes
     }
 
+    /// 已读（黄）会话超过阈值后自动转灰（闲置）。
+    /// 遍历 waiting+acknowledged 会话，凡 now - lastActiveAt > readGrayAfter → 置 stale，acknowledged 重置为 false。
+    /// 未超阈值、非 acknowledged、非 waiting 的会话一律 no-op。
+    @discardableResult
+    public func ageReadToStale(now: Double, readGrayAfter: Double) -> [StoreChange] {
+        var changes: [StoreChange] = []
+        for (key, var session) in sessions {
+            guard case .waiting = session.state, session.acknowledged else { continue }
+            if now - session.lastActiveAt > readGrayAfter {
+                session.state = .stale
+                session.acknowledged = false
+                sessions[key] = session
+                changes.append(.upserted(key))
+            }
+        }
+        emit(changes, replay: false)
+        return changes
+    }
+
     /// 回收：STALE 超过 endedAfter / WAITING 超过 waitingEndedAfter 的会话转 ENDED，并从 sessions 驱逐。
     /// 返回被移除会话的 .removed 变更。纯计时，不依赖 hook（面板 H3-3）。
     @discardableResult

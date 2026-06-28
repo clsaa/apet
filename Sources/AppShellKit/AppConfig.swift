@@ -38,6 +38,27 @@ public struct AppConfig: Codable, Equatable {
     public var waitingEndedAfterSec: Double
     /// Which pet sprite to render: `"shiba"` or `"bichon"`.
     public var selectedPet: String
+    /// 已读（黄）会话超过此秒数自动转灰（闲置）。默认 3600（1 小时）。
+    public var readGrayAfterSec: Double
+
+    // CodingKeys：含 readGrayAfterSec，供自定义 decoder 和 synthesized encoder 共同使用。
+    private enum CodingKeys: String, CodingKey {
+        case dataRoots, displayMode, notifyMode, staleAfterSec, endedAfterSec,
+             waitingEndedAfterSec, selectedPet, readGrayAfterSec
+    }
+
+    /// 自定义解码：旧版 config.json 缺少 readGrayAfterSec 时用默认值 3600，不丢失其他已有设置。
+    public init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        dataRoots            = try c.decode([DataRoot].self, forKey: .dataRoots)
+        displayMode          = try c.decode(String.self,    forKey: .displayMode)
+        notifyMode           = try c.decode(String.self,    forKey: .notifyMode)
+        staleAfterSec        = try c.decode(Double.self,    forKey: .staleAfterSec)
+        endedAfterSec        = try c.decode(Double.self,    forKey: .endedAfterSec)
+        waitingEndedAfterSec = try c.decode(Double.self,    forKey: .waitingEndedAfterSec)
+        selectedPet          = try c.decode(String.self,    forKey: .selectedPet)
+        readGrayAfterSec     = try c.decodeIfPresent(Double.self, forKey: .readGrayAfterSec) ?? 3600
+    }
 
     public init(
         dataRoots: [DataRoot],
@@ -46,7 +67,8 @@ public struct AppConfig: Codable, Equatable {
         staleAfterSec: Double,
         endedAfterSec: Double,
         waitingEndedAfterSec: Double,
-        selectedPet: String
+        selectedPet: String,
+        readGrayAfterSec: Double = 3600
     ) {
         self.dataRoots = dataRoots
         self.displayMode = displayMode
@@ -55,6 +77,7 @@ public struct AppConfig: Codable, Equatable {
         self.endedAfterSec = endedAfterSec
         self.waitingEndedAfterSec = waitingEndedAfterSec
         self.selectedPet = selectedPet
+        self.readGrayAfterSec = readGrayAfterSec
     }
 
     /// Factory that produces the out-of-the-box defaults.
@@ -70,7 +93,8 @@ public struct AppConfig: Codable, Equatable {
             staleAfterSec: 600,
             endedAfterSec: 14400,
             waitingEndedAfterSec: 28800,
-            selectedPet: "shiba"
+            selectedPet: "shiba",
+            readGrayAfterSec: 3600
         )
     }
 }
