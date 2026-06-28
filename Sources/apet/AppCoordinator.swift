@@ -109,9 +109,19 @@ final class AppCoordinator {
         // 2b. Create and start NotificationService (safe to call before replay).
         // Single shared TerminalFocusService instance injected into both consumers (Fix M-3).
         let focusService = TerminalFocusService()
-        let ns = NotificationService(focusService: focusService, sessionLookup: { [weak self] key in
-            self?.store?.sessions[key]
-        })
+        let ns = NotificationService(
+            focusService: focusService,
+            sessionLookup: { [weak self] key in self?.store?.sessions[key] },
+            // Closure reads the latest config each time it is called (after applyConfig), so
+            // DND changes take effect on the very next notification without a restart.
+            dndProvider: { [weak self] in
+                DNDWindow(
+                    enabled:  self?.config.dndEnabled   ?? false,
+                    startMin: self?.config.dndStartMin  ?? 0,
+                    endMin:   self?.config.dndEndMin    ?? 0
+                )
+            }
+        )
         notificationService = ns
         ns.start()
 

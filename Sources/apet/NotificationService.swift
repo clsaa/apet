@@ -24,17 +24,22 @@ final class NotificationService: NSObject {
     private let focusService: TerminalFocusService
     /// Called on `@MainActor` to look up a live session by key.
     private let sessionLookup: (SessionKey) -> Session?
+    /// Returns the current DND window; called on `@MainActor` inside `consider`.
+    /// Defaults to a disabled window so the service is a drop-in replacement for existing callers.
+    private let dndProvider: () -> DNDWindow
 
     // MARK: - Init
 
     init(
         cooldown: Double = 60.0,
         focusService: TerminalFocusService,
-        sessionLookup: @escaping (SessionKey) -> Session?
+        sessionLookup: @escaping (SessionKey) -> Session?,
+        dndProvider: @escaping () -> DNDWindow = { DNDWindow(enabled: false, startMin: 0, endMin: 0) }
     ) {
         self.gate = NotificationGate(cooldown: cooldown)
         self.focusService = focusService
         self.sessionLookup = sessionLookup
+        self.dndProvider = dndProvider
         super.init()
     }
 
@@ -69,6 +74,14 @@ final class NotificationService: NSObject {
         let now = Date().timeIntervalSince1970
         guard let content = gate.evaluate(event: event, session: session,
                                           mode: mode, replay: replay, now: now) else { return }
+
+        // DND gate: suppress OS notification if the current time falls inside the quiet window.
+        // Time is obtained here (service boundary, same pattern as the `now` above) so that
+        // the pure `shouldSuppress` function itself never touches system state.
+        let cal = Calendar.current
+        let comps = cal.dateComponents([.hour, .minute], from: Date())
+        let nowMin = (comps.hour ?? 0) * 60 + (comps.minute ?? 0)
+        if DNDWindow.shouldSuppress(dnd: dndProvider(), nowMinOfDay: nowMin) { return }
 
         let un = UNMutableNotificationContent()
         un.title = content.title

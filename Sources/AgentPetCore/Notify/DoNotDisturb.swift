@@ -19,4 +19,12 @@ public struct DNDWindow: Equatable {
         }
         return nowMinOfDay >= startMin || nowMinOfDay < endMin
     }
+
+    /// Pure function: returns `true` when the notification should be suppressed.
+    ///
+    /// Extracted as a static method so it can be unit-tested without touching system state
+    /// (`Date()` is never called here; the caller supplies `nowMinOfDay`).
+    public static func shouldSuppress(dnd: DNDWindow, nowMinOfDay: Int) -> Bool {
+        dnd.isQuiet(nowMinOfDay: nowMinOfDay)
+    }
 }

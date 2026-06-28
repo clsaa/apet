@@ -282,6 +282,11 @@ struct PreferencesView: View {
     @State private var isRecordingHotKey = false
     @StateObject private var hotKeyRecorder = HotKeyRecorder()
 
+    // MARK: - 免打扰预设选择
+    /// 当前选中的免打扰预设（"lateNight" / "work" / "custom"）。
+    /// 独立于 config 值存储，避免"自定义→预设"来回跳动时丢失自定义值。
+    @State private var dndPreset: String
+
     // MARK: - Health panel state (Part B)
     @State private var notifStatusForHealth: NotificationStatus = .notDetermined
     @State private var hookStatusForHealth: HookStatus = .notInstalled
@@ -294,6 +299,12 @@ struct PreferencesView: View {
         _config = State(initialValue: config)
         self.configStore = configStore
         self.onSave = onSave
+        // Derive the initial preset tag from saved config values.
+        let initPreset: String
+        if config.dndStartMin == 1380 && config.dndEndMin == 420 { initPreset = "lateNight" }
+        else if config.dndStartMin == 540 && config.dndEndMin == 1080 { initPreset = "work" }
+        else { initPreset = "custom" }
+        _dndPreset = State(initialValue: initPreset)
     }
 
     var body: some View {
@@ -390,11 +401,61 @@ struct PreferencesView: View {
                     .font(.subheadline)
                     .foregroundStyle(.secondary)
                 Picker("通知模式", selection: $config.notifyMode) {
-                    Text("仅等待关注时提醒").tag("attentionOnly")
-                    Text("每次会话完成都提醒").tag("everyStop")
+                    Text("需关注才响").tag("attentionOnly")
+                    Text("每轮结束都响").tag("everyStop")
                 }
                 .pickerStyle(.segmented)
                 .labelsHidden()
+            }
+
+            // ── 免打扰 ───────────────────────────────────────────────────────
+            VStack(alignment: .leading, spacing: 8) {
+                Text("免打扰")
+                    .font(.subheadline)
+                    .foregroundStyle(.secondary)
+
+                Toggle("开启免打扰（静音时段内不弹 OS 通知）", isOn: $config.dndEnabled)
+
+                if config.dndEnabled {
+                    // 时段预设
+                    Picker("时段预设", selection: $dndPreset) {
+                        Text("深夜 23:00–07:00").tag("lateNight")
+                        Text("工作 09:00–18:00").tag("work")
+                        Text("自定义").tag("custom")
+                    }
+                    .pickerStyle(.segmented)
+                    .labelsHidden()
+                    .onChange(of: dndPreset, perform: { preset in
+                        switch preset {
+                        case "lateNight": config.dndStartMin = 1380; config.dndEndMin = 420
+                        case "work":      config.dndStartMin = 540;  config.dndEndMin = 1080
+                        default:          break   // custom: keep current values
+                        }
+                    })
+
+                    // 自定义起止时分（仅在"自定义"时展开）
+                    if dndPreset == "custom" {
+                        dndTimePicker(
+                            label: "开始",
+                            totalMin: Binding(
+                                get: { config.dndStartMin },
+                                set: { config.dndStartMin = $0 }
+                            )
+                        )
+                        dndTimePicker(
+                            label: "结束",
+                            totalMin: Binding(
+                                get: { config.dndEndMin },
+                                set: { config.dndEndMin = $0 }
+                            )
+                        )
+                    }
+
+                    // 动态说明文字：跨午夜 vs 当天
+                    Text(Self.dndHintText(startMin: config.dndStartMin, endMin: config.dndEndMin))
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
             }
 
             // ── 呼出面板快捷键 ───────────────────────────────────────────────
@@ -495,6 +556,52 @@ struct PreferencesView: View {
             Text("\(Int(value.wrappedValue)) \(unit)")
                 .monospacedDigit()
                 .frame(minWidth: 52, alignment: .trailing)
+        }
+    }
+
+    // MARK: - DND helpers
+
+    /// Format total minutes-since-midnight as "HH:mm".
+    private static func formatMinutes(_ m: Int) -> String {
+        String(format: "%02d:%02d", m / 60, m % 60)
+    }
+
+    /// Build the dynamic hint text shown under the DND toggle.
+    private static func dndHintText(startMin: Int, endMin: Int) -> String {
+        let s = formatMinutes(startMin)
+        let e = formatMinutes(endMin)
+        return startMin > endMin
+            ? "每天 \(s) 至次日 \(e) 静音"
+            : "\(s)–\(e) 静音"
+    }
+
+    /// Single start/end time row using two Pickers (hour + minute in 5-min steps).
+    private func dndTimePicker(label: String, totalMin: Binding<Int>) -> some View {
+        HStack(spacing: 6) {
+            Text(label + "：")
+                .frame(minWidth: 36, alignment: .leading)
+            Picker("", selection: Binding(
+                get: { totalMin.wrappedValue / 60 },
+                set: { totalMin.wrappedValue = $0 * 60 + (totalMin.wrappedValue % 60) }
+            )) {
+                ForEach(0..<24, id: \.self) { h in
+                    Text(String(format: "%02d", h)).tag(h)
+                }
+            }
+            .labelsHidden()
+            .frame(width: 58)
+            Text("时")
+            Picker("", selection: Binding(
+                get: { (totalMin.wrappedValue % 60) / 5 * 5 },   // snap to 5-min grid
+                set: { totalMin.wrappedValue = (totalMin.wrappedValue / 60) * 60 + $0 }
+            )) {
+                ForEach([0, 5, 10, 15, 20, 25, 30, 35, 40, 45, 50, 55], id: \.self) { m in
+                    Text(String(format: "%02d", m)).tag(m)
+                }
+            }
+            .labelsHidden()
+            .frame(width: 58)
+            Text("分")
         }
     }
 
