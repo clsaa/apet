@@ -13,11 +13,15 @@ public struct Session: Equatable {
     public var terminal: TerminalRef?
     public var lastSeq: Int
     public var lastActiveAt: Double   // 注入的 now（Unix 秒），用于 STALE 计时
+    /// 进程内来源标记（不进 wire）。
+    public var source: SessionSource
 
     public init(key: SessionKey, state: SessionState, cwd: String? = nil, title: String? = nil,
-                terminal: TerminalRef? = nil, lastSeq: Int, lastActiveAt: Double) {
+                terminal: TerminalRef? = nil, lastSeq: Int, lastActiveAt: Double,
+                source: SessionSource = .hook) {
         self.key = key; self.state = state; self.cwd = cwd; self.title = title
         self.terminal = terminal; self.lastSeq = lastSeq; self.lastActiveAt = lastActiveAt
+        self.source = source
     }
 
     /// 多 profile 区分标签：从 root 派生。`~/.claude-profiles/work` → "work"；普通 `~/.claude` → nil。

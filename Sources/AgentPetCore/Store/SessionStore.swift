@@ -43,7 +43,7 @@ public final class SessionStore {
             let finalInitialSt: SessionState = (replay && initialSt == .running) ? .stale : initialSt
             let s = Session(key: key, state: finalInitialSt, cwd: event.cwd,
                             title: event.title, terminal: event.terminal,
-                            lastSeq: seq, lastActiveAt: now)
+                            lastSeq: seq, lastActiveAt: now, source: event.source)
             sessions[key] = s
             return [.upserted(key)]
         }
@@ -58,6 +58,8 @@ public final class SessionStore {
         if let cwd = event.cwd { session.cwd = cwd }
         if let title = event.title { session.title = title }
         if let terminal = event.terminal { session.terminal = terminal }
+        // 来源合并：hook 一旦标记不被 jsonl 降级（hook 更精确）。
+        session.source = (session.source == .hook) ? .hook : event.source
 
         let newState = nextState(from: session.state, event: event)
         // 回放历史时，被 kill 的会话只有 session_start/busy 无 session_end，会重建成 RUNNING 绿点幽灵。
