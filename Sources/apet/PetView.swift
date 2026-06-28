@@ -45,8 +45,8 @@ struct PetView: View {
                     }
                 }
 
-                // State dot
-                stateDot
+                // 始终显示的运行/完成计数（用户反馈：时刻显示，无需点击）
+                countChip
             }
             .padding(8)
         }
@@ -64,20 +64,29 @@ struct PetView: View {
             .frame(width: 96, height: 96)
     }
 
+    /// 常驻计数条：🟢 在跑 · 🔴 完成。即便都是 0 也显示，让用户一眼看到全局而不必点开面板。
     @ViewBuilder
-    private var stateDot: some View {
-        switch presentation.assetState {
-        case "busy":
-            Circle()
-                .fill(Color.green)
-                .frame(width: 8, height: 8)
-        case "calling":
-            Circle()
-                .fill(presentation.emphasize ? Color.orange : Color.red)
-                .frame(width: 8, height: 8)
-        default:
-            Color.clear.frame(width: 8, height: 8)
+    private var countChip: some View {
+        HStack(spacing: 8) {
+            HStack(spacing: 3) {
+                Circle().fill(Color.green).frame(width: 7, height: 7)
+                Text("\(presentation.runningCount)")
+                    .font(.system(size: 11, weight: .semibold))
+                    .foregroundColor(.primary)
+            }
+            HStack(spacing: 3) {
+                Circle().fill(presentation.emphasize ? Color.orange : Color.red).frame(width: 7, height: 7)
+                Text("\(presentation.doneCount)")
+                    .font(.system(size: 11, weight: .semibold))
+                    .foregroundColor(.primary)
+            }
         }
+        .padding(.horizontal, 8)
+        .padding(.vertical, 3)
+        .background(
+            Capsule().fill(Color(NSColor.windowBackgroundColor).opacity(0.9)).shadow(radius: 2)
+        )
+        .help("绿=进行中 · 红=停下等你/完成")
     }
 
     @ViewBuilder

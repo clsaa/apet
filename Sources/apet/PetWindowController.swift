@@ -211,6 +211,12 @@ final class PetWindowController: NSObject {
             return
         }
 
+        // 确保窗口/App 处于可锚定状态——LSUIElement 背景 App 在非激活态下，
+        // transient popover 锚到非 key 窗口可能不显示或秒关。激活 + 置 key 后再弹（点击修复）。
+        NSApp.activate(ignoringOtherApps: true)
+        w.makeKeyAndOrderFront(nil)
+        w.orderFrontRegardless()
+
         let rows = currentSessions.map(SessionRowMapper.make)
         let panelVC = SessionPanelHostController(rows: rows, onTap: { [weak self] id in
             self?.handleSessionTap(id: id)
@@ -259,7 +265,8 @@ private final class DragDetectorView: NSView {
     private var dragStartLocation: NSPoint = .zero
     private var windowOriginAtDragStart: NSPoint = .zero
     private var hasDragged = false
-    private let dragThreshold: CGFloat = 4
+    // 8pt：4pt 太小，正常点击（尤其触控板）的微小抖动会被误判成拖动→保存位置而不弹面板（点击修复）。
+    private let dragThreshold: CGFloat = 8
 
     override init(frame: NSRect) {
         super.init(frame: frame)
