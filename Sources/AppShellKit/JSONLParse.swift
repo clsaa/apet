@@ -162,6 +162,21 @@ public enum JSONLParse {
         // 8. title：customTitle > aiTitle > lastPrompt
         let title = customTitle ?? aiTitle ?? lastPromptText
 
+        // 9. latestSubagentMtime：扫描 <dir>/<sessionId>/subagents/agent-*.jsonl 的最新 mtime
+        // 主文件 <dir>/<sessionId>.jsonl → subagent 目录 <dir>/<sessionId>/subagents/
+        var latestSubagentMtime: Double? = nil
+        let pathNoExt = (path as NSString).deletingPathExtension   // <dir>/<sessionId>
+        let subagentDir = pathNoExt + "/subagents"
+        if let items = try? FileManager.default.contentsOfDirectory(atPath: subagentDir) {
+            for item in items where item.hasPrefix("agent-") && item.hasSuffix(".jsonl") {
+                let subPath = (subagentDir as NSString).appendingPathComponent(item)
+                if let attrs = try? FileManager.default.attributesOfItem(atPath: subPath),
+                   let mt = (attrs[.modificationDate] as? Date)?.timeIntervalSince1970 {
+                    latestSubagentMtime = max(latestSubagentMtime ?? 0, mt)
+                }
+            }
+        }
+
         return ScannedFile(
             sessionId: resolvedSessionId,
             root: root,
@@ -177,7 +192,8 @@ public enum JSONLParse {
             entrypoint: entrypoint,
             promptSource: promptSource,
             isSidechain: isSidechain,
-            isSubagentPath: isSubagentPath
+            isSubagentPath: isSubagentPath,
+            latestSubagentMtime: latestSubagentMtime
         )
     }
 }

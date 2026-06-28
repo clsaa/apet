@@ -23,6 +23,9 @@ public struct ScannedFile: Equatable {
     public var promptSource: String?
     public var isSidechain: Bool
     public var isSubagentPath: Bool
+    /// 该会话所有 subagent 文件（agent-*.jsonl）中最新的 mtime（epoch 秒）。
+    /// 无 subagent 文件时为 nil。
+    public var latestSubagentMtime: Double?
 
     public init(
         sessionId: String,
@@ -39,7 +42,8 @@ public struct ScannedFile: Equatable {
         entrypoint: String? = nil,
         promptSource: String? = nil,
         isSidechain: Bool = false,
-        isSubagentPath: Bool = false
+        isSubagentPath: Bool = false,
+        latestSubagentMtime: Double? = nil
     ) {
         self.sessionId = sessionId
         self.root = root
@@ -56,6 +60,7 @@ public struct ScannedFile: Equatable {
         self.promptSource = promptSource
         self.isSidechain = isSidechain
         self.isSubagentPath = isSubagentPath
+        self.latestSubagentMtime = latestSubagentMtime
     }
 }
 
@@ -133,7 +138,10 @@ public enum JSONLSessionScanner {
         // effectiveTs = min(mtime, lastConversationTs ?? mtime)
         let effectiveTs = min(f.mtime, f.lastConversationTs ?? f.mtime)
         let age = now - effectiveTs
-        if age >= idleWindow {
+        // subagent 新鲜时父会话不被过滤（活跃子 Agent → 父会话仍在工作）
+        // latestSubagentMtime 为 nil 时退回到 effectiveTs，避免 ?? 0 引入假活跃基线
+        let activity = f.latestSubagentMtime.map { max(effectiveTs, $0) } ?? effectiveTs
+        if now - activity >= idleWindow {
             return .ignore(.tooOld)
         }
 
@@ -146,11 +154,15 @@ public enum JSONLSessionScanner {
         let derived: ScanState
         // AI-M2: away 比较用时间戳（lastAwayTs > lastAssistantTs），非布尔
         let awayIsLatest = (f.lastAwayTs ?? -1) > (f.lastAssistantTs ?? -1)
-        // Fix 7（真实 bug）：recentQueueOp 优先级提到最高。
+        // 最高优先：活跃子 Agent 存在 → 父会话正在工作，强制判 .running（压过 end_turn）
+        let subagentActive = (f.latestSubagentMtime.map { now - $0 < runningWindow } ?? false)
+        if subagentActive {
+            derived = .running
+        // Fix 7（真实 bug）：recentQueueOp 优先级次之。
         // 近期 queue-operation 表示用户刚入队新指令，会话即将/正在继续——
         // 即使末条 assistant 是 end_turn/stop_sequence，也应判为 running（待办未消化完），
         // 否则会出现"刚排队就被打成 waitingStop"的误报。
-        if recentQueueOp {
+        } else if recentQueueOp {
             // 近期入队：按 runningWindow 窗口区分（盖过 end_turn/stop_sequence）
             derived = age < runningWindow ? .running : .waitingStop
         } else if awayIsLatest {
