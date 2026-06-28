@@ -348,8 +348,10 @@ func test_decode_oldJson_withoutDndFields_keepsOtherSettings_andDefaultsDnd() th
     XCTAssertEqual(cfg.dndStartMin, 0)
     XCTAssertEqual(cfg.dndEndMin, 0)
 }
-func test_roundTrip_withDnd() throws {
-    var c = AppConfig.defaults; c.dndEnabled = true; c.dndStartMin = 1380; c.dndEndMin = 420
+func test_roundTrip_withDndAndExcluded() throws {
+    var c = AppConfig.defaults
+    c.dndEnabled = true; c.dndStartMin = 1380; c.dndEndMin = 420
+    c.excludedRoots = ["/a/b", "/c/d"]   // 非空，守护 excludedRoots 真进了 CodingKeys（架构 B1/测试 B2）
     let data = try JSONEncoder().encode(c)
     XCTAssertEqual(try JSONDecoder().decode(AppConfig.self, from: data), c)
 }
@@ -365,7 +367,8 @@ public var dndStartMin: Int
 public var dndEndMin: Int
 // init 末位加： dndEnabled: Bool = false, dndStartMin: Int = 0, dndEndMin: Int = 0
 // 自定义解码：
-enum CodingKeys: String, CodingKey { case dataRoots, displayMode, notifyMode, staleAfterSec, endedAfterSec, waitingEndedAfterSec, selectedPet, dndEnabled, dndStartMin, dndEndMin }
+enum CodingKeys: String, CodingKey { case dataRoots, displayMode, notifyMode, staleAfterSec, endedAfterSec, waitingEndedAfterSec, selectedPet, dndEnabled, dndStartMin, dndEndMin, excludedRoots }
+// ⚠️ encode(to:) 加了自定义 init(from:) 后仍可 synthesized（只要不写自定义 encode）；CodingKeys 必须含所有字段含 excludedRoots，否则 encode 跳过该字段、用户排除配置重启丢失。
 public init(from d: Decoder) throws {
     let c = try d.container(keyedBy: CodingKeys.self)
     dataRoots = try c.decode([DataRoot].self, forKey: .dataRoots)
@@ -414,21 +417,22 @@ public init(from d: Decoder) throws {
 
 **Files:** Modify `Sources/apet/AppCoordinator.swift`、`Sources/apet/PreferencesWindow.swift`（数据根段）、`Sources/apet/MenuBarController.swift`（行 profileTag 已有，确认 root>1 渲染）
 
-- [ ] **Step 1:** `jsonlWatcher: JSONLDirectoryWatcher?` → `jsonlWatchers: [JSONLDirectoryWatcher]`；`start()` 改：`let disc = DataRootDiscovery.discover(home: 展开home, existing: config.dataRoots, excluded: config.excludedRoots, fileOps: RealFileOps())`；对 `disc.roots` 每个建 watcher（projectsDir=`<root>/projects`、parse root=该 root、eventId 前缀加 rootLabel）；持有进数组。
+- [ ] **Step 1:** `jsonlWatcher: JSONLDirectoryWatcher?` → `jsonlWatchers: [JSONLDirectoryWatcher]`；`start()` 改：`let disc = DataRootDiscovery.discover(home: 展开home, existing: config.dataRoots, excluded: config.excludedRoots, fileOps: RealFileOps())`；对 `disc.roots` **每个** 建 watcher（projectsDir=`<root>/projects`、parse root=该 root）`append` 进 `jsonlWatchers`。**⚠️ 现有单 watcher 在 start() 末尾（change handler 注册 + hook replay 之后）调 `watcher.scanOnce(); watcher.start(every: 8)`——多 watcher 必须对数组每个都调（架构 M1，否则 watcher 建了却永不扫描，面板静默空）：`jsonlWatchers.forEach { $0.scanOnce(); $0.start(every: 8) }`，且保持在现有时序位置（change handler 注册之后）。**
 - [ ] **Step 2:** `stop()`：`jsonlWatchers.forEach { $0.stop() }; jsonlWatchers.removeAll()`（防 ARC 泄漏）。
-- [ ] **Step 3:** 知情同意：`disc.newlyDiscovered` 非空 → 一次性提示（复用 NotificationService 发一条本地通知或健康面板横幅）"发现并加入 N 个 Claude profile，仅读会话状态，可在首选项移除"；把 newlyDiscovered 写入 config.dataRoots 持久化。
-- [ ] **Step 4:** AppConfig 加 `excludedRoots: [String]`（同 Task 6 模式：decodeIfPresent ?? []）；PreferencesWindow 数据根列表对自动发现项标「自动发现」+ 移除按钮（移除→加入 excludedRoots）。
-- [ ] **Step 5:** MenuBarController/SessionPanel：确认 `SessionRowModel.profileTag` 在 root 数>1 时渲染（已有 profileTag 字段；若未渲染则加 badge）。
-- [ ] **Step 6:** `swift build` + `swift test` 绿（注意 AppConfig 加 excludedRoots 需更新 Task6 的自定义解码 + 测试）→ 提交 `feat: 多root并行watcher+发现知情同意+excludedRoots（M2-B,三重收敛同意/架构N-1/N-5）`
+- [ ] **Step 3:** eventId 加 root（架构 m1/N-1）：`applyScanResult` 内 `eventId: "jsonl:\(key.sessionId):\(jsonlSeqCounter)"` → `eventId: "jsonl:\((key.root as NSString).lastPathComponent):\(key.sessionId):\(jsonlSeqCounter)"`（`key.root` 已在 ScanResult 内）。
+- [ ] **Step 4:** 知情同意 + **持久化**：`disc.newlyDiscovered` 非空 → `config.dataRoots.append(contentsOf: disc.newlyDiscovered)` 后 **`try? configStore.save(config)`（架构 M2，否则每次启动重弹）**；再发一次性提示（复用 NotificationService 本地通知或健康面板横幅）"发现并加入 N 个 Claude profile，仅读会话状态，可在首选项移除"。（`configStore` 已是 AppCoordinator 的 `private let`。）
+- [ ] **Step 5:** PreferencesWindow 数据根列表对自动发现项标「自动发现」+ 移除按钮（移除 → 加入 `config.excludedRoots` 并 save；`excludedRoots` 字段已由 **Task 6** 全权添加含 CodingKeys/解码，本任务直接使用，**不再动 AppConfig 解码**）。
+- [ ] **Step 6:** MenuBarController/SessionPanel：确认 `SessionRowModel.profileTag` 在 root 数>1 时渲染（已有 profileTag 字段；若未渲染则加 badge）。
+- [ ] **Step 7:** `swift build` + `swift test` 绿 → 提交 `feat: 多root并行watcher(每个scanOnce+start)+发现知情同意+持久化+eventId加root（M2-B,架构M1/M2/N-1/N-5）`
 
 ### Task 10: (A) PetAssetLoader(selection) + PetView resolvedImage + 呼吸动画 + applyPet 迁移
 
 **Files:** Modify `Sources/apet/PetAssetLoader.swift`、`Sources/apet/PetView.swift`、`Sources/apet/PetWindowController.swift`、`Sources/apet/AppCoordinator.swift`
 
 - [ ] **Step 1:** `PetAssetLoader.image(selection: PetKind, assetState: String, customStore: CustomPetStore?) -> NSImage`：`.builtin(name)` 走原 PNG；`.custom(id)` 从 `customStore?.imagePath(id)` 加载 NSImage，缺失/nil → SF Symbol 兜底。保留旧 `image(pet:assetState:)` 内部委托或删（看调用点）。
-- [ ] **Step 2:** `PetView`：`pet: String` 入参 → `resolvedImage: NSImage?`；body 用 `resolvedImage ?? SF Symbol`；移除 body 内 `PetAssetLoader.image` 调用；加呼吸动画 `.scaleEffect(breathing ? 1.03 : 1.0).animation(.easeInOut(duration: 2).repeatForever(autoreverses: true), value: breathing)` + `.onAppear { breathing = true }`；`.clipShape(Circle())`（custom 时）。
-- [ ] **Step 3:** `PetWindowController`：持有 `customStore: CustomPetStore`、`currentSelection: PetKind`；`applyPet(_ selection: PetKind)`（替换 `applyPet(_ pet: String)`）；`update()/applyPet()` 内 `let img = PetAssetLoader.image(selection: currentSelection, assetState:, customStore: customStore)` 传 PetView。
-- [ ] **Step 4:** `AppCoordinator`：`pw.applyPet(newConfig.selectedPet)` → `pw.applyPet(PetSelection.parse(newConfig.selectedPet))`；构造 PetWindowController 时注入 customStore；`pet:` 初值用 `PetSelection.parse(config.selectedPet)`。删除旧 String 重载。
+- [ ] **Step 2:** `PetView`：`pet: String` 入参 → `resolvedImage: NSImage?` + **`isCustomPet: Bool`**（架构 M3：内置宠物**不能**被裁圆，否则 shiba/bichon PNG 视觉回归）；body 用 `resolvedImage ?? SF Symbol`；移除 body 内 `PetAssetLoader.image` 调用；**保留现有 bobOffset 上下浮动动画**，**追加**轻呼吸 `@State private var breathing = false` + `.scaleEffect(breathing ? 1.03 : 1.0).animation(.easeInOut(duration: 2).repeatForever(autoreverses: true), value: breathing)` + `.onAppear { breathing = true }`（架构 m3：bob + 呼吸共存，注释标注）；**仅 `isCustomPet` 时** `.clipShape(Circle())`：`if isCustomPet { img.clipShape(Circle()) } else { img }`。
+- [ ] **Step 3:** `PetWindowController`：持有 `customStore: CustomPetStore`、`currentSelection: PetKind`；`applyPet(_ selection: PetKind)`（替换 `applyPet(_ pet: String)`，同步存 `currentSelection`）；`update()/applyPet()` 内 `let img = PetAssetLoader.image(selection: currentSelection, assetState:, customStore: customStore)` + 计算 `isCustom = { if case .custom = currentSelection { true } else { false } }` 一并传 PetView（`resolvedImage: img, isCustomPet: isCustom`）。
+- [ ] **Step 4:** `AppCoordinator`：**创建单一 `CustomPetStore` 实例**（rootDir=`<appSupport>/pets-custom`、RealFileOps、idProvider=`{ UUID().uuidString }`——注：UUID 在 apet target 边界生成，非纯逻辑层），构造 PetWindowController 时注入它；`pet:` 初值用 `PetSelection.parse(config.selectedPet)`；`applyConfig` 里 `pw.applyPet(newConfig.selectedPet)` → `pw.applyPet(PetSelection.parse(newConfig.selectedPet))`。删除旧 `applyPet(String)` 重载。**把同一 `customStore` 实例 + 一个 `applyPet: (PetKind) -> Void` 闭包（内部 `self.pw?.applyPet($0)` + 写 `config.selectedPet` + save）经 PreferencesWindow 传给 T11 的 PetUploadController（架构 M4，闭环换宠）。**
 - [ ] **Step 5:** `swift build`（确认无旧 applyPet(String) 残留）+ `swift test` 绿 → 提交 `feat: 照片宠物渲染(PetView纯resolvedImage)+呼吸动画+applyPet(PetKind)迁移（M2-A,架构M-1/M-2/产品M-1）`
 
 ### Task 11: (A) VisionForegroundCutter + 上传动线 UI + 失败不出丑
@@ -436,7 +440,7 @@ public init(from d: Decoder) throws {
 **Files:** Create `Sources/AppShellKit/VisionForegroundCutter.swift`、`Sources/apet/PetUploadController.swift`; Modify `Sources/apet/PreferencesWindow.swift`（宠物段）
 
 - [ ] **Step 1:** `VisionForegroundCutter`（`@available(macOS 14.0,*)`）按 spec §3 五步管道实现（CGImageSource 取 EXIF orientation → VNImageRequestHandler.perform → guard allInstances 非空否则 throw .noForegroundDetected → generateMaskedImage → CVPixelBuffer→CIImage→CGImage→NSBitmapImageRep→PNG，nil→throw .outputWriteFailed）。
-- [ ] **Step 2:** `PetUploadController`（@MainActor）：`upload()` → NSOpenPanel(png/jpg) → **completionHandler 内同步** `store.importPhoto(srcPath)` 得 id → 弹"一键抠图？"对话 → 选抠图：`Task { let r = await (cutterFactory()).cutoutResult(...); let outcome = CutoutDecision.decide(...); switch outcome { case .setAsPet: 设 config.selectedPet="custom:id" + applyPet; case .keepCurrent(msg): NSAlert 提示 msg，不改宠物 } }`；选原图：直接设 custom:id（原图圆形）。`cutterFactory`：macOS 14+ 返回 VisionForegroundCutter，否则 UnavailableForegroundCutter。
+- [ ] **Step 2:** `PetUploadController`（@MainActor）**注入**：`store: CustomPetStore`（T10 AppCoordinator 创建的同一实例）+ `applyPet: (PetKind) -> Void`（T10 提供的闭包，内部换宠+写 config.selectedPet+save，架构 M4——闭环换宠）。`upload()` → NSOpenPanel(png/jpg) → **completionHandler 内同步** `store.importPhoto(srcPath)` 得 id → 弹"一键抠图？"对话 → 选抠图：`Task { let r: Result<Void,CutoutError> = await runCutout(...); let outcome = CutoutDecision.decide(result: r, cutoutPath: store.cutoutPath(id:)); switch outcome { case .setAsPet: applyPet(.custom(id: id)); case .keepCurrent(msg): NSAlert 提示 msg，不调 applyPet（宠物不变） } }`；选原图：`applyPet(.custom(id: id))`（原图圆形）。`cutterFactory`：macOS 14+ 返回 VisionForegroundCutter，否则 UnavailableForegroundCutter。
 - [ ] **Step 3:** PreferencesWindow 宠物区块：内置柴犬/比熊 + 「上传照片」按钮（触发 PetUploadController）；自定义宠物条目显示「✓已抠图/⚠用原图」+「重新抠图」按钮（重跑抠图，失败保持当前）。
 - [ ] **Step 4:** `swift build` + `swift test` 绿；**手动 E2E**：上传一张照片 → 抠图成功 → 桌宠变照片（圆形+呼吸）；抠图失败 → 不变宠物 + 提示。
 - [ ] **Step 5:** 提交 `feat: VisionForegroundCutter(@available14,五步管道)+上传动线+失败不出丑+重试（M2-A,安全BLK-1/BLK-2/MAJ-1/MAJ-3,产品B-1）`
