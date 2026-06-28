@@ -35,6 +35,10 @@ final class AppCoordinator {
     private var reapTimer: DispatchSourceTimer?
     private var isStopped = false
 
+    private var jsonlWatcher: JSONLDirectoryWatcher?
+    /// 进程内单调计数器，用于 jsonl 合成事件的唯一 eventId（替代 UUID，防 seenEventIds 慢泄漏）。
+    private var jsonlSeqCounter: Int = 0
+
     private var preferencesController: PreferencesWindowController?
 
     // MARK: - Derived config helpers
@@ -81,6 +85,24 @@ final class AppCoordinator {
         self.ingestor = ingestor
 
         // 2b. Create and start NotificationService (safe to call before replay).
+        // ─── 2a. Setup JSONL directory watcher ───────────────────────────────────
+        // 共享同一 NDJSONIngestor（唯一 seq 源）；source=.jsonl；replay=false；不接 NotificationService。
+        // config.dataRoots 是 [DataRoot]，取第一个 path（默认 ~/.claude）作为 dataRoot（架构-B1/M4）。
+        let dataRoot = config.dataRoots.first?.path
+            ?? FileManager.default.homeDirectoryForCurrentUser
+                .appendingPathComponent(".claude").path
+        let projectsDir = (dataRoot as NSString).appendingPathComponent("projects")
+        let watcher = JSONLDirectoryWatcher(
+            projectsDir: projectsDir,
+            root: dataRoot,
+            now: { Date().timeIntervalSince1970 },
+            parse: { JSONLParse.parse(path: $0, root: dataRoot) },
+            emit: { [weak self] result in self?.applyScanResult(result) }
+        )
+        self.jsonlWatcher = watcher
+        watcher.scanOnce()          // seed：回放结束后立即扫描一次（replay=false，不触发通知）
+        watcher.start(every: 8)     // 每 8 秒定期扫描，queue:.main
+        // ──────────────────────────────────────────────────────────────────────────
         // Single shared TerminalFocusService instance injected into both consumers (Fix M-3).
         let focusService = TerminalFocusService()
         let ns = NotificationService(focusService: focusService, sessionLookup: { [weak self] key in
@@ -179,6 +201,8 @@ final class AppCoordinator {
         }
         reapTimer?.cancel()
         reapTimer = nil
+        jsonlWatcher?.stop()
+        jsonlWatcher = nil
     }
 
     // MARK: - Preferences
@@ -221,6 +245,54 @@ final class AppCoordinator {
             }
             // Apply selected pet sprite immediately (Fix I-2).
             pw.applyPet(newConfig.selectedPet)
+        }
+    }
+
+    // MARK: - Private: JSONL watcher result handler
+
+    /// JSONLDirectoryWatcher emit 回调——在 DispatchQueue.main 上触发（watcher timer 已 queue:.main），
+    /// @MainActor 上下文安全，直接调用 ingestor.ingest / store.markStaleSession。
+    /// 绝不调用 NotificationService（jsonl 路径永不发 OS 通知，架构-B1）。
+    private func applyScanResult(_ result: ScanResult) {
+        guard let ingestor = self.ingestor, let store = self.store else { return }
+        switch result {
+        case .ignore:
+            return
+
+        case .observe(let state, let key, let cwd, let title):
+            let now = Date().timeIntervalSince1970
+            switch state {
+            case .running, .waitingStop:
+                // .running → 合成 busy；.waitingStop → 合成 stop（会话进入 waiting 等用户）
+                let kind: EventKind = (state == .running) ? .busy : .stop
+                var ev = AgentEvent(
+                    v: 1,
+                    eventId: "jsonl:\(key.sessionId):\(jsonlSeqCounter)",
+                    agent: key.agent,
+                    kind: kind,
+                    sessionId: key.sessionId,
+                    root: key.root,
+                    cwd: cwd,
+                    title: title,
+                    ts: ""
+                )
+                ev.source = .jsonl
+                jsonlSeqCounter += 1
+                _ = ingestor.ingest(event: ev, now: now, replay: false)
+                // ⚠️ 绝不调用 notificationService.consider（jsonl 不发通知，架构-B1）
+
+            case .stale:
+                // 文件消失/过期：仅 jsonl 来源的会话才打灰（hook 会话由 hook 路径或定时器管理）
+                if store.sessions[key]?.source == .jsonl {
+                    _ = store.markStaleSession(key, now: now)
+                }
+            }
+
+            // 刷新 UI（菜单栏 + 宠物窗）
+            let summary = store.summary()
+            let sessions = store.activeSessions()
+            menuBar?.update(summary: summary, sessions: sessions)
+            petWindow?.update(summary: summary, sessions: sessions)
         }
     }
 
