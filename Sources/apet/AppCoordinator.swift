@@ -193,6 +193,8 @@ final class AppCoordinator {
                 customStore: customStore,
                 compact: isCompact
             )
+            // 桌宠面板的「首选项」按钮入口——不依赖状态栏图标（图标可能被刘海/溢出区藏住）。
+            pw.onOpenPreferences = { [weak self] in self?.openPreferences() }
             mb.petVisibilityProvider = { [weak pw] in pw?.isVisible ?? false }
             mb.onTogglePet = { [weak pw] in
                 guard let pw else { return }

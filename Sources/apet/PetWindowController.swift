@@ -33,6 +33,11 @@ final class PetWindowController: NSObject {
     /// 精简条模式。
     private var currentCompact: Bool
 
+    /// 打开首选项的回调。桌宠面板的「首选项」按钮通过它进入设置——
+    /// 这是**不依赖状态栏图标**的首选项入口（状态栏图标可能被刘海/菜单栏溢出区藏住，
+    /// 那样用户就只剩这条路）。由 AppCoordinator 注入。
+    var onOpenPreferences: (() -> Void)?
+
     // MARK: - Dependencies
 
     private let focusService: TerminalFocusService
@@ -328,14 +333,17 @@ final class PetWindowController: NSObject {
         w.orderFrontRegardless()
 
         let rows = currentSessions.map(SessionRowMapper.make)
-        let panelVC = SessionPanelHostController(rows: rows, hotkeyHint: hotkeyHint, onTap: { [weak self] id in
-            self?.handleSessionTap(id: id)
-        })
+        let panelVC = SessionPanelHostController(
+            rows: rows,
+            hotkeyHint: hotkeyHint,
+            onTap: { [weak self] id in self?.handleSessionTap(id: id) },
+            onOpenPreferences: { [weak self] in self?.onOpenPreferences?() }
+        )
         let p = NSPopover()
         p.contentViewController = panelVC
         p.behavior = .transient
-        // 顶部快捷键提示约占 28px，有提示时加高，避免会话列表被截断（评审 MINOR-5）。
-        p.contentSize = NSSize(width: 320, height: hotkeyHint != nil ? 428 : 400)
+        // 顶部快捷键提示约占 28px，有提示时加高；底部「首选项」按钮约占 36px，整体加高避免列表被截断。
+        p.contentSize = NSSize(width: 320, height: hotkeyHint != nil ? 464 : 436)
         self.popover = p
 
         // Anchor to center of content view; let NSPopover pick the best edge
@@ -418,29 +426,70 @@ private final class DragDetectorView: NSView {
     }
 }
 
+// MARK: - PetPanelRootView
+
+/// ``SessionPanel`` + 一个「首选项…」页脚按钮。
+///
+/// 桌宠面板必须自带通往首选项的入口，**不能只依赖状态栏图标**——状态栏图标会被
+/// 刘海 / 菜单栏溢出区藏掉，那样用户就再也打不开首选项（实测踩坑）。
+private struct PetPanelRootView: View {
+    let rows: [SessionRowModel]
+    let hotkeyHint: String?
+    let onTap: (String) -> Void
+    let onOpenPreferences: () -> Void
+
+    var body: some View {
+        VStack(spacing: 0) {
+            SessionPanel(rows: rows, onTap: onTap, hotkeyHint: hotkeyHint)
+            Divider()
+            Button {
+                onOpenPreferences()
+            } label: {
+                Label("首选项…", systemImage: "gearshape")
+                    .frame(maxWidth: .infinity)
+                    .padding(.vertical, 4)
+            }
+            .buttonStyle(.plain)
+            .foregroundStyle(.secondary)
+            .padding(.horizontal, 10)
+            .padding(.vertical, 4)
+        }
+    }
+}
+
 // MARK: - SessionPanelHostController
 
-/// Minimal NSViewController that wraps ``SessionPanel`` in a popover.
+/// Minimal NSViewController that wraps ``PetPanelRootView`` in a popover.
 private final class SessionPanelHostController: NSViewController {
 
     private var rows: [SessionRowModel]
     private let hotkeyHint: String?
     private let onTap: (String) -> Void
-    private var hostingController: NSHostingController<SessionPanel>?
+    private let onOpenPreferences: () -> Void
+    private var hostingController: NSHostingController<PetPanelRootView>?
 
-    init(rows: [SessionRowModel], hotkeyHint: String?, onTap: @escaping (String) -> Void) {
+    init(
+        rows: [SessionRowModel],
+        hotkeyHint: String?,
+        onTap: @escaping (String) -> Void,
+        onOpenPreferences: @escaping () -> Void
+    ) {
         self.rows = rows
         self.hotkeyHint = hotkeyHint
         self.onTap = onTap
+        self.onOpenPreferences = onOpenPreferences
         super.init(nibName: nil, bundle: nil)
     }
 
     required init?(coder: NSCoder) { fatalError("init(coder:) not supported") }
 
+    private func makeRoot() -> PetPanelRootView {
+        PetPanelRootView(rows: rows, hotkeyHint: hotkeyHint, onTap: onTap, onOpenPreferences: onOpenPreferences)
+    }
+
     override func loadView() {
-        let panel = SessionPanel(rows: rows, onTap: onTap, hotkeyHint: hotkeyHint)
-        let hc = NSHostingController(rootView: panel)
-        hc.view.frame = NSRect(x: 0, y: 0, width: 320, height: 400)
+        let hc = NSHostingController(rootView: makeRoot())
+        hc.view.frame = NSRect(x: 0, y: 0, width: 320, height: 436)
         self.view = hc.view
         addChild(hc)
         hostingController = hc
@@ -448,6 +497,6 @@ private final class SessionPanelHostController: NSViewController {
 
     func update(rows: [SessionRowModel]) {
         self.rows = rows
-        hostingController?.rootView = SessionPanel(rows: rows, onTap: onTap, hotkeyHint: hotkeyHint)
+        hostingController?.rootView = makeRoot()
     }
 }
