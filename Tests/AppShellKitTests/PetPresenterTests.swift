@@ -105,4 +105,32 @@ final class PetPresenterTests: XCTestCase {
         XCTAssertEqual(p.runningCount, 1)
         XCTAssertEqual(p.doneCount, 3)
     }
+
+    // MARK: - 已读态（红只数未读 + readCount）
+
+    /// readCount 默认 0；无 acknowledged 时 done 不被扣减
+    func test_readCount_defaultsZero() {
+        let p = PetPresenter.make(from: PetSummary(state: .calling, runningCount: 0, waitingCount: 2, attentionCount: 0, staleCount: 0))
+        XCTAssertEqual(p.readCount, 0)
+        XCTAssertEqual(p.doneCount, 2, "无已读时 done = waiting + attention")
+    }
+
+    /// readCount == acknowledgedCount；done 扣除已读（红只数未读）
+    func test_readCount_and_done_excludesAcknowledged() {
+        // 3 waiting(含 1 attention)，其中 2 个已读 → done = waiting(3)+attention(1)-ack(2) = 2，read = 2
+        let p = PetPresenter.make(from: PetSummary(
+            state: .calling, runningCount: 0, waitingCount: 3, attentionCount: 1,
+            staleCount: 0, acknowledgedCount: 2))
+        XCTAssertEqual(p.readCount, 2)
+        XCTAssertEqual(p.doneCount, 2, "红色只数未读：waiting+attention - acknowledged")
+    }
+
+    /// 全部已读 → done 可为 0，read 等于全部
+    func test_allAcknowledged_doneZero() {
+        let p = PetPresenter.make(from: PetSummary(
+            state: .calling, runningCount: 0, waitingCount: 2, attentionCount: 0,
+            staleCount: 0, acknowledgedCount: 2))
+        XCTAssertEqual(p.readCount, 2)
+        XCTAssertEqual(p.doneCount, 0)
+    }
 }

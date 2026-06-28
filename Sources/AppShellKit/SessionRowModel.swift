@@ -8,6 +8,7 @@ public enum Dot: Equatable {
     case running     // green  — session is actively processing
     case attention   // orange — session paused, awaiting user input
     case doneWaiting // red    — session stopped (waiting.stop)
+    case read        // yellow — a waiting session the user has acknowledged (红→黄)
     case stale       // gray   — session timed-out or ended
 }
 
@@ -76,14 +77,16 @@ public enum SessionRowMapper {
         // Subtitle: full cwd (empty string if not available)
         let subtitle = session.cwd ?? ""
 
-        // Dot colour from session state
+        // Dot colour from session state.
+        // 已读（acknowledged）的 waiting 会话优先渲染为黄色 .read（红→黄），先于 doneWaiting/attention。
         let dot: Dot
         switch session.state {
-        case .running:              dot = .running
-        case .waiting(.attention):  dot = .attention
-        case .waiting(.stop):       dot = .doneWaiting
-        case .stale:                dot = .stale
-        case .ended:                dot = .stale   // shouldn't appear in active list
+        case .running:                              dot = .running
+        case .waiting where session.acknowledged:   dot = .read
+        case .waiting(.attention):                  dot = .attention
+        case .waiting(.stop):                       dot = .doneWaiting
+        case .stale:                                dot = .stale
+        case .ended:                                dot = .stale   // shouldn't appear in active list
         }
 
         // activateOnly: warp / other cannot do a precise tab jump

@@ -122,6 +122,7 @@ private struct SessionRowCell: View {
         case .running:     base = .green
         case .attention:   base = .orange
         case .doneWaiting: base = .red
+        case .read:        base = .yellow   // 已读：红→黄
         case .stale:       base = .gray
         }
         // Inferred (jsonl waiting) rows get a muted dot so they don't look as urgent
