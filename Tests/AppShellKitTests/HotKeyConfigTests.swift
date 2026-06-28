@@ -70,4 +70,53 @@ final class HotKeyConfigTests: XCTestCase {
         let decoded = try JSONDecoder().decode(HotKeyConfig.self, from: data)
         XCTAssertEqual(decoded, original)
     }
+
+    // MARK: - nsModifiersToCarbonModifiers
+
+    /// NSEvent.ModifierFlags.command.rawValue (1<<20) → cmdKey (256)
+    func test_nsModifiers_command_only() {
+        let nsRaw: UInt = 1 << 20   // .command = 1048576
+        XCTAssertEqual(nsModifiersToCarbonModifiers(nsRaw), 256)
+    }
+
+    /// NSEvent.ModifierFlags.option.rawValue (1<<19) → optionKey (2048)
+    func test_nsModifiers_option_only() {
+        let nsRaw: UInt = 1 << 19   // .option = 524288
+        XCTAssertEqual(nsModifiersToCarbonModifiers(nsRaw), 2048)
+    }
+
+    /// NSEvent.ModifierFlags.shift.rawValue (1<<17) → shiftKey (512)
+    func test_nsModifiers_shift_only() {
+        let nsRaw: UInt = 1 << 17   // .shift = 131072
+        XCTAssertEqual(nsModifiersToCarbonModifiers(nsRaw), 512)
+    }
+
+    /// NSEvent.ModifierFlags.control.rawValue (1<<18) → controlKey (4096)
+    func test_nsModifiers_control_only() {
+        let nsRaw: UInt = 1 << 18   // .control = 262144
+        XCTAssertEqual(nsModifiersToCarbonModifiers(nsRaw), 4096)
+    }
+
+    /// ⌥⌘ (option | command) → 2048 | 256 = 2304（⌥⌘P 默认快捷键修饰组合）
+    func test_nsModifiers_optionCommand() {
+        let nsRaw: UInt = (1 << 19) | (1 << 20)   // .option | .command
+        XCTAssertEqual(nsModifiersToCarbonModifiers(nsRaw), 2048 | 256)
+    }
+
+    /// 全修饰（⌃⌥⇧⌘）→ 4096 | 2048 | 512 | 256 = 6912
+    func test_nsModifiers_allFour() {
+        let nsRaw: UInt = (1 << 20) | (1 << 17) | (1 << 19) | (1 << 18)
+        XCTAssertEqual(nsModifiersToCarbonModifiers(nsRaw), 256 | 512 | 2048 | 4096)
+    }
+
+    /// 无修饰位 → 0
+    func test_nsModifiers_none() {
+        XCTAssertEqual(nsModifiersToCarbonModifiers(0), 0)
+    }
+
+    /// 不相关位（如 .numericPad = 1<<21）不映射到任何 Carbon 修饰位
+    func test_nsModifiers_numericPad_ignored() {
+        let nsRaw: UInt = 1 << 21   // .numericPad — not mapped to Carbon modifiers
+        XCTAssertEqual(nsModifiersToCarbonModifiers(nsRaw), 0)
+    }
 }

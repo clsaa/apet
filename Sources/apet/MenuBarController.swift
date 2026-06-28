@@ -12,6 +12,8 @@ private struct PanelRootView: View {
     /// Fix 6: whether the hook is already installed for any data root.
     /// When `true`, the panel surfaces "已启用" instead of the call-to-action button.
     let hookInstalled: Bool
+    /// 面板顶部快捷键提示，如 "⌥⌘P 打开/关闭"。
+    let hotkeyHint: String?
     let onTap: (String) -> Void
     let onTogglePet: () -> Void
     let onOpenPreferences: () -> Void
@@ -19,7 +21,7 @@ private struct PanelRootView: View {
 
     var body: some View {
         VStack(spacing: 0) {
-            SessionPanel(rows: rows, onTap: onTap)
+            SessionPanel(rows: rows, onTap: onTap, hotkeyHint: hotkeyHint)
             Divider()
 
             // 隐藏/显示宠物
@@ -119,6 +121,8 @@ final class MenuBarController: NSObject {
     var hookInstalledProvider: (() -> Bool)?
     /// 用户点开一个会话（跳转终端）后回调，AppCoordinator 据此把会话标记为"已读"（红→黄）。
     var onAcknowledge: ((SessionKey) -> Void)?
+    /// 面板顶部快捷键提示字符串，如 "⌥⌘P 打开/关闭"。nil 表示不显示 header。
+    var hotkeyHint: String?
 
     // MARK: - State
 
@@ -208,12 +212,13 @@ final class MenuBarController: NSObject {
             rows: rows,
             petVisible: petVisibilityProvider?() ?? false,
             hookInstalled: hookInstalledProvider?() ?? false,
+            hotkeyHint: hotkeyHint,
             onTap: { [weak self] id in self?.handleSessionTap(id: id) },
             onTogglePet: { [weak self] in
                 self?.onTogglePet?()
                 // Re-render the panel so the button label flips immediately.
                 self?.panelHosting?.rootView = self?.makePanelRootView() ?? PanelRootView(
-                    rows: [], petVisible: false, hookInstalled: false,
+                    rows: [], petVisible: false, hookInstalled: false, hotkeyHint: nil,
                     onTap: { _ in }, onTogglePet: {}, onOpenPreferences: {}, onQuit: {}
                 )
             },
@@ -223,6 +228,11 @@ final class MenuBarController: NSObject {
             },
             onQuit: { NSApplication.shared.terminate(nil) }
         )
+    }
+
+    /// 以编程方式打开/切换会话面板 popover（供全局热键在 menuBarOnly 模式下调用）。
+    func showPanel() {
+        showPopover()
     }
 
     private func showPopover() {

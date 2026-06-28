@@ -42,3 +42,29 @@ public struct HotKeyConfig: Equatable, Codable {
         keyLabel: "P"
     )
 }
+
+// MARK: - NSEvent.ModifierFlags → Carbon modifier bits
+
+/// 把 NSEvent.ModifierFlags.rawValue 转换为 Carbon RegisterEventHotKey 所用的修饰键位掩码。
+///
+/// NSEvent.ModifierFlags raw 位（不需要 import AppKit）：
+/// - .command  = 1 << 20 = 1048576
+/// - .shift    = 1 << 17 = 131072
+/// - .option   = 1 << 19 = 524288
+/// - .control  = 1 << 18 = 262144
+///
+/// Carbon 修饰键位（与 HotKeyConfig.modifiers 使用的值一致）：
+/// - cmdKey     = 256
+/// - shiftKey   = 512
+/// - optionKey  = 2048
+/// - controlKey = 4096
+///
+/// 纯函数，无 AppKit 依赖，可在 AppShellKitTests 中单测。
+public func nsModifiersToCarbonModifiers(_ nsRawFlags: UInt) -> UInt32 {
+    var result: UInt32 = 0
+    if nsRawFlags & (1 << 20) != 0 { result |= 256 }   // .command  → cmdKey
+    if nsRawFlags & (1 << 17) != 0 { result |= 512 }   // .shift    → shiftKey
+    if nsRawFlags & (1 << 19) != 0 { result |= 2048 }  // .option   → optionKey
+    if nsRawFlags & (1 << 18) != 0 { result |= 4096 }  // .control  → controlKey
+    return result
+}

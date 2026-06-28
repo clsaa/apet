@@ -8,10 +8,23 @@ import AppShellKit
 struct PetView: View {
     let presentation: PetPresentation
     let pet: String
+    /// 精简条模式：仅渲染 countChip，不显示宠物图、气泡、呼吸动画。
+    /// 窗口尺寸由 ``PetWindowController`` 根据此标志调整。
+    var compact: Bool = false
 
     @State private var bobOffset: CGFloat = 0
 
     var body: some View {
+        if compact {
+            compactBody
+        } else {
+            fullBody
+        }
+    }
+
+    // MARK: - Full pet body (pet + bubble + countChip)
+
+    private var fullBody: some View {
         ZStack(alignment: .top) {
             VStack(spacing: 4) {
                 // Speech bubble (calling state)
@@ -51,6 +64,22 @@ struct PetView: View {
             .padding(8)
         }
         .frame(width: 140, height: 160)
+    }
+
+    // MARK: - Compact body (only countChip)
+
+    private var compactBody: some View {
+        HStack {
+            Spacer(minLength: 0)
+            countChip
+            Spacer(minLength: 0)
+        }
+        .frame(width: 160, height: 40)
+        .background(
+            RoundedRectangle(cornerRadius: 8)
+                .fill(Color(NSColor.windowBackgroundColor).opacity(0.88))
+                .shadow(radius: 3)
+        )
     }
 
     // MARK: - Subviews

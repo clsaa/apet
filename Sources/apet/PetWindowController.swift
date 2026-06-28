@@ -19,6 +19,7 @@ final class PetWindowController: NSObject {
 
     private static let positionKey = "com.clsaa.apet.PetWindowPosition"
     private let windowSize = NSSize(width: 140, height: 160)
+    private let compactWindowSize = NSSize(width: 160, height: 40)
 
     // MARK: - State
 
@@ -29,6 +30,8 @@ final class PetWindowController: NSObject {
     private var currentSessions: [Session] = []
     /// Currently rendered pet sprite name ("shiba" | "bichon").
     private var currentPet: String
+    /// 精简条模式。
+    private var currentCompact: Bool
 
     // MARK: - Dependencies
 
@@ -36,15 +39,19 @@ final class PetWindowController: NSObject {
 
     /// 用户点开一个会话（跳转终端）后回调，AppCoordinator 据此把会话标记为"已读"（红→黄）。
     var onAcknowledge: ((SessionKey) -> Void)?
+    /// 面板顶部快捷键提示字符串，如 "⌥⌘P 打开/关闭"。
+    var hotkeyHint: String?
 
     // MARK: - Init
 
     /// - Parameters:
     ///   - focusService: Service used to jump to the terminal that owns a session.
     ///   - pet: Initial pet sprite ("shiba" or "bichon").  Defaults to "shiba".
-    init(focusService: TerminalFocusService, pet: String = "shiba") {
+    ///   - compact: 精简条模式（仅显示计数条）。Defaults to false.
+    init(focusService: TerminalFocusService, pet: String = "shiba", compact: Bool = false) {
         self.focusService = focusService
         self.currentPet = pet
+        self.currentCompact = compact
         self.currentPresentation = PetPresenter.make(
             from: PetSummary(
                 state: .idle,
@@ -65,7 +72,7 @@ final class PetWindowController: NSObject {
         let presentation = PetPresenter.make(from: summary)
         currentPresentation = presentation
         currentSessions = sessions
-        hostingView?.rootView = PetView(presentation: presentation, pet: currentPet)
+        hostingView?.rootView = PetView(presentation: presentation, pet: currentPet, compact: currentCompact)
 
         // Update popover session list in-place when visible
         if let popover, popover.isShown,
@@ -97,7 +104,31 @@ final class PetWindowController: NSObject {
     func applyPet(_ pet: String) {
         guard pet != currentPet else { return }
         currentPet = pet
-        hostingView?.rootView = PetView(presentation: currentPresentation, pet: currentPet)
+        hostingView?.rootView = PetView(presentation: currentPresentation, pet: currentPet, compact: currentCompact)
+    }
+
+    /// 切换精简条模式。窗口尺寸随之调整，宿主视图立即更新。
+    ///
+    /// Call from ``AppCoordinator/applyConfig(_:)`` whenever `displayMode` changes between
+    /// `"pet"` and `"compact"`.
+    func applyCompact(_ compact: Bool) {
+        guard compact != currentCompact else { return }
+        currentCompact = compact
+        let newSize = compact ? compactWindowSize : windowSize
+        // Resize window; keep top-left anchor (macOS y=0 is bottom, so adjust origin).
+        if let w = window {
+            let oldFrame = w.frame
+            let newOriginY = oldFrame.maxY - newSize.height
+            w.setFrame(NSRect(origin: NSPoint(x: oldFrame.origin.x, y: newOriginY), size: newSize), display: true)
+        }
+        // Resize all immediate subviews (hostingView + overlayView)
+        if let contentView = window?.contentView {
+            contentView.frame = NSRect(origin: .zero, size: newSize)
+            for sub in contentView.subviews {
+                sub.frame = NSRect(origin: .zero, size: newSize)
+            }
+        }
+        hostingView?.rootView = PetView(presentation: currentPresentation, pet: currentPet, compact: compact)
     }
 
     // MARK: - Private: session tap (mirrors MenuBarController.handleSessionTap)
@@ -120,8 +151,9 @@ final class PetWindowController: NSObject {
     // MARK: - Private: window setup
 
     private func setupWindow() {
+        let size = currentCompact ? compactWindowSize : windowSize
         let origin = savedPosition() ?? defaultOrigin()
-        let contentRect = NSRect(origin: origin, size: windowSize)
+        let contentRect = NSRect(origin: origin, size: size)
 
         let w = ApeFloatingWindow(
             contentRect: contentRect,
@@ -139,12 +171,12 @@ final class PetWindowController: NSObject {
         w.isExcludedFromWindowsMenu = true
 
         // Hosting view for SwiftUI content
-        let hv = NSHostingView(rootView: PetView(presentation: currentPresentation, pet: currentPet))
-        hv.frame = NSRect(origin: .zero, size: windowSize)
+        let hv = NSHostingView(rootView: PetView(presentation: currentPresentation, pet: currentPet, compact: currentCompact))
+        hv.frame = NSRect(origin: .zero, size: size)
         hostingView = hv
 
         // Drag/click overlay (transparent, sits on top of the hosting view)
-        let overlay = DragDetectorView(frame: NSRect(origin: .zero, size: windowSize))
+        let overlay = DragDetectorView(frame: NSRect(origin: .zero, size: size))
         overlay.onClicked = { [weak self] in
             self?.togglePopover()
         }
@@ -153,7 +185,7 @@ final class PetWindowController: NSObject {
         }
 
         // Container holds both subviews
-        let container = NSView(frame: NSRect(origin: .zero, size: windowSize))
+        let container = NSView(frame: NSRect(origin: .zero, size: size))
         container.addSubview(hv)
         container.addSubview(overlay)  // overlay is topmost (event capturing)
         w.contentView = container
@@ -206,9 +238,11 @@ final class PetWindowController: NSObject {
         }
     }
 
-    // MARK: - Private: popover
+    // MARK: - Popover (internal: AppCoordinator may call togglePopover via hot key)
 
-    private func togglePopover() {
+    /// 切换会话面板 popover 的显示/隐藏状态。
+    /// AppCoordinator 在接收到全局热键事件时调用此方法（非 private）。
+    func togglePopover() {
         guard let w = window, let contentView = w.contentView else { return }
 
         if let popover, popover.isShown {
@@ -223,7 +257,7 @@ final class PetWindowController: NSObject {
         w.orderFrontRegardless()
 
         let rows = currentSessions.map(SessionRowMapper.make)
-        let panelVC = SessionPanelHostController(rows: rows, onTap: { [weak self] id in
+        let panelVC = SessionPanelHostController(rows: rows, hotkeyHint: hotkeyHint, onTap: { [weak self] id in
             self?.handleSessionTap(id: id)
         })
         let p = NSPopover()
@@ -318,11 +352,13 @@ private final class DragDetectorView: NSView {
 private final class SessionPanelHostController: NSViewController {
 
     private var rows: [SessionRowModel]
+    private let hotkeyHint: String?
     private let onTap: (String) -> Void
     private var hostingController: NSHostingController<SessionPanel>?
 
-    init(rows: [SessionRowModel], onTap: @escaping (String) -> Void) {
+    init(rows: [SessionRowModel], hotkeyHint: String?, onTap: @escaping (String) -> Void) {
         self.rows = rows
+        self.hotkeyHint = hotkeyHint
         self.onTap = onTap
         super.init(nibName: nil, bundle: nil)
     }
@@ -330,7 +366,7 @@ private final class SessionPanelHostController: NSViewController {
     required init?(coder: NSCoder) { fatalError("init(coder:) not supported") }
 
     override func loadView() {
-        let panel = SessionPanel(rows: rows, onTap: onTap)
+        let panel = SessionPanel(rows: rows, onTap: onTap, hotkeyHint: hotkeyHint)
         let hc = NSHostingController(rootView: panel)
         hc.view.frame = NSRect(x: 0, y: 0, width: 320, height: 400)
         self.view = hc.view
@@ -340,6 +376,6 @@ private final class SessionPanelHostController: NSViewController {
 
     func update(rows: [SessionRowModel]) {
         self.rows = rows
-        hostingController?.rootView = SessionPanel(rows: rows, onTap: onTap)
+        hostingController?.rootView = SessionPanel(rows: rows, onTap: onTap, hotkeyHint: hotkeyHint)
     }
 }
