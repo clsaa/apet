@@ -345,8 +345,8 @@ final class PetWindowController: NSObject {
         let p = NSPopover()
         p.contentViewController = panelVC
         p.behavior = .transient
-        // 顶部快捷键提示约占 28px，有提示时加高；底部「首选项」按钮约占 36px，整体加高避免列表被截断。
-        p.contentSize = NSSize(width: 320, height: hotkeyHint != nil ? 464 : 436)
+        // 顶部快捷键提示约占 28px；底部页脚现含「全部已读」「首选项」「退出」三按钮(约 110px)，整体加高避免列表被截断。
+        p.contentSize = NSSize(width: 320, height: hotkeyHint != nil ? 512 : 484)
         self.popover = p
 
         // Anchor to center of content view; let NSPopover pick the best edge
@@ -486,6 +486,19 @@ private struct PetPanelRootView: View {
             .foregroundStyle(.secondary)
             .padding(.horizontal, 10)
             .padding(.vertical, 4)
+
+            // 退出入口——状态栏图标被刘海/溢出区藏住时，这是唯一能退出 App 的地方（A1）。
+            Button {
+                NSApplication.shared.terminate(nil)
+            } label: {
+                Label("退出 apet", systemImage: "power")
+                    .frame(maxWidth: .infinity)
+                    .padding(.vertical, 4)
+            }
+            .buttonStyle(.plain)
+            .foregroundStyle(.secondary)
+            .padding(.horizontal, 10)
+            .padding(.bottom, 4)
         }
     }
 }
