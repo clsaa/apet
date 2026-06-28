@@ -88,7 +88,7 @@ final class SessionStoreAgeReadToStaleTests: XCTestCase {
         // A: waiting+acknowledged，lastActiveAt=100，超时
         _ = store.apply(makeEvent(eventId: "a1", sessionId: "A", kind: .stop), seq: 1, now: 100, replay: false)
         _ = store.acknowledge(key: key("A"))
-        // B: waiting+acknowledged，lastActiveAt=10000，未超时
+        // B: waiting+acknowledged，lastActiveAt=10000，也超时(3701>3600)
         _ = store.apply(makeEvent(eventId: "b1", sessionId: "B", kind: .stop), seq: 2, now: 10000, replay: false)
         _ = store.acknowledge(key: key("B"))
         // C: waiting 未读，超时也不动
@@ -107,5 +107,44 @@ final class SessionStoreAgeReadToStaleTests: XCTestCase {
         XCTAssertTrue(changedIds.contains("B"), "B 超时应转灰")
         XCTAssertFalse(changedIds.contains("C"), "C 未 acknowledged 不转")
         XCTAssertEqual(store.sessions[key("C")]?.state, .waiting(.stop), "C 状态不变")
+    }
+
+    // MARK: - MINOR-3: attention 路径覆盖
+
+    // TC-AGR-FUNC-008：kind=.attention，waiting+acknowledged+超时 → stale（attention 路径等同 stop）
+    func test_attention_acknowledged_expired_becomesStale() {
+        let store = SessionStore()
+        _ = store.apply(makeEvent(eventId: "e1", kind: .attention), seq: 1, now: 100, replay: false)
+        _ = store.acknowledge(key: key())
+        XCTAssertEqual(store.sessions[key()]?.state, .waiting(.attention), "前置：waiting(.attention)")
+        XCTAssertEqual(store.sessions[key()]?.acknowledged, true, "前置：已读")
+
+        let changes = store.ageReadToStale(now: 3701, readGrayAfter: 3600)  // 3701-100=3601 > 3600
+
+        XCTAssertEqual(changes, [.upserted(key())], "超时后应广播 upserted")
+        XCTAssertEqual(store.sessions[key()]?.state, .stale, "attention 已读超时 → stale")
+        XCTAssertEqual(store.sessions[key()]?.acknowledged, false, "acknowledged 重置为 false")
+    }
+
+    // MARK: - MINOR-4: ageReadToStale 更新 lastActiveAt
+
+    // TC-AGR-FUNC-009：ageReadToStale 转灰后 lastActiveAt 刷新为 now，防止立即被 reap 淘汰
+    func test_ageReadToStale_updatesLastActiveAt() {
+        let store = SessionStore()
+        // lastActiveAt 极老（100），waiting+acknowledged，超 readGrayAfter
+        _ = store.apply(makeEvent(eventId: "e1", kind: .stop), seq: 1, now: 100, replay: false)
+        _ = store.acknowledge(key: key())
+        XCTAssertEqual(store.sessions[key()]?.lastActiveAt, 100, "前置：lastActiveAt=100")
+
+        let now: Double = 9999
+        let changes = store.ageReadToStale(now: now, readGrayAfter: 3600)  // 9999-100=9899 > 3600
+
+        XCTAssertEqual(changes, [.upserted(key())], "应转灰并广播")
+        XCTAssertEqual(store.sessions[key()]?.state, .stale, "状态为 stale")
+        XCTAssertEqual(store.sessions[key()]?.lastActiveAt, now,
+                       "lastActiveAt 刷新为 now，不被 reap 立即淘汰")
+        // 验证：reap 用较小的 endedAfter 不会立即淘汰（因 lastActiveAt 已刷新）
+        let removed = store.reap(now: now, endedAfter: 3600, waitingEndedAfter: 86400)
+        XCTAssertEqual(removed, [], "刚转灰的 stale 会话不应立即被 reap")
     }
 }

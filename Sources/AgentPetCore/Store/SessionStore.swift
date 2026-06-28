@@ -178,6 +178,7 @@ extension SessionStore {
         case .running, .waiting: break
         }
         session.state = .stale
+        session.acknowledged = false   // MAJOR-1: 清除 acknowledged，防止幽灵已读态
         session.lastActiveAt = now
         sessions[key] = session
         let changes: [StoreChange] = [.upserted(key)]
@@ -210,6 +211,7 @@ extension SessionStore {
             if now - session.lastActiveAt > readGrayAfter {
                 session.state = .stale
                 session.acknowledged = false
+                session.lastActiveAt = now   // MINOR-4: 刷新时间戳，避免会话立即被 reap 淘汰
                 sessions[key] = session
                 changes.append(.upserted(key))
             }

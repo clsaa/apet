@@ -15,7 +15,7 @@ public struct PetPresentation: Equatable {
     public let emphasize: Bool
     /// 始终显示的"进行中"会话数（绿点），即便为 0（用户反馈：时刻显示）。
     public let runningCount: Int
-    /// 始终显示的"停下等你/完成（未读）"会话数（红点）= waiting + attention - acknowledged，即便为 0。
+    /// 始终显示的"停下等你/完成（未读）"会话数（红点）= waiting - acknowledged，即便为 0。
     public let doneCount: Int
     /// "已读"会话数（黄点）= acknowledgedCount，即便为 0。
     public let readCount: Int
@@ -44,11 +44,11 @@ public enum PetPresenter {
         let badge = summary.badgeCount > 0 ? "\(summary.badgeCount)" : nil
         let emphasize = summary.attentionCount > 0
         // 始终携带计数：running=进行中；
-        // done=停下等你/完成「未读」（waiting + attention - acknowledged，红色只数未读）；
+        // done=停下等你/完成「未读」（waiting - acknowledged，attention 已计入 waiting，红色只数未读）；
         // read=已读（acknowledged，黄色）。
         let running = summary.runningCount
         let read = summary.acknowledgedCount
-        let done = summary.waitingCount + summary.attentionCount - summary.acknowledgedCount
+        let done = max(0, summary.waitingCount - summary.acknowledgedCount)
         let idle = summary.staleCount
 
         switch summary.state {

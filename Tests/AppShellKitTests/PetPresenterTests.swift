@@ -39,7 +39,7 @@ final class PetPresenterTests: XCTestCase {
     }
 
     func test_busy_withWaitingAndAttention() {
-        // 1 running + 2 waiting (1 attention) → badgeCount = attentionCount = 1
+        // 1 running + 2 waiting(含 1 attention)，ack=0 → badgeCount = waiting - ack = 2 - 0 = 2
         let summary = PetSummary(
             state: .busy,
             runningCount: 1,
@@ -49,7 +49,7 @@ final class PetPresenterTests: XCTestCase {
         )
         let p = PetPresenter.make(from: summary)
         XCTAssertEqual(p.assetState, "busy")
-        XCTAssertEqual(p.badge, "1")
+        XCTAssertEqual(p.badge, "2")
         XCTAssertNil(p.bubble)
     }
 
@@ -99,11 +99,11 @@ final class PetPresenterTests: XCTestCase {
         XCTAssertEqual(p.doneCount, 0)
     }
 
-    func test_counts_done_isWaitingPlusAttention() {
-        // 1 running + 2 waiting(含 1 attention) → done = waiting(2) + attention(1) = 3（停下等你/完成）
+    func test_counts_done_isWaitingMinusAcknowledged() {
+        // 1 running + 2 waiting(含 1 attention)，ack=0 → done = waiting(2) - ack(0) = 2（attention 已计入 waiting，不重复加）
         let p = PetPresenter.make(from: PetSummary(state: .busy, runningCount: 1, waitingCount: 2, attentionCount: 1, staleCount: 0))
         XCTAssertEqual(p.runningCount, 1)
-        XCTAssertEqual(p.doneCount, 3)
+        XCTAssertEqual(p.doneCount, 2)
     }
 
     // MARK: - 已读态（红只数未读 + readCount）
@@ -112,17 +112,18 @@ final class PetPresenterTests: XCTestCase {
     func test_readCount_defaultsZero() {
         let p = PetPresenter.make(from: PetSummary(state: .calling, runningCount: 0, waitingCount: 2, attentionCount: 0, staleCount: 0))
         XCTAssertEqual(p.readCount, 0)
-        XCTAssertEqual(p.doneCount, 2, "无已读时 done = waiting + attention")
+        XCTAssertEqual(p.doneCount, 2, "无已读时 done = waiting - acknowledged = 2 - 0 = 2")
     }
 
     /// readCount == acknowledgedCount；done 扣除已读（红只数未读）
     func test_readCount_and_done_excludesAcknowledged() {
-        // 3 waiting(含 1 attention)，其中 2 个已读 → done = waiting(3)+attention(1)-ack(2) = 2，read = 2
+        // 3 waiting(含 1 attention)，其中 2 个已读 → done = waiting(3) - ack(2) = 1，read = 2
+        // attention 已计入 waitingCount，不重复加，避免双计
         let p = PetPresenter.make(from: PetSummary(
             state: .calling, runningCount: 0, waitingCount: 3, attentionCount: 1,
             staleCount: 0, acknowledgedCount: 2))
         XCTAssertEqual(p.readCount, 2)
-        XCTAssertEqual(p.doneCount, 2, "红色只数未读：waiting+attention - acknowledged")
+        XCTAssertEqual(p.doneCount, 1, "红色只数未读：waiting - acknowledged")
     }
 
     /// 全部已读 → done 可为 0，read 等于全部
@@ -132,6 +133,16 @@ final class PetPresenterTests: XCTestCase {
             staleCount: 0, acknowledgedCount: 2))
         XCTAssertEqual(p.readCount, 2)
         XCTAssertEqual(p.doneCount, 0)
+    }
+
+    /// MAJOR-2 新增：全部 attention 且全部已读 → doneCount==0（旧公式 waiting+attention-ack=2+2-2=2，双计 bug）
+    func test_counts_allAttention_allRead_doneZero() {
+        // 2 waiting(全为 attention)，全部已读 → done = max(0, waiting-ack) = max(0, 2-2) = 0
+        let p = PetPresenter.make(from: PetSummary(
+            state: .calling, runningCount: 0, waitingCount: 2, attentionCount: 2,
+            staleCount: 0, acknowledgedCount: 2))
+        XCTAssertEqual(p.doneCount, 0, "全部已读后未读数应为 0")
+        XCTAssertEqual(p.readCount, 2)
     }
 
     // MARK: - 精修 2：idleCount 等于 staleCount
