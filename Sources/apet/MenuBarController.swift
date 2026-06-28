@@ -203,8 +203,11 @@ final class MenuBarController: NSObject {
     /// and we hop back to `@MainActor` immediately (same pattern as the existing B2 fix).
     /// Right-click routes to the standard NSMenu; left-click routes to the popover.
     @objc nonisolated func statusButtonClicked(_ sender: AnyObject) {
+        // AppKit 保证此处在主线程；在让渡给 Swift concurrency 前同步捕获事件类型，
+        // 避免 Task 执行时 NSApp.currentEvent 已被替换的时序漏洞（Task2 评审 Important）。
+        let isRightClick = NSApp.currentEvent?.type == .rightMouseUp
         Task { @MainActor [weak self] in
-            if NSApp.currentEvent?.type == .rightMouseUp {
+            if isRightClick {
                 self?.showRightClickMenu()
                 return
             }
