@@ -454,11 +454,17 @@ private struct PetPanelRootView: View {
     let onOpenPreferences: () -> Void
     let onAcknowledgeAll: () -> Void
 
+    /// 是否存在未读 waiting 会话（红/橙点）。仅此时显示「全部已读」，
+    /// 避免全绿/全已读时按钮可见却点了无反应（产品评审 MAJOR-1）。
+    private var hasUnread: Bool {
+        rows.contains { $0.dot == .doneWaiting || $0.dot == .attention }
+    }
+
     var body: some View {
         VStack(spacing: 0) {
             SessionPanel(rows: rows, onTap: onTap, hotkeyHint: hotkeyHint)
             Divider()
-            if !rows.isEmpty {
+            if hasUnread {
                 Button {
                     onAcknowledgeAll()
                 } label: {
@@ -484,16 +490,20 @@ private struct PetPanelRootView: View {
             .padding(.vertical, 4)
 
             // 退出入口——状态栏图标被刘海/溢出区藏住时，这是唯一能退出 App 的地方（A1）。
+            // 与「首选项」用 Divider + 间距 + 更弱配色拉开，降低顺手误点退出整个常驻 App 的概率（产品评审 MAJOR-2）。
+            Divider().padding(.top, 2)
             Button {
                 NSApplication.shared.terminate(nil)
             } label: {
                 Label("退出 apet", systemImage: "power")
+                    .font(.system(size: 11))
                     .frame(maxWidth: .infinity)
-                    .padding(.vertical, 4)
+                    .padding(.vertical, 3)
             }
             .buttonStyle(.plain)
-            .foregroundStyle(.secondary)
+            .foregroundStyle(.tertiary)
             .padding(.horizontal, 10)
+            .padding(.top, 4)
             .padding(.bottom, 4)
         }
     }

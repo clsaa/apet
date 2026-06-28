@@ -218,11 +218,12 @@ extension SessionStore {
     /// 已读（黄）会话超过阈值后自动转灰（闲置）。
     /// 遍历 waiting+acknowledged 会话，凡 now - lastActiveAt > readGrayAfter → 置 stale，acknowledged 重置为 false。
     /// 未超阈值、非 acknowledged、非 waiting 的会话一律 no-op。
+    /// 跳过 source==.jsonl：jsonl 派生态生命周期由 watcher 驱动，定时器不得在 watcher 之外打灰（硬约束 #10，与 markStale 对齐）。
     @discardableResult
     public func ageReadToStale(now: Double, readGrayAfter: Double) -> [StoreChange] {
         var changes: [StoreChange] = []
         for (key, var session) in sessions {
-            guard case .waiting = session.state, session.acknowledged else { continue }
+            guard case .waiting = session.state, session.acknowledged, session.source != .jsonl else { continue }
             if now - session.lastActiveAt > readGrayAfter {
                 session.state = .stale
                 session.acknowledged = false

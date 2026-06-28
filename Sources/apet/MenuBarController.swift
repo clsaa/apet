@@ -20,13 +20,18 @@ private struct PanelRootView: View {
     let onQuit: () -> Void
     let onAcknowledgeAll: () -> Void
 
+    /// 是否存在未读 waiting 会话——仅此时显示「全部已读」（产品评审 MAJOR-1）。
+    private var hasUnread: Bool {
+        rows.contains { $0.dot == .doneWaiting || $0.dot == .attention }
+    }
+
     var body: some View {
         VStack(spacing: 0) {
             SessionPanel(rows: rows, onTap: onTap, hotkeyHint: hotkeyHint)
             Divider()
 
-            // 全部标记已读（仅在有会话时显示）
-            if !rows.isEmpty {
+            // 全部标记已读（仅在确有未读时显示）
+            if hasUnread {
                 Button {
                     onAcknowledgeAll()
                 } label: {

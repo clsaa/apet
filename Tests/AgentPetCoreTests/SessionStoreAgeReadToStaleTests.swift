@@ -13,6 +13,21 @@ final class SessionStoreAgeReadToStaleTests: XCTestCase {
         SessionKey(agent: "claude", root: "/r", sessionId: sessionId)
     }
 
+    // TC-AGR-FUNC-005：source==.jsonl 的已读会话超时也不转灰（生命周期归 watcher，硬约束 #10）
+    func test_jsonl_acknowledged_expired_isSkipped() {
+        let store = SessionStore()
+        var ev = makeEvent(eventId: "e1", kind: .stop)
+        ev.source = .jsonl
+        _ = store.apply(ev, seq: 1, now: 100, replay: false)
+        _ = store.acknowledge(key: key())
+        XCTAssertEqual(store.sessions[key()]?.source, .jsonl, "前置：jsonl 来源")
+
+        let changes = store.ageReadToStale(now: 3701, readGrayAfter: 3600)  // 远超阈值
+
+        XCTAssertEqual(changes, [], "jsonl 会话不被定时器转灰")
+        XCTAssertEqual(store.sessions[key()]?.state, .waiting(.stop), "状态保持 waiting，未被打灰")
+    }
+
     // TC-AGR-FUNC-001：waiting+acknowledged+超时 → stale，acknowledged 重置为 false
     func test_waiting_acknowledged_expired_becomesStale() {
         let store = SessionStore()
