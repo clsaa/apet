@@ -47,8 +47,8 @@ public enum TailLineReader {
         defer { try? fh.close() }
 
         fh.seek(toFileOffset: 0)
-        // Read up to 4KB to find the first line
-        let data = fh.readData(ofLength: 4096)
+        // Read up to 64KB to find the first line（计划指定 65536；jsonl 首行远小于此）
+        let data = fh.readData(ofLength: 65_536)
         let text = String(decoding: data, as: UTF8.self)
         return text.components(separatedBy: "\n").first
     }
