@@ -101,6 +101,10 @@ final class AppCoordinator {
             mb.onOpenPreferences = { [weak self] in
                 self?.openPreferences()
             }
+            mb.summaryProvider = { [weak self] in
+                (running: self?.store?.summary().runningCount ?? 0,
+                 waiting: self?.store?.summary().waitingCount ?? 0)
+            }
             menuBar = mb
             petWindow = pw
 

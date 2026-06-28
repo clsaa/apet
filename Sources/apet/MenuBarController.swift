@@ -33,11 +33,11 @@ private struct PanelRootView: View {
             .padding(.top, 6)
             .padding(.bottom, 2)
 
-            // 首选项…
+            // 首选项…（齿轮入口）
             Button {
                 onOpenPreferences()
             } label: {
-                Text("首选项…")
+                Label("首选项…", systemImage: "gearshape")
                     .frame(maxWidth: .infinity)
                     .padding(.vertical, 3)
             }
@@ -84,6 +84,8 @@ final class MenuBarController: NSObject {
     var onTogglePet: (() -> Void)?
     /// Invoked when the user taps 首选项…; AppCoordinator shows the preferences window.
     var onOpenPreferences: (() -> Void)?
+    /// Returns the current running + waiting counts for the right-click menu summary row.
+    var summaryProvider: (() -> (running: Int, waiting: Int))?
 
     // MARK: - State
 
@@ -119,7 +121,9 @@ final class MenuBarController: NSObject {
         guard let button = statusItem.button else { return }
         button.action = #selector(statusButtonClicked(_:))
         button.target = self
-        // No NSMenu — left-click routes to our action and we show an NSPopover instead.
+        // Listen for both left and right mouse-up so we can route right-click to NSMenu.
+        button.sendAction(on: [.leftMouseUp, .rightMouseUp])
+        // Keep statusItem.menu nil — assigning it would intercept left-clicks permanently.
         statusItem.menu = nil
     }
 
@@ -197,9 +201,50 @@ final class MenuBarController: NSObject {
 
     /// AppKit delivers this on the main thread; `nonisolated` satisfies the `@objc` requirement,
     /// and we hop back to `@MainActor` immediately (same pattern as the existing B2 fix).
+    /// Right-click routes to the standard NSMenu; left-click routes to the popover.
     @objc nonisolated func statusButtonClicked(_ sender: AnyObject) {
         Task { @MainActor [weak self] in
+            if NSApp.currentEvent?.type == .rightMouseUp {
+                self?.showRightClickMenu()
+                return
+            }
             self?.showPopover()
+        }
+    }
+
+    private func showRightClickMenu() {
+        guard let button = statusItem.button else { return }
+        let s = summaryProvider?() ?? (running: 0, waiting: 0)
+        let menu = NSMenu()
+        for row in MenuBarMenuModel.rows(runningCount: s.running, waitingCount: s.waiting) {
+            if row.command == .sessionSummary {
+                let it = NSMenuItem(title: row.title, action: nil, keyEquivalent: "")
+                it.isEnabled = false
+                menu.addItem(it)
+                menu.addItem(.separator())
+                continue
+            }
+            let it = NSMenuItem(
+                title: row.title,
+                action: #selector(handleMenuCommand(_:)),
+                keyEquivalent: row.shortcut ?? ""
+            )
+            it.target = self
+            it.representedObject = row.command
+            menu.addItem(it)
+        }
+        button.highlight(true)
+        menu.popUp(positioning: nil, at: NSPoint(x: 0, y: button.bounds.height + 4), in: button)
+        button.highlight(false)
+    }
+
+    @objc private func handleMenuCommand(_ sender: NSMenuItem) {
+        guard let cmd = sender.representedObject as? MenuCommand else { return }
+        switch cmd {
+        case .preferences:   onOpenPreferences?()
+        case .quit:          NSApplication.shared.terminate(nil)
+        case .about:         NSApp.orderFrontStandardAboutPanel(nil)
+        case .sessionSummary: break
         }
     }
 
