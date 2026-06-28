@@ -142,6 +142,8 @@ extension SessionStore {
         for (key, var session) in sessions {
             switch session.state {
             case .running:
+                // jsonl 会话生命周期由后续 watcher 驱动，不被定时器打灰（架构-B3）
+                guard session.source != .jsonl else { break }
                 if now - session.lastActiveAt > timeout {
                     session.state = .stale
                     sessions[key] = session
@@ -151,6 +153,24 @@ extension SessionStore {
                 break
             }
         }
+        return changes
+    }
+
+    /// 定向把指定 key 的会话置为 stale（running/waiting → stale）。
+    /// ended/stale 属终态或已达目标状态，返回 []；key 不存在同样返回 []。
+    /// 用于 jsonl watcher 检测会话消失时主动打灰，区别于定时 markStale（架构-B3）。
+    @discardableResult
+    public func markStaleSession(_ key: SessionKey, now: Double) -> [StoreChange] {
+        guard var session = sessions[key] else { return [] }
+        switch session.state {
+        case .ended, .stale: return []
+        case .running, .waiting: break
+        }
+        session.state = .stale
+        session.lastActiveAt = now
+        sessions[key] = session
+        let changes: [StoreChange] = [.upserted(key)]
+        emit(changes, replay: false)
         return changes
     }
 
