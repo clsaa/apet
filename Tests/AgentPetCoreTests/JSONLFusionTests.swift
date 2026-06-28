@@ -48,9 +48,13 @@ final class JSONLFusionTests: XCTestCase {
         let key = SessionKey(agent: "claude", root: "/r", sessionId: "s1")
 
         // Act: busy(j1) → stop(j2) → busy(j3)，eventId 各不同保证无去重拦截
-        _ = ing.ingest(event: ev("j1", .busy, "s1"), now: 100, replay: false)
-        _ = ing.ingest(event: ev("j2", .stop, "s1"), now: 200, replay: false)
-        _ = ing.ingest(event: ev("j3", .busy, "s1"), now: 300, replay: false)
+        // 场景为 jsonl 回流，事件标 source=.jsonl 与命名一致
+        func jsonlEv(_ id: String, _ kind: EventKind) -> AgentEvent {
+            var e = ev(id, kind, "s1"); e.source = .jsonl; return e
+        }
+        _ = ing.ingest(event: jsonlEv("j1", .busy), now: 100, replay: false)
+        _ = ing.ingest(event: jsonlEv("j2", .stop), now: 200, replay: false)
+        _ = ing.ingest(event: jsonlEv("j3", .busy), now: 300, replay: false)
 
         // Assert: 第三次 busy 应从 .waiting(.stop) 翻回 .running
         XCTAssertEqual(store.sessions[key]?.state, .running,

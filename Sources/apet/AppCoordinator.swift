@@ -84,10 +84,11 @@ final class AppCoordinator {
         self.store = sessionStore
         self.ingestor = ingestor
 
-        // 2b. Create and start NotificationService (safe to call before replay).
         // ─── 2a. Setup JSONL directory watcher ───────────────────────────────────
         // 共享同一 NDJSONIngestor（唯一 seq 源）；source=.jsonl；replay=false；不接 NotificationService。
         // config.dataRoots 是 [DataRoot]，取第一个 path（默认 ~/.claude）作为 dataRoot（架构-B1/M4）。
+        // ⚠️ 仅在此创建 watcher；seed 扫描(scanOnce) + start 推迟到 change handler 注册与 hook replay 之后
+        //    （Step 4 末），否则 seed 事件在 handler 注册前发射 → 当前会话不会立即上屏（Task8 评审 I#1）。
         let dataRoot = config.dataRoots.first?.path
             ?? FileManager.default.homeDirectoryForCurrentUser
                 .appendingPathComponent(".claude").path
@@ -100,9 +101,8 @@ final class AppCoordinator {
             emit: { [weak self] result in self?.applyScanResult(result) }
         )
         self.jsonlWatcher = watcher
-        watcher.scanOnce()          // seed：回放结束后立即扫描一次（replay=false，不触发通知）
-        watcher.start(every: 8)     // 每 8 秒定期扫描，queue:.main
         // ──────────────────────────────────────────────────────────────────────────
+        // 2b. Create and start NotificationService (safe to call before replay).
         // Single shared TerminalFocusService instance injected into both consumers (Fix M-3).
         let focusService = TerminalFocusService()
         let ns = NotificationService(focusService: focusService, sessionLookup: { [weak self] key in
@@ -169,6 +169,11 @@ final class AppCoordinator {
         } catch {
             appendToLog("[error] replay failed: \(error)\n")
         }
+
+        // 4b. jsonl seed：change handler 已注册、hook replay 已完成后再种子扫描，
+        //     使当前正在跑的会话立即上屏（hook 的 ended 终态仍保护，不被 jsonl 复活）。
+        watcher.scanOnce()          // seed（replay=false；jsonl 不接 NotificationService，天然静默）
+        watcher.start(every: 8)     // 每 8 秒定期扫描，queue:.main
 
         // 5. Live file watch via DispatchSource
         openWatchSource()
@@ -261,6 +266,7 @@ final class AppCoordinator {
 
         case .observe(let state, let key, let cwd, let title):
             let now = Date().timeIntervalSince1970
+            var changed = false
             switch state {
             case .running, .waitingStop:
                 // .running → 合成 busy；.waitingStop → 合成 stop（会话进入 waiting 等用户）
@@ -278,17 +284,18 @@ final class AppCoordinator {
                 )
                 ev.source = .jsonl
                 jsonlSeqCounter += 1
-                _ = ingestor.ingest(event: ev, now: now, replay: false)
+                changed = !ingestor.ingest(event: ev, now: now, replay: false).isEmpty
                 // ⚠️ 绝不调用 notificationService.consider（jsonl 不发通知，架构-B1）
 
             case .stale:
                 // 文件消失/过期：仅 jsonl 来源的会话才打灰（hook 会话由 hook 路径或定时器管理）
                 if store.sessions[key]?.source == .jsonl {
-                    _ = store.markStaleSession(key, now: now)
+                    changed = !store.markStaleSession(key, now: now).isEmpty
                 }
             }
 
-            // 刷新 UI（菜单栏 + 宠物窗）
+            // 仅在 store 真有变更时刷新 UI（避免每 8s 对未变会话空算，Task8 评审 Minor#1）
+            guard changed else { return }
             let summary = store.summary()
             let sessions = store.activeSessions()
             menuBar?.update(summary: summary, sessions: sessions)
