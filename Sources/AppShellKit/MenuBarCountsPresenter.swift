@@ -4,20 +4,22 @@ import AgentPetCore
 
 /// 状态栏「彩色计数」样式：把 ``PetSummary`` 映射为一排彩点+数字（🟢2 🔴1 🟡3 ⚪1）。
 ///
-/// 颜色映射（与面板 Dot 语义一致）：
-/// - 🟢 green  = `runningCount`（进行中）
-/// - 🔴 red    = 未读 waiting = `max(0, waitingCount - acknowledgedCount)`（停下等你）
-/// - 🟡 yellow = 已读 waiting = `min(acknowledgedCount, waitingCount)`（已读）
-/// - ⚪ gray   = `staleCount`（超时/结束）
+/// 与悬浮宠物条（``PetPresenter``）**共用同一套桶**，杜绝两处不一致：
+/// - 🟢 green         = `runningCount`（进行中）
+/// - 🟠/🔴 done       = `waitingCount - acknowledgedCount`（停下等你/未读）；
+///                     `attentionCount > 0`（emphasize）时为橙 🟠，否则红 🔴——与宠物条一致
+/// - 🟡 yellow        = `acknowledgedCount`（已读）
+/// - ⚪ gray          = `staleCount`（超时/结束）
 ///
 /// 某状态计数为 0 时**不显示**该段；全 0 时回退 `🐾`。
 public enum StatusCountColor: Equatable {
-    case green, red, yellow, gray
+    case green, orange, red, yellow, gray
 
     /// 展示用彩点 emoji。
     public var dot: String {
         switch self {
         case .green:  return "🟢"
+        case .orange: return "🟠"
         case .red:    return "🔴"
         case .yellow: return "🟡"
         case .gray:   return "⚪"
@@ -36,15 +38,16 @@ public struct StatusCountSegment: Equatable {
 
 public enum MenuBarCountsPresenter {
 
-    /// 有序、非零的计数段（顺序：绿→红→黄→灰）。全 0 时返回 `[]`。
+    /// 有序、非零的计数段（顺序：绿→橙/红→黄→灰）。全 0 时返回 `[]`。
+    /// 复用 ``PetPresenter`` 的桶与 emphasize（橙/红）规则，确保与宠物条完全一致。
     public static func segments(from s: PetSummary) -> [StatusCountSegment] {
-        let red    = max(0, s.waitingCount - s.acknowledgedCount)
-        let yellow = min(max(0, s.acknowledgedCount), s.waitingCount)
+        let p = PetPresenter.make(from: s)
+        let doneColor: StatusCountColor = p.emphasize ? .orange : .red
         let pairs: [(StatusCountColor, Int)] = [
-            (.green,  s.runningCount),
-            (.red,    red),
-            (.yellow, yellow),
-            (.gray,   s.staleCount),
+            (.green,    p.runningCount),
+            (doneColor, p.doneCount),
+            (.yellow,   p.readCount),
+            (.gray,     p.idleCount),
         ]
         return pairs
             .filter { $0.1 > 0 }
