@@ -107,7 +107,7 @@ def main():
     elif term_prog == "Apple_Terminal":
         terminal = {"kind": "terminal", "bundleId": "com.apple.Terminal"}
     elif term_prog == "WarpTerminal":
-        terminal = {"kind": "warp", "bundleId": "dev.warp.Warp"}
+        terminal = {"kind": "warp", "bundleId": "dev.warp.Warp-Stable"}
     elif term_prog == "ghostty":
         terminal = {"kind": "ghostty", "bundleId": "com.mitchellh.ghostty"}
     elif term_prog == "vscode":

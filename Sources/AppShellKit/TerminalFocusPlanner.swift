@@ -55,7 +55,8 @@ public enum TerminalFocusPlanner {
             return .activateBundle(ref.bundleId ?? "com.apple.Terminal")
 
         case .warp:
-            return .activateBundle(ref.bundleId ?? "dev.warp.Warp")
+            // 稳定版 Warp 的 bundle id 是 dev.warp.Warp-Stable（非 dev.warp.Warp）。
+            return .activateBundle(ref.bundleId ?? "dev.warp.Warp-Stable")
 
         case .ghostty:
             return .activateBundle(ref.bundleId ?? "com.mitchellh.ghostty")

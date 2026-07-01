@@ -99,13 +99,13 @@ final class TerminalFocusPlannerTests: XCTestCase {
         )
     }
 
-    // MARK: - 8. .warp → .activateBundle("dev.warp.Warp")
+    // MARK: - 8. .warp → .activateBundle("dev.warp.Warp-Stable")
 
     func testWarpKindNoBundleIdUsesDefault() {
         let ref = TerminalRef(kind: .warp)
         XCTAssertEqual(
             TerminalFocusPlanner.plan(for: ref),
-            .activateBundle("dev.warp.Warp")
+            .activateBundle("dev.warp.Warp-Stable")
         )
     }
 
