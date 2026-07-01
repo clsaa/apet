@@ -27,6 +27,8 @@ final class NotificationService: NSObject {
     /// Returns the current DND window; called on `@MainActor` inside `consider`.
     /// Defaults to a disabled window so the service is a drop-in replacement for existing callers.
     private let dndProvider: () -> DNDWindow
+    /// F1：当前横幅/声音开关；默认全开，由 AppCoordinator 注入 config 值。
+    private let channelProvider: () -> (banner: Bool, sound: Bool)
     /// 点击通知时把对应会话标记已读（红→黄）。默认空，由 AppCoordinator 注入 store.acknowledge。
     private let onAcknowledge: (SessionKey) -> Void
 
@@ -37,12 +39,14 @@ final class NotificationService: NSObject {
         focusService: TerminalFocusService,
         sessionLookup: @escaping (SessionKey) -> Session?,
         dndProvider: @escaping () -> DNDWindow = { DNDWindow(enabled: false, startMin: 0, endMin: 0) },
+        channelProvider: @escaping () -> (banner: Bool, sound: Bool) = { (true, true) },
         onAcknowledge: @escaping (SessionKey) -> Void = { _ in }
     ) {
         self.gate = NotificationGate(cooldown: cooldown)
         self.focusService = focusService
         self.sessionLookup = sessionLookup
         self.dndProvider = dndProvider
+        self.channelProvider = channelProvider
         self.onAcknowledge = onAcknowledge
         super.init()
     }
@@ -98,10 +102,16 @@ final class NotificationService: NSObject {
         let nowMin = (comps.hour ?? 0) * 60 + (comps.minute ?? 0)
         if DNDWindow.shouldSuppress(dnd: dndProvider(), nowMinOfDay: nowMin) { return }
 
+        // F1：横幅/声音独立开关。横幅关 → 不发；声音关 → 静默横幅。
+        let ch = channelProvider()
+        let decision = NotifyChannelDecider.decide(baseShouldNotify: true,
+                                                   bannerEnabled: ch.banner, soundEnabled: ch.sound)
+        guard decision.post else { return }
+
         let un = UNMutableNotificationContent()
         un.title = content.title
         un.body  = content.body
-        un.sound = .default
+        un.sound = decision.withSound ? .default : nil
         // 归入会话 category，使"划掉通知"也触发 didReceive → 标已读。
         un.categoryIdentifier = Self.sessionCategoryId
 

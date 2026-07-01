@@ -164,6 +164,11 @@ final class AppCoordinator {
                     endMin:   self?.config.dndEndMin    ?? 0
                 )
             },
+            // F1：横幅/声音开关，每次读最新 config（即时生效）。
+            channelProvider: { [weak self] in
+                (banner: self?.config.notifyBannerEnabled ?? true,
+                 sound:  self?.config.notifySoundEnabled  ?? true)
+            },
             // B1：点击通知 → 标记已读（红→黄）。store 变更经既有 changeHandler 刷新面板/桌宠。
             onAcknowledge: { [weak self] key in self?.store?.acknowledge(key: key) }
         )

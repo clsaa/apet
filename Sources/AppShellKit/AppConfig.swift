@@ -92,12 +92,17 @@ public struct AppConfig: Codable, Equatable {
     public var menuBarStyle: String
     /// 5 状态圆点自定义颜色（F3）。缺省用 `StateColorConfig.defaults`。
     public var stateColors: StateColorConfig
+    /// F1：通知横幅开关（关→完全不弹）。默认 true。
+    public var notifyBannerEnabled: Bool
+    /// F1：通知声音开关（关→静默横幅）。默认 true。
+    public var notifySoundEnabled: Bool
 
     // CodingKeys：含全部字段，供自定义 decoder 和 synthesized encoder 共同使用。
     private enum CodingKeys: String, CodingKey {
         case dataRoots, displayMode, notifyMode, staleAfterSec, endedAfterSec,
              waitingEndedAfterSec, selectedPet, readGrayAfterSec, panelHotKey,
-             dndEnabled, dndStartMin, dndEndMin, excludedRoots, menuBarStyle, stateColors
+             dndEnabled, dndStartMin, dndEndMin, excludedRoots, menuBarStyle, stateColors,
+             notifyBannerEnabled, notifySoundEnabled
     }
 
     /// 自定义解码：旧版 config.json 缺少可选字段时用默认值，不丢失其他已有设置。
@@ -124,6 +129,8 @@ public struct AppConfig: Codable, Equatable {
         excludedRoots        = try c.decodeIfPresent([String].self,      forKey: .excludedRoots) ?? []
         menuBarStyle         = try c.decodeIfPresent(String.self,        forKey: .menuBarStyle)  ?? "counts"
         stateColors          = try c.decodeIfPresent(StateColorConfig.self, forKey: .stateColors) ?? .defaults
+        notifyBannerEnabled  = try c.decodeIfPresent(Bool.self, forKey: .notifyBannerEnabled) ?? true
+        notifySoundEnabled   = try c.decodeIfPresent(Bool.self, forKey: .notifySoundEnabled)  ?? true
     }
 
     public init(
@@ -141,7 +148,9 @@ public struct AppConfig: Codable, Equatable {
         dndEndMin: Int = 0,
         excludedRoots: [String] = [],
         menuBarStyle: String = "counts",
-        stateColors: StateColorConfig = .defaults
+        stateColors: StateColorConfig = .defaults,
+        notifyBannerEnabled: Bool = true,
+        notifySoundEnabled: Bool = true
     ) {
         self.dataRoots = dataRoots
         self.displayMode = displayMode
@@ -158,6 +167,8 @@ public struct AppConfig: Codable, Equatable {
         self.excludedRoots = excludedRoots
         self.menuBarStyle = menuBarStyle
         self.stateColors = stateColors
+        self.notifyBannerEnabled = notifyBannerEnabled
+        self.notifySoundEnabled = notifySoundEnabled
     }
 
     /// Factory that produces the out-of-the-box defaults.

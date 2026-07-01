@@ -355,8 +355,8 @@ final class PetWindowController: NSObject {
         let p = NSPopover()
         p.contentViewController = panelVC
         p.behavior = .transient
-        // 顶部快捷键提示约占 28px；底部页脚现含「全部已读」「首选项」「退出」三按钮(约 110px)，整体加高避免列表被截断。
-        p.contentSize = NSSize(width: 320, height: hotkeyHint != nil ? 512 : 484)
+        // 顶部快捷键提示约 28px + 搜索框 ~40px + 列表 + 紧凑页脚(一行图标 ~44px)。页脚瘦身后整体降高。
+        p.contentSize = NSSize(width: 320, height: hotkeyHint != nil ? 452 : 424)
         self.popover = p
 
         // Anchor to center of content view; let NSPopover pick the best edge
@@ -501,47 +501,16 @@ private struct PetPanelRootView: View {
                          onCopyId: onCopyId, onCopyResume: onCopyResume,
                          hotkeyHint: hotkeyHint, palette: palette)
             Divider()
-            if hasUnread {
-                Button {
-                    onAcknowledgeAll()
-                } label: {
-                    Label("全部标记已读", systemImage: "checkmark.circle")
-                        .frame(maxWidth: .infinity)
-                        .padding(.vertical, 4)
+            // 紧凑操作行：已读(仅未读时)/首选项/退出。退出保留（状态栏被刘海藏住时唯一出口，A1）。
+            HStack(spacing: 0) {
+                if hasUnread {
+                    PanelFooterButton(icon: "checkmark.circle", label: "已读", action: onAcknowledgeAll)
                 }
-                .buttonStyle(.plain)
-                .foregroundStyle(.secondary)
-                .padding(.horizontal, 10)
-                .padding(.top, 4)
+                PanelFooterButton(icon: "gearshape", label: "首选项", action: onOpenPreferences)
+                PanelFooterButton(icon: "power", label: "退出") { NSApplication.shared.terminate(nil) }
             }
-            Button {
-                onOpenPreferences()
-            } label: {
-                Label("首选项…", systemImage: "gearshape")
-                    .frame(maxWidth: .infinity)
-                    .padding(.vertical, 4)
-            }
-            .buttonStyle(.plain)
-            .foregroundStyle(.secondary)
-            .padding(.horizontal, 10)
+            .padding(.horizontal, 6)
             .padding(.vertical, 4)
-
-            // 退出入口——状态栏图标被刘海/溢出区藏住时，这是唯一能退出 App 的地方（A1）。
-            // 与「首选项」用 Divider + 间距 + 更弱配色拉开，降低顺手误点退出整个常驻 App 的概率（产品评审 MAJOR-2）。
-            Divider().padding(.top, 2)
-            Button {
-                NSApplication.shared.terminate(nil)
-            } label: {
-                Label("退出 apet", systemImage: "power")
-                    .font(.system(size: 11))
-                    .frame(maxWidth: .infinity)
-                    .padding(.vertical, 3)
-            }
-            .buttonStyle(.plain)
-            .foregroundStyle(.tertiary)
-            .padding(.horizontal, 10)
-            .padding(.top, 4)
-            .padding(.bottom, 4)
         }
     }
 }

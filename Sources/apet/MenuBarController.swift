@@ -42,88 +42,53 @@ private struct PanelRootView: View {
                          hotkeyHint: hotkeyHint, palette: palette)
             Divider()
 
-            // 全部标记已读（仅在确有未读时显示）
-            if hasUnread {
-                Button {
-                    onAcknowledgeAll()
-                } label: {
-                    Label("全部标记已读", systemImage: "checkmark.circle")
+            // 未装 hook 时的 slim 开启入口；已装则完全隐藏（省空间，去掉冗余「已启用」状态行）。
+            if !hookInstalled {
+                Button { onOpenPreferences() } label: {
+                    Label("开启精确跳转/通知…", systemImage: "bolt.badge.a")
+                        .font(.caption)
                         .frame(maxWidth: .infinity)
-                        .padding(.vertical, 3)
+                        .padding(.vertical, 4)
                 }
                 .buttonStyle(.plain)
-                .foregroundStyle(.secondary)
-                .padding(.horizontal, 10)
-                .padding(.top, 6)
+                .foregroundStyle(Color.accentColor.opacity(0.75))
+                Divider()
             }
 
-            // 隐藏/显示宠物
-            Button {
-                onTogglePet()
-            } label: {
-                Text(petVisible ? "隐藏宠物" : "显示宠物")
-                    .frame(maxWidth: .infinity)
-                    .padding(.vertical, 3)
-            }
-            .buttonStyle(.plain)
-            .foregroundStyle(.secondary)
-            .padding(.horizontal, 10)
-            .padding(.top, 6)
-            .padding(.bottom, 2)
-
-            // 首选项…（齿轮入口）
-            Button {
-                onOpenPreferences()
-            } label: {
-                Label("首选项…", systemImage: "gearshape")
-                    .frame(maxWidth: .infinity)
-                    .padding(.vertical, 3)
-            }
-            .buttonStyle(.plain)
-            .foregroundStyle(.secondary)
-            .padding(.horizontal, 10)
-            .padding(.vertical, 2)
-
-            // Part D / Fix 6: 常驻增强入口。
-            // hook 已装 → 显示"已启用"状态（不再引导）；未装 → 显示可点击的开启入口。
-            if hookInstalled {
-                Label("精确跳转/通知：已启用", systemImage: "bolt.badge.a.fill")
-                    .frame(maxWidth: .infinity)
-                    .padding(.vertical, 2)
-                    .foregroundStyle(Color.green.opacity(0.7))
-                    .font(.caption)
-                    .padding(.horizontal, 10)
-                    .padding(.vertical, 2)
-            } else {
-                Button {
-                    onOpenPreferences()
-                } label: {
-                    Label("开启精确跳转/通知…", systemImage: "bolt.badge.a.fill")
-                        .frame(maxWidth: .infinity)
-                        .padding(.vertical, 2)
+            // 紧凑操作行：图标按钮，一行搞定，不再挤占列表空间。
+            HStack(spacing: 0) {
+                if hasUnread {
+                    PanelFooterButton(icon: "checkmark.circle", label: "已读", action: onAcknowledgeAll)
                 }
-                .buttonStyle(.plain)
-                .foregroundStyle(Color.accentColor.opacity(0.6))
-                .font(.caption)
-                .padding(.horizontal, 10)
-                .padding(.vertical, 2)
+                PanelFooterButton(icon: petVisible ? "eye.slash" : "eye",
+                                  label: petVisible ? "隐藏" : "显示", action: onTogglePet)
+                PanelFooterButton(icon: "gearshape", label: "首选项", action: onOpenPreferences)
+                PanelFooterButton(icon: "power", label: "退出", action: onQuit)
             }
-
-            // 退出
-            Button {
-                onQuit()
-            } label: {
-                Text("退出 AgentPet")
-                    .frame(maxWidth: .infinity)
-                    .padding(.vertical, 3)
-            }
-            .buttonStyle(.plain)
-            .foregroundStyle(.secondary)
-            .padding(.horizontal, 10)
-            .padding(.top, 2)
-            .padding(.bottom, 6)
+            .padding(.horizontal, 6)
+            .padding(.vertical, 4)
         }
         .frame(width: 320)
+    }
+}
+
+/// 面板底部紧凑图标按钮（图标 + 极小文字，等宽平铺）。菜单栏与宠物 popover 共用。
+struct PanelFooterButton: View {
+    let icon: String
+    let label: String
+    let action: () -> Void
+    var body: some View {
+        Button(action: action) {
+            VStack(spacing: 2) {
+                Image(systemName: icon).font(.system(size: 13))
+                Text(label).font(.system(size: 9))
+            }
+            .frame(maxWidth: .infinity)
+            .padding(.vertical, 4)
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .foregroundStyle(.secondary)
     }
 }
 
