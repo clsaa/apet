@@ -7,7 +7,8 @@ import AppShellKit
 
 /// Wraps ``SessionPanel`` with action footer buttons. Private to this file.
 private struct PanelRootView: View {
-    let rows: [SessionRowModel]
+    let sessions: [Session]
+    let now: Double
     let petVisible: Bool
     /// Fix 6: whether the hook is already installed for any data root.
     /// When `true`, the panel surfaces "已启用" instead of the call-to-action button.
@@ -15,6 +16,10 @@ private struct PanelRootView: View {
     /// 面板顶部快捷键提示，如 "⌥⌘P 打开/关闭"。
     let hotkeyHint: String?
     let onTap: (String) -> Void
+    let onToggleFavorite: (String) -> Void
+    let onRename: (String) -> Void
+    let onCopyId: (String) -> Void
+    let onCopyResume: (String) -> Void
     let onTogglePet: () -> Void
     let onOpenPreferences: () -> Void
     let onQuit: () -> Void
@@ -22,12 +27,18 @@ private struct PanelRootView: View {
 
     /// 是否存在未读 waiting 会话——仅此时显示「全部已读」（产品评审 MAJOR-1）。
     private var hasUnread: Bool {
-        rows.contains { $0.dot == .doneWaiting || $0.dot == .attention }
+        sessions.contains { s in
+            if case .waiting = s.state, !s.acknowledged { return true }
+            return false
+        }
     }
 
     var body: some View {
         VStack(spacing: 0) {
-            SessionPanel(rows: rows, onTap: onTap, hotkeyHint: hotkeyHint)
+            SessionPanel(sessions: sessions, now: now, onTap: onTap,
+                         onToggleFavorite: onToggleFavorite, onRename: onRename,
+                         onCopyId: onCopyId, onCopyResume: onCopyResume,
+                         hotkeyHint: hotkeyHint)
             Divider()
 
             // 全部标记已读（仅在确有未读时显示）
@@ -144,6 +155,10 @@ final class MenuBarController: NSObject {
     var onAcknowledge: ((SessionKey) -> Void)?
     /// 面板「全部标记已读」回调，由 AppCoordinator 注入 store.acknowledgeAll。
     var onAcknowledgeAll: (() -> Void)?
+    /// F7：收藏/取消收藏，由 AppCoordinator 注入（写 SessionMetaStore + 刷新）。
+    var onToggleFavorite: ((SessionKey) -> Void)?
+    /// F7：重命名（nil=恢复默认名），由 AppCoordinator 注入。
+    var onRenameSession: ((SessionKey, String?) -> Void)?
     /// 面板顶部快捷键提示字符串，如 "⌥⌘P 打开/关闭"。nil 表示不显示 header。
     var hotkeyHint: String?
     /// 状态栏样式（F2）：`"counts"`（🟢🔴🟡⚪+数字）| `"pawprint"`（单图标+主色+总数）。
@@ -248,21 +263,26 @@ final class MenuBarController: NSObject {
 
     // MARK: - Private: popover
 
-    /// Build the SwiftUI root view with current rows and callbacks.
+    /// Build the SwiftUI root view with current sessions and callbacks.
     private func makePanelRootView() -> PanelRootView {
-        let rows = currentSessions.map(SessionRowMapper.make)
         return PanelRootView(
-            rows: rows,
+            sessions: currentSessions,
+            now: Date().timeIntervalSince1970,
             petVisible: petVisibilityProvider?() ?? false,
             hookInstalled: hookInstalledProvider?() ?? false,
             hotkeyHint: hotkeyHint,
             onTap: { [weak self] id in self?.handleSessionTap(id: id) },
+            onToggleFavorite: { [weak self] id in self?.handleToggleFavorite(id: id) },
+            onRename: { [weak self] id in self?.handleRename(id: id) },
+            onCopyId: { [weak self] id in self?.handleCopyId(id: id) },
+            onCopyResume: { [weak self] id in self?.handleCopyResume(id: id) },
             onTogglePet: { [weak self] in
                 self?.onTogglePet?()
-                // Re-render the panel so the button label flips immediately.
                 self?.panelHosting?.rootView = self?.makePanelRootView() ?? PanelRootView(
-                    rows: [], petVisible: false, hookInstalled: false, hotkeyHint: nil,
-                    onTap: { _ in }, onTogglePet: {}, onOpenPreferences: {}, onQuit: {}, onAcknowledgeAll: {}
+                    sessions: [], now: 0, petVisible: false, hookInstalled: false, hotkeyHint: nil,
+                    onTap: { _ in }, onToggleFavorite: { _ in }, onRename: { _ in },
+                    onCopyId: { _ in }, onCopyResume: { _ in },
+                    onTogglePet: {}, onOpenPreferences: {}, onQuit: {}, onAcknowledgeAll: {}
                 )
             },
             onOpenPreferences: { [weak self] in
@@ -272,6 +292,32 @@ final class MenuBarController: NSObject {
             onQuit: { NSApplication.shared.terminate(nil) },
             onAcknowledgeAll: { [weak self] in self?.onAcknowledgeAll?() }
         )
+    }
+
+    // MARK: - Private: F7/F11 row actions
+
+    private func sessionForId(_ id: String) -> Session? {
+        currentSessions.first { "\($0.key.agent)|\($0.key.root)|\($0.key.sessionId)" == id }
+    }
+
+    private func handleToggleFavorite(id: String) {
+        guard let s = sessionForId(id) else { return }
+        onToggleFavorite?(s.key)
+    }
+
+    private func handleRename(id: String) {
+        guard let s = sessionForId(id) else { return }
+        if case .set(let name) = SessionRowActions.promptRename(s) {
+            onRenameSession?(s.key, name)
+        }
+    }
+
+    private func handleCopyId(id: String) {
+        sessionForId(id).map(SessionRowActions.copyId)
+    }
+
+    private func handleCopyResume(id: String) {
+        sessionForId(id).map(SessionRowActions.copyResume)
     }
 
     /// 以编程方式打开/切换会话面板 popover（供全局热键在 menuBarOnly 模式下调用）。

@@ -43,7 +43,7 @@ public enum SessionListOrganizer {
         var pinned: [SessionRowModel] = []
         var rest: [Session] = []
         for s in matched {
-            if isUnreadWaiting(s) { pinned.append(SessionRowMapper.make(s)) }
+            if isUnreadWaiting(s) { pinned.append(SessionRowMapper.make(s, now: now)) }
             else { rest.append(s) }
         }
 
@@ -68,33 +68,33 @@ public enum SessionListOrganizer {
 
     private static func group(_ sessions: [Session], by dimension: GroupDimension, now: Double) -> [SessionGroup] {
         switch dimension {
-        case .status: return groupByStatus(sessions)
-        case .agent:  return groupByKey(sessions) { $0.key.agent }
+        case .status: return groupByStatus(sessions, now: now)
+        case .agent:  return groupByKey(sessions, now: now) { $0.key.agent }
         case .date:   return groupByDate(sessions, now: now)
         }
     }
 
     /// 状态维度固定顺序：进行中 → 已读 → 超时（置顶已取走未读 waiting）。
-    private static func groupByStatus(_ sessions: [Session]) -> [SessionGroup] {
+    private static func groupByStatus(_ sessions: [Session], now: Double) -> [SessionGroup] {
         let order: [(String, (Session) -> Bool)] = [
             ("进行中", { if case .running = $0.state { return true }; return false }),
             ("已读",   { if case .waiting = $0.state, $0.acknowledged { return true }; return false }),
             ("超时",   { if case .stale = $0.state { return true }; return false }),
         ]
         return order.compactMap { title, pred in
-            let rows = sessions.filter(pred).map(SessionRowMapper.make)
+            let rows = sessions.filter(pred).map { SessionRowMapper.make($0, now: now) }
             return rows.isEmpty ? nil : SessionGroup(title: title, rows: rows)
         }
     }
 
     /// 按 key 分组，保留首次出现顺序。
-    private static func groupByKey(_ sessions: [Session], _ key: (Session) -> String) -> [SessionGroup] {
+    private static func groupByKey(_ sessions: [Session], now: Double, _ key: (Session) -> String) -> [SessionGroup] {
         var order: [String] = []
         var buckets: [String: [SessionRowModel]] = [:]
         for s in sessions {
             let k = key(s)
             if buckets[k] == nil { order.append(k) }
-            buckets[k, default: []].append(SessionRowMapper.make(s))
+            buckets[k, default: []].append(SessionRowMapper.make(s, now: now))
         }
         return order.map { SessionGroup(title: $0, rows: buckets[$0] ?? []) }
     }
@@ -109,7 +109,7 @@ public enum SessionListOrganizer {
             ("更早", { $0 <= nowDay - 7 }),
         ]
         return order.compactMap { title, pred in
-            let rows = sessions.filter { pred(Int($0.lastActiveAt / 86_400)) }.map(SessionRowMapper.make)
+            let rows = sessions.filter { pred(Int($0.lastActiveAt / 86_400)) }.map { SessionRowMapper.make($0, now: now) }
             return rows.isEmpty ? nil : SessionGroup(title: title, rows: rows)
         }
     }
