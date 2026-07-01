@@ -43,6 +43,15 @@ public enum TerminalFocusPlanner {
             }
 
         case .terminal:
+            // 有合法 tty → 窗口级 osascript；否则激活应用兜底。
+            if let tty = ref.tty, TTYPath.isValid(tty) {
+                do {
+                    let inv = try TerminalAppLocator().focusInvocation(for: ref)
+                    return .osascript(inv)
+                } catch {
+                    return .activateBundle(ref.bundleId ?? "com.apple.Terminal")
+                }
+            }
             return .activateBundle(ref.bundleId ?? "com.apple.Terminal")
 
         case .warp:
