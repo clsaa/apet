@@ -57,6 +57,13 @@ public enum TerminalFocusPlanner {
         case .warp:
             return .activateBundle(ref.bundleId ?? "dev.warp.Warp")
 
+        case .ghostty:
+            return .activateBundle(ref.bundleId ?? "com.mitchellh.ghostty")
+
+        case .vscode:
+            // VSCode/Cursor 内置终端：仅激活应用，需用户手动切 tab（能力分级 activateOnlyManualTab）
+            return .activateBundle(ref.bundleId ?? "com.microsoft.VSCode")
+
         case .other:
             if let bundleId = ref.bundleId {
                 return .activateBundle(bundleId)

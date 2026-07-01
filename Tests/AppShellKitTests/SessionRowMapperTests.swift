@@ -164,6 +164,23 @@ final class SessionRowMapperTests: XCTestCase {
         XCTAssertFalse(row.activateOnly)
     }
 
+    // MARK: - TC-ROWMAP-FUNC-010  terminal .vscode → activateOnly true + needsManualTabHint true
+
+    func test_vscodeTerminal_needsManualTabHint() {
+        let session = makeSession(terminal: TerminalRef(kind: .vscode))
+        let row = SessionRowMapper.make(session)
+        XCTAssertTrue(row.activateOnly)
+        XCTAssertTrue(row.needsManualTabHint)
+    }
+
+    // MARK: - TC-ROWMAP-FUNC-011  terminal .warp → activateOnly true 但不需手动 tab 提示
+
+    func test_warpTerminal_noManualTabHint() {
+        let session = makeSession(terminal: TerminalRef(kind: .warp))
+        let row = SessionRowMapper.make(session)
+        XCTAssertFalse(row.needsManualTabHint)
+    }
+
     // MARK: - TC-ROWMAP-INFER-001  jsonl + waiting(.stop) → isInferred true
 
     func test_jsonl_waitingStop_isInferred() {

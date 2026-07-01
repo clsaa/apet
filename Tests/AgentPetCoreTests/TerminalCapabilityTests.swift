@@ -23,6 +23,14 @@ final class TerminalCapabilityTests: XCTestCase {
         XCTAssertEqual(TerminalCapabilities.capability(for: .other), .activateOnly)
     }
 
+    func test_ghostty_isActivateOnly() {
+        XCTAssertEqual(TerminalCapabilities.capability(for: .ghostty), .activateOnly)
+    }
+
+    func test_vscode_isActivateOnlyManualTab() {
+        XCTAssertEqual(TerminalCapabilities.capability(for: .vscode), .activateOnlyManualTab)
+    }
+
     // MARK: - 2. isActivateOnly 派生：仅 precise* 为 false
 
     func test_preciseTab_isNotActivateOnly() {

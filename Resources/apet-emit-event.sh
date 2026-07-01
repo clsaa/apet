@@ -27,6 +27,10 @@ export _APET_OUT="$AGENTPET_OUT"
 export _APET_ROOT="${AGENTPET_ROOT:-$HOME/.claude}"
 export _APET_ITERM="${ITERM_SESSION_ID:-}"
 export _APET_TERM_PROG="${TERM_PROGRAM:-}"
+# Controlling tty of the parent (the terminal running Claude). hook stdin is the
+# payload (not a tty), so we read the parent's tty via ps. Yields e.g. "ttys001"
+# or "??"/empty when detached; python validates before use.
+export _APET_TTY="$(ps -o tty= -p "$PPID" 2>/dev/null | tr -d '[:space:]')"
 
 # python3 ships on macOS dev machines; use json.dumps for injection-safe JSON building
 # and fcntl.flock for atomic append under concurrent hook invocations.
@@ -40,6 +44,15 @@ def main():
     root      = os.environ.get("_APET_ROOT", "~/.claude")
     iterm_id  = os.environ.get("_APET_ITERM", "")
     term_prog = os.environ.get("_APET_TERM_PROG", "")
+    raw_tty   = os.environ.get("_APET_TTY", "")
+
+    # Normalize tty: "ttys001" → "/dev/ttys001"; only accept /dev/tty + alnum.
+    tty = ""
+    if raw_tty and raw_tty not in ("??", "?"):
+        cand = raw_tty if raw_tty.startswith("/dev/") else "/dev/" + raw_tty
+        tail = cand[len("/dev/tty"):] if cand.startswith("/dev/tty") else None
+        if tail is not None and tail != "" and tail.isalnum():
+            tty = cand
 
     if not out_path:
         return
@@ -82,23 +95,29 @@ def main():
         "ts":        ts,
     }
 
-    # Attach terminal info when available
+    # Attach terminal info when available.
+    # TERM_PROGRAM values: Apple_Terminal / WarpTerminal / ghostty / vscode (Cursor also sets vscode).
+    terminal = None
     if iterm_id:
-        obj["terminal"] = {
+        terminal = {
             "kind":           "iterm2",
             "itermSessionId": iterm_id,
             "bundleId":       "com.googlecode.iterm2",
         }
     elif term_prog == "Apple_Terminal":
-        obj["terminal"] = {
-            "kind":     "terminal",
-            "bundleId": "com.apple.Terminal",
-        }
+        terminal = {"kind": "terminal", "bundleId": "com.apple.Terminal"}
     elif term_prog == "WarpTerminal":
-        obj["terminal"] = {
-            "kind":     "warp",
-            "bundleId": "dev.warp.Warp",
-        }
+        terminal = {"kind": "warp", "bundleId": "dev.warp.Warp"}
+    elif term_prog == "ghostty":
+        terminal = {"kind": "ghostty", "bundleId": "com.mitchellh.ghostty"}
+    elif term_prog == "vscode":
+        terminal = {"kind": "vscode", "bundleId": "com.microsoft.VSCode"}
+
+    if terminal is not None:
+        # tty enables Terminal.app window-level focus; harmless extra field for others.
+        if tty:
+            terminal["tty"] = tty
+        obj["terminal"] = terminal
 
     line = json.dumps(obj, ensure_ascii=False, separators=(',', ':'))
 

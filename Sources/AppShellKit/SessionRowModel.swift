@@ -28,8 +28,11 @@ public struct SessionRowModel: Equatable, Identifiable {
     /// Dot color driven by `SessionState`.
     public let dot: Dot
     /// `true` when the terminal kind only supports app-activate (no precise tab jump).
-    /// Currently: `.warp` and `.other`.
+    /// Currently: `.warp`, `.ghostty`, `.vscode`, `.other`.
     public let activateOnly: Bool
+    /// `true` when the terminal is activate-only AND the user must manually find the tab
+    /// (VSCode/Cursor integrated terminal). Drives an extra UI hint beyond "仅激活".
+    public let needsManualTabHint: Bool
     /// `true` when the session state is inferred from jsonl replay (source == .jsonl &&
     /// state == .waiting). The session is paused/stopped but the terminal info comes from
     /// file scanning rather than a live hook event — so it may be stale.
@@ -42,6 +45,7 @@ public struct SessionRowModel: Equatable, Identifiable {
         profileTag: String?,
         dot: Dot,
         activateOnly: Bool,
+        needsManualTabHint: Bool = false,
         isInferred: Bool = false
     ) {
         self.id = id
@@ -50,6 +54,7 @@ public struct SessionRowModel: Equatable, Identifiable {
         self.profileTag = profileTag
         self.dot = dot
         self.activateOnly = activateOnly
+        self.needsManualTabHint = needsManualTabHint
         self.isInferred = isInferred
     }
 }
@@ -92,10 +97,14 @@ public enum SessionRowMapper {
         // activateOnly: 由终端能力分级单一事实源推导（与 TerminalFocusPlanner 一致）。
         // 无终端信息（kind == nil）时不显降级提示。
         let activateOnly: Bool
+        let needsManualTabHint: Bool
         if let kind = session.terminal?.kind {
-            activateOnly = TerminalCapabilities.capability(for: kind).isActivateOnly
+            let cap = TerminalCapabilities.capability(for: kind)
+            activateOnly = cap.isActivateOnly
+            needsManualTabHint = cap.needsManualTabHint
         } else {
             activateOnly = false
+            needsManualTabHint = false
         }
 
         // isInferred: jsonl-sourced session whose state is waiting (stop or attention).
@@ -112,6 +121,7 @@ public enum SessionRowMapper {
             profileTag: session.profileLabel,
             dot: dot,
             activateOnly: activateOnly,
+            needsManualTabHint: needsManualTabHint,
             isInferred: isInferred
         )
     }

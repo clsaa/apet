@@ -34,6 +34,8 @@ public enum TerminalCapabilities {
         case .iterm2:   return .preciseTab
         case .terminal: return .preciseWindow
         case .warp:     return .activateOnly
+        case .ghostty:  return .activateOnly
+        case .vscode:   return .activateOnlyManualTab
         case .other:    return .activateOnly
         }
     }
