@@ -67,12 +67,14 @@ public struct AppConfig: Codable, Equatable {
     public var dndEndMin: Int
     /// 从多 root 自动发现中排除的路径列表。默认空（不排除任何路径）。
     public var excludedRoots: [String]
+    /// 状态栏样式：`"counts"`（彩色计数 🟢🔴🟡⚪+数字）| `"pawprint"`（单 pawprint 图标+主色+总数）。
+    public var menuBarStyle: String
 
     // CodingKeys：含全部字段，供自定义 decoder 和 synthesized encoder 共同使用。
     private enum CodingKeys: String, CodingKey {
         case dataRoots, displayMode, notifyMode, staleAfterSec, endedAfterSec,
              waitingEndedAfterSec, selectedPet, readGrayAfterSec, panelHotKey,
-             dndEnabled, dndStartMin, dndEndMin, excludedRoots
+             dndEnabled, dndStartMin, dndEndMin, excludedRoots, menuBarStyle
     }
 
     /// 自定义解码：旧版 config.json 缺少可选字段时用默认值，不丢失其他已有设置。
@@ -97,6 +99,7 @@ public struct AppConfig: Codable, Equatable {
         dndStartMin          = try c.decodeIfPresent(Int.self,           forKey: .dndStartMin)   ?? 0
         dndEndMin            = try c.decodeIfPresent(Int.self,           forKey: .dndEndMin)     ?? 0
         excludedRoots        = try c.decodeIfPresent([String].self,      forKey: .excludedRoots) ?? []
+        menuBarStyle         = try c.decodeIfPresent(String.self,        forKey: .menuBarStyle)  ?? "counts"
     }
 
     public init(
@@ -112,7 +115,8 @@ public struct AppConfig: Codable, Equatable {
         dndEnabled: Bool = false,
         dndStartMin: Int = 0,
         dndEndMin: Int = 0,
-        excludedRoots: [String] = []
+        excludedRoots: [String] = [],
+        menuBarStyle: String = "counts"
     ) {
         self.dataRoots = dataRoots
         self.displayMode = displayMode
@@ -127,6 +131,7 @@ public struct AppConfig: Codable, Equatable {
         self.dndStartMin = dndStartMin
         self.dndEndMin = dndEndMin
         self.excludedRoots = excludedRoots
+        self.menuBarStyle = menuBarStyle
     }
 
     /// Factory that produces the out-of-the-box defaults.

@@ -18,7 +18,7 @@ public enum EventKind: Equatable {
 }
 
 public enum WaitingReason: String, Codable, Equatable { case stop, attention }
-public enum TerminalKind: String, Codable, Equatable { case iterm2, terminal, warp, other }
+public enum TerminalKind: String, Codable, Equatable { case iterm2, terminal, warp, ghostty, vscode, other }
 public enum NotifyClass: String, Codable, Equatable { case alert, passive, none }
 
 public struct TerminalRef: Equatable, Decodable {

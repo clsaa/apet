@@ -83,4 +83,5 @@ swift test --filter SessionStoreOrderingTests   # 跑单个测试类
 - **M1 地基+桌宠** ✅ 事件协议 + SessionStore 状态机 + hook 内置插件 + 悬浮宠物窗 + 菜单栏 + iTerm2 精确跳转。
 - **M1.5 开箱即用+常规体验** ✅ jsonl 兜底（零配置看到会话含当前在跑的）+ 右键菜单 + 首启引导 + 配置健康 + just-in-time 授权。
 - **M2 宠物扩展+多源** ✅ 上传照片宠物（本地 Vision 抠图，零网络）+ 多 profile 并行发现（带授权）+ 通知模式可配 + 免打扰。
-- **M3 终端+安全加固** / **M4 生态**（公开契约 + 第三方样例）。详见 README 与 spec。
+- **M3**（进行中）：**M3-A0 体验热修** ✅（B1/B2/B3/A1）；**M3-A1 多终端+常驻** ✅（F12：Terminal.app 窗口级/Warp/Ghostty/VSCode 能力分级 + hook 采集 tty；A4：SMAppService 开机自启）。后续批次 M3-B 会话管理 / M3-A2 外观 / M3-C 多 Agent / M3-D AI 总结见 `docs/superpowers/specs/2026-06-28-apet-m3-design.md`。
+- **M4 生态**（公开契约 + 第三方样例）。详见 README 与 spec。

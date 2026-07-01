@@ -30,6 +30,55 @@ public enum ITermSessionId {
     }
 }
 
+/// Terminal.app 的 tty 白名单校验：只接受 `/dev/tty` 前缀 + 其后纯字母数字（如 `/dev/ttys001`），
+/// 杜绝空格/引号/`;`/`$()`/反引号等注入。
+public enum TTYPath {
+    private static let prefix = "/dev/tty"
+    public static func isValid(_ s: String) -> Bool {
+        guard s.hasPrefix(prefix) else { return false }
+        let tail = s.dropFirst(prefix.count)
+        guard !tail.isEmpty else { return false }
+        return tail.allSatisfy { c in
+            (c >= "a" && c <= "z") || (c >= "A" && c <= "Z") || (c >= "0" && c <= "9")
+        }
+    }
+}
+
+/// Terminal.app 窗口级定位：用 tty 在各窗口的 tabs 中匹配，选中所在窗口/标签并激活。
+/// 能力比 iTerm2 低（无 session id 精确到 tab 的概念，但 tab 有 tty 属性可选中）。
+public struct TerminalAppLocator: TerminalLocator {
+    public init() {}
+    public var kind: TerminalKind { .terminal }
+    public var capability: LocatorCapability { .activateOnly }
+
+    /// 参数化 AppleScript：tty 经 argv 传入，绝不字符串内插。设计 §3.1 / §6。
+    private static let script = """
+    on run argv
+        set targetTty to item 1 of argv
+        tell application "Terminal"
+            repeat with w in windows
+                repeat with t in tabs of w
+                    if (tty of t) is targetTty then
+                        set selected of t to true
+                        set frontmost of w to true
+                        activate
+                        return
+                    end if
+                end repeat
+            end repeat
+            error "apet: tty not found" number -1
+        end tell
+    end run
+    """
+
+    public func focusInvocation(for ref: TerminalRef) throws -> ScriptInvocation {
+        guard let tty = ref.tty else { throw LocatorError.missingRef }
+        guard TTYPath.isValid(tty) else { throw LocatorError.invalidRef }
+        return ScriptInvocation(executable: "/usr/bin/osascript",
+                                arguments: [Self.script, tty])
+    }
+}
+
 public struct ITerm2Locator: TerminalLocator {
     public init() {}
     public var kind: TerminalKind { .iterm2 }

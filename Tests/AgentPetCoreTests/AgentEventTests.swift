@@ -14,6 +14,34 @@ final class AgentEventTests: XCTestCase {
         XCTAssertEqual(e?.reason, .stop)
     }
 
+    // MARK: - TerminalKind 扩展：ghostty / vscode / 未知回退 other / tty decode
+
+    func test_terminal_decodes_ghostty() {
+        let line = #"{"eventId":"E","agent":"a","event":"stop","sessionId":"S","root":"r","ts":"t","terminal":{"kind":"ghostty","bundleId":"com.mitchellh.ghostty"}}"#
+        let e = AgentEvent.decode(line: Substring(line))
+        XCTAssertEqual(e?.terminal?.kind, .ghostty)
+        XCTAssertEqual(e?.terminal?.bundleId, "com.mitchellh.ghostty")
+    }
+
+    func test_terminal_decodes_vscode() {
+        let line = #"{"eventId":"E","agent":"a","event":"stop","sessionId":"S","root":"r","ts":"t","terminal":{"kind":"vscode","bundleId":"com.microsoft.VSCode"}}"#
+        let e = AgentEvent.decode(line: Substring(line))
+        XCTAssertEqual(e?.terminal?.kind, .vscode)
+    }
+
+    func test_terminal_unknownKind_fallsBackToOther() {
+        let line = #"{"eventId":"E","agent":"a","event":"stop","sessionId":"S","root":"r","ts":"t","terminal":{"kind":"zellij"}}"#
+        let e = AgentEvent.decode(line: Substring(line))
+        XCTAssertEqual(e?.terminal?.kind, .other)
+    }
+
+    func test_terminal_decodes_tty() {
+        let line = #"{"eventId":"E","agent":"a","event":"stop","sessionId":"S","root":"r","ts":"t","terminal":{"kind":"terminal","tty":"/dev/ttys003"}}"#
+        let e = AgentEvent.decode(line: Substring(line))
+        XCTAssertEqual(e?.terminal?.kind, .terminal)
+        XCTAssertEqual(e?.terminal?.tty, "/dev/ttys003")
+    }
+
     func test_unknown_event_kind_is_preserved_not_dropped() {
         let line = #"{"v":1,"eventId":"E2","agent":"a","event":"compacting","sessionId":"S","root":"r","ts":"t"}"#
         let e = AgentEvent.decode(line: Substring(line))

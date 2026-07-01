@@ -77,13 +77,35 @@ final class TerminalFocusPlannerTests: XCTestCase {
         )
     }
 
-    // MARK: - 8. .warp → .activateBundle("dev.warp.Warp")
+    // MARK: - 7b. .terminal WITH valid tty → .osascript, argv[1] == tty
+
+    func testTerminalKindWithValidTtyProducesOsascript() {
+        let ref = TerminalRef(kind: .terminal, tty: "/dev/ttys001")
+        let action = TerminalFocusPlanner.plan(for: ref)
+        guard case .osascript(let inv) = action else {
+            return XCTFail("expected .osascript, got \(action)")
+        }
+        XCTAssertGreaterThanOrEqual(inv.arguments.count, 2)
+        XCTAssertEqual(inv.arguments[1], "/dev/ttys001")
+    }
+
+    // MARK: - 7c. .terminal WITH invalid tty → .activateBundle (不抛异常)
+
+    func testTerminalKindWithInvalidTtyFallsBackToActivate() {
+        let ref = TerminalRef(kind: .terminal, tty: "bad; rm -rf /")
+        XCTAssertEqual(
+            TerminalFocusPlanner.plan(for: ref),
+            .activateBundle("com.apple.Terminal")
+        )
+    }
+
+    // MARK: - 8. .warp → .activateBundle("dev.warp.Warp-Stable")
 
     func testWarpKindNoBundleIdUsesDefault() {
         let ref = TerminalRef(kind: .warp)
         XCTAssertEqual(
             TerminalFocusPlanner.plan(for: ref),
-            .activateBundle("dev.warp.Warp")
+            .activateBundle("dev.warp.Warp-Stable")
         )
     }
 

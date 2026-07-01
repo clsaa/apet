@@ -116,7 +116,7 @@ private struct SessionRowCell: View {
                     }
 
                     if row.activateOnly {
-                        Text("仅激活")
+                        Text(row.needsManualTabHint ? "仅激活·手动切标签" : "仅激活")
                             .font(.system(size: 10))
                             .foregroundStyle(.tertiary)
                     }

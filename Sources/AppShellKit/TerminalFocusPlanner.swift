@@ -43,10 +43,27 @@ public enum TerminalFocusPlanner {
             }
 
         case .terminal:
+            // 有合法 tty → 窗口级 osascript；否则激活应用兜底。
+            if let tty = ref.tty, TTYPath.isValid(tty) {
+                do {
+                    let inv = try TerminalAppLocator().focusInvocation(for: ref)
+                    return .osascript(inv)
+                } catch {
+                    return .activateBundle(ref.bundleId ?? "com.apple.Terminal")
+                }
+            }
             return .activateBundle(ref.bundleId ?? "com.apple.Terminal")
 
         case .warp:
-            return .activateBundle(ref.bundleId ?? "dev.warp.Warp")
+            // 稳定版 Warp 的 bundle id 是 dev.warp.Warp-Stable（非 dev.warp.Warp）。
+            return .activateBundle(ref.bundleId ?? "dev.warp.Warp-Stable")
+
+        case .ghostty:
+            return .activateBundle(ref.bundleId ?? "com.mitchellh.ghostty")
+
+        case .vscode:
+            // VSCode/Cursor 内置终端：仅激活应用，需用户手动切 tab（能力分级 activateOnlyManualTab）
+            return .activateBundle(ref.bundleId ?? "com.microsoft.VSCode")
 
         case .other:
             if let bundleId = ref.bundleId {
