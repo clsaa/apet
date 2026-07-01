@@ -354,6 +354,8 @@ struct PreferencesView: View {
                 Divider()
                 displayAndHotkeySection
                 Divider()
+                stateColorsSection
+                Divider()
                 thresholdsSection
                 Divider()
                 petSection
@@ -366,6 +368,8 @@ struct PreferencesView: View {
         }
         .frame(minWidth: 480, idealWidth: 520, minHeight: 440)
         .onAppear { refreshLaunchAtLogin() }
+        // 即时生效：任一设置变更立刻落盘+应用，无需点「保存」。
+        .onChange(of: config, perform: { _ in performSave() })
         // Part B: load health status on appear; re-run whenever healthRefreshID changes.
         .task(id: healthRefreshID) {
             await refreshHealthStatus()
@@ -476,6 +480,53 @@ struct PreferencesView: View {
             // 回滚开关到真实态
             refreshLaunchAtLogin()
         }
+    }
+
+    // MARK: - 状态圆点颜色（F3）
+
+    private var stateColorsSection: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Label("状态圆点颜色", systemImage: "paintpalette")
+                .font(.headline)
+            Text("自定义会话列表里 5 种状态圆点的颜色。菜单栏彩色计数用 emoji，颜色固定不受影响。")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+
+            ColorPicker("进行中", selection: colorBinding(\.running, defaultHex: "#34C759"), supportsOpacity: false)
+            ColorPicker("需关注", selection: colorBinding(\.attention, defaultHex: "#FF9500"), supportsOpacity: false)
+            ColorPicker("停下等你", selection: colorBinding(\.doneWaiting, defaultHex: "#FF3B30"), supportsOpacity: false)
+            ColorPicker("已读", selection: colorBinding(\.read, defaultHex: "#FFCC00"), supportsOpacity: false)
+            ColorPicker("超时", selection: colorBinding(\.stale, defaultHex: "#8E8E93"), supportsOpacity: false)
+
+            Button("恢复默认颜色") { config.stateColors = .defaults }
+                .font(.caption)
+                .padding(.top, 2)
+        }
+    }
+
+    /// hex(config) <-> Color 双向绑定；改动经 @State config 触发即时生效。
+    private func colorBinding(_ keyPath: WritableKeyPath<StateColorConfig, String?>, defaultHex: String) -> Binding<Color> {
+        Binding(
+            get: {
+                let hex = config.stateColors[keyPath: keyPath] ?? defaultHex
+                if let c = HexColor.parse(hex) {
+                    return Color(.sRGB, red: c.r, green: c.g, blue: c.b, opacity: c.a)
+                }
+                return .gray
+            },
+            set: { newColor in
+                config.stateColors[keyPath: keyPath] = Self.hexString(from: newColor)
+            }
+        )
+    }
+
+    private static func hexString(from color: Color) -> String {
+        let ns = NSColor(color).usingColorSpace(.sRGB) ?? NSColor(color)
+        let r = Int((ns.redComponent * 255).rounded())
+        let g = Int((ns.greenComponent * 255).rounded())
+        let b = Int((ns.blueComponent * 255).rounded())
+        return String(format: "#%02X%02X%02X", r, g, b)
     }
 
     private var displayAndHotkeySection: some View {
@@ -1071,8 +1122,11 @@ struct PreferencesView: View {
                     .fixedSize(horizontal: false, vertical: true)
             }
             HStack {
+                Text("设置更改后即时生效。")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
                 Spacer()
-                Button("保存") { performSave() }
+                Button("完成") { performSave() }
                     .buttonStyle(.borderedProminent)
                     .keyboardShortcut(.return, modifiers: [.command])
             }

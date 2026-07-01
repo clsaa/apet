@@ -25,6 +25,8 @@ struct SessionPanel: View {
     var onCopyResume: (String) -> Void = { _ in }
     /// 面板顶部快捷键提示，如 "⌥⌘P 打开/关闭"。为 nil 不显示。
     var hotkeyHint: String? = nil
+    /// 状态圆点配色（F3）。默认系统色。
+    var palette: DotPalette = .system
 
     @State private var filter: String = ""
 
@@ -107,7 +109,7 @@ struct SessionPanel: View {
     }
 
     private func rowCell(_ row: SessionRowModel) -> some View {
-        SessionRowCell(row: row)
+        SessionRowCell(row: row, palette: palette)
             .contentShape(Rectangle())
             .onTapGesture { onTap(row.id) }
             .contextMenu {
@@ -143,6 +145,7 @@ struct SessionPanel: View {
 
 private struct SessionRowCell: View {
     let row: SessionRowModel
+    let palette: DotPalette
 
     var body: some View {
         HStack(alignment: .center, spacing: 8) {
@@ -198,14 +201,7 @@ private struct SessionRowCell: View {
     }
 
     private var dotColor: Color {
-        let base: Color
-        switch row.dot {
-        case .running:     base = .green
-        case .attention:   base = .orange
-        case .doneWaiting: base = .red
-        case .read:        base = .yellow
-        case .stale:       base = .gray
-        }
+        let base = palette.color(for: row.dot)
         return row.isInferred ? base.opacity(0.45) : base
     }
 }

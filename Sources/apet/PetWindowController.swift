@@ -43,6 +43,8 @@ final class PetWindowController: NSObject {
     var onToggleFavorite: ((SessionKey) -> Void)?
     /// F7：重命名（nil=恢复默认名），由 AppCoordinator 注入。
     var onRenameSession: ((SessionKey, String?) -> Void)?
+    /// F3：状态圆点配色，由 AppCoordinator 从 config 注入。
+    var dotPalette: DotPalette = .system
 
     // MARK: - Dependencies
 
@@ -340,6 +342,7 @@ final class PetWindowController: NSObject {
 
         let panelVC = SessionPanelHostController(
             sessions: currentSessions,
+            palette: dotPalette,
             hotkeyHint: hotkeyHint,
             onTap: { [weak self] id in self?.handleSessionTap(id: id) },
             onToggleFavorite: { [weak self] id in self?.handleToggleFavorite(id: id) },
@@ -472,6 +475,7 @@ private final class DragDetectorView: NSView {
 private struct PetPanelRootView: View {
     let sessions: [Session]
     let now: Double
+    let palette: DotPalette
     let hotkeyHint: String?
     let onTap: (String) -> Void
     let onToggleFavorite: (String) -> Void
@@ -495,7 +499,7 @@ private struct PetPanelRootView: View {
             SessionPanel(sessions: sessions, now: now, onTap: onTap,
                          onToggleFavorite: onToggleFavorite, onRename: onRename,
                          onCopyId: onCopyId, onCopyResume: onCopyResume,
-                         hotkeyHint: hotkeyHint)
+                         hotkeyHint: hotkeyHint, palette: palette)
             Divider()
             if hasUnread {
                 Button {
@@ -548,6 +552,7 @@ private struct PetPanelRootView: View {
 private final class SessionPanelHostController: NSViewController {
 
     private var sessions: [Session]
+    private let palette: DotPalette
     private let hotkeyHint: String?
     private let onTap: (String) -> Void
     private let onToggleFavorite: (String) -> Void
@@ -560,6 +565,7 @@ private final class SessionPanelHostController: NSViewController {
 
     init(
         sessions: [Session],
+        palette: DotPalette,
         hotkeyHint: String?,
         onTap: @escaping (String) -> Void,
         onToggleFavorite: @escaping (String) -> Void,
@@ -570,6 +576,7 @@ private final class SessionPanelHostController: NSViewController {
         onAcknowledgeAll: @escaping () -> Void
     ) {
         self.sessions = sessions
+        self.palette = palette
         self.hotkeyHint = hotkeyHint
         self.onTap = onTap
         self.onToggleFavorite = onToggleFavorite
@@ -585,6 +592,7 @@ private final class SessionPanelHostController: NSViewController {
 
     private func makeRoot() -> PetPanelRootView {
         PetPanelRootView(sessions: sessions, now: Date().timeIntervalSince1970,
+                         palette: palette,
                          hotkeyHint: hotkeyHint, onTap: onTap,
                          onToggleFavorite: onToggleFavorite, onRename: onRename,
                          onCopyId: onCopyId, onCopyResume: onCopyResume,

@@ -268,6 +268,11 @@ final class AppCoordinator {
             // 状态栏样式（F2）：counts=彩色计数 / pawprint=单图标。
             mb.menuBarStyle = config.menuBarStyle
 
+            // F3：状态圆点配色
+            let palette = DotPalette(from: config.stateColors)
+            mb.dotPalette = palette
+            pw.dotPalette = palette
+
             menuBar = mb
             petWindow = pw
 
@@ -428,10 +433,15 @@ final class AppCoordinator {
         menuBar?.hotkeyHint = hint
         petWindow?.hotkeyHint = hint
 
-        // 状态栏样式（F2）立即生效：更新样式并用当前 summary 重绘。
+        // 状态栏样式（F2）+ 状态圆点配色（F3）立即生效：更新后用当前 summary 重绘。
+        let palette = DotPalette(from: newConfig.stateColors)
+        menuBar?.dotPalette = palette
+        petWindow?.dotPalette = palette
         if let store = store {
             menuBar?.menuBarStyle = newConfig.menuBarStyle
-            menuBar?.update(summary: store.summary(), sessions: store.activeSessions())
+            let sessions = applyMetas(store.activeSessions())
+            menuBar?.update(summary: store.summary(), sessions: sessions)
+            petWindow?.update(summary: store.summary(), sessions: sessions)
         }
     }
 

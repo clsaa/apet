@@ -9,6 +9,7 @@ import AppShellKit
 private struct PanelRootView: View {
     let sessions: [Session]
     let now: Double
+    let palette: DotPalette
     let petVisible: Bool
     /// Fix 6: whether the hook is already installed for any data root.
     /// When `true`, the panel surfaces "已启用" instead of the call-to-action button.
@@ -38,7 +39,7 @@ private struct PanelRootView: View {
             SessionPanel(sessions: sessions, now: now, onTap: onTap,
                          onToggleFavorite: onToggleFavorite, onRename: onRename,
                          onCopyId: onCopyId, onCopyResume: onCopyResume,
-                         hotkeyHint: hotkeyHint)
+                         hotkeyHint: hotkeyHint, palette: palette)
             Divider()
 
             // 全部标记已读（仅在确有未读时显示）
@@ -159,6 +160,8 @@ final class MenuBarController: NSObject {
     var onToggleFavorite: ((SessionKey) -> Void)?
     /// F7：重命名（nil=恢复默认名），由 AppCoordinator 注入。
     var onRenameSession: ((SessionKey, String?) -> Void)?
+    /// F3：状态圆点配色，由 AppCoordinator 从 config 注入。
+    var dotPalette: DotPalette = .system
     /// 面板顶部快捷键提示字符串，如 "⌥⌘P 打开/关闭"。nil 表示不显示 header。
     var hotkeyHint: String?
     /// 状态栏样式（F2）：`"counts"`（🟢🔴🟡⚪+数字）| `"pawprint"`（单图标+主色+总数）。
@@ -268,6 +271,7 @@ final class MenuBarController: NSObject {
         return PanelRootView(
             sessions: currentSessions,
             now: Date().timeIntervalSince1970,
+            palette: dotPalette,
             petVisible: petVisibilityProvider?() ?? false,
             hookInstalled: hookInstalledProvider?() ?? false,
             hotkeyHint: hotkeyHint,
@@ -279,7 +283,7 @@ final class MenuBarController: NSObject {
             onTogglePet: { [weak self] in
                 self?.onTogglePet?()
                 self?.panelHosting?.rootView = self?.makePanelRootView() ?? PanelRootView(
-                    sessions: [], now: 0, petVisible: false, hookInstalled: false, hotkeyHint: nil,
+                    sessions: [], now: 0, palette: .system, petVisible: false, hookInstalled: false, hotkeyHint: nil,
                     onTap: { _ in }, onToggleFavorite: { _ in }, onRename: { _ in },
                     onCopyId: { _ in }, onCopyResume: { _ in },
                     onTogglePet: {}, onOpenPreferences: {}, onQuit: {}, onAcknowledgeAll: {}
