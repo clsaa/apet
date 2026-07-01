@@ -44,7 +44,28 @@ public final class TerminalFocusService {
             return .activatedOnly
 
         case .osascript(let invocation):
-            return runOsascript(invocation)
+            let result = runOsascript(invocation)
+            // 完备性兜底：精确跳转未命中(.targetGone)时，至少把对应终端 App 切到前台，
+            // 不给用户「无法跳转」死路。iTerm2 / Terminal.app 皆有已知 bundleId。
+            if result == .targetGone, let bundleId = Self.fallbackBundleId(for: ref) {
+                activateBundle(bundleId)
+                return .activatedOnly
+            }
+            return result
+        }
+    }
+
+    /// 精确跳转失败时用于「至少激活 App」的 bundleId：优先 ref 自带，否则按 kind 取默认。
+    private static func fallbackBundleId(for ref: TerminalRef?) -> String? {
+        guard let ref else { return nil }
+        if let b = ref.bundleId { return b }
+        switch ref.kind {
+        case .iterm2:   return "com.googlecode.iterm2"
+        case .terminal: return "com.apple.Terminal"
+        case .warp:     return "dev.warp.Warp-Stable"
+        case .ghostty:  return "com.mitchellh.ghostty"
+        case .vscode:   return "com.microsoft.VSCode"
+        case .other:    return nil
         }
     }
 
