@@ -72,7 +72,12 @@ public struct AgentManifest: Equatable {
         hasStateRules: true
     )
 
-    /// Qoder：路径/时间方言为实测事实；**resume 命令与状态规则未核实 → 不臆造**（遵守 no-fabricated-commands）。
+    /// Qoder 系接入目标（用户指定）：**Qoder / Qoder Work / Qoder Cli** 三个产品。
+    /// 各自的真实路径 / jsonl 格式 / resume 命令 **待逐一核实**，核实前只留可扩展 manifest 接口、
+    /// 不臆造（遵守 no-fabricated-urls-commands）。下面 `qoder` 为占位 stub，
+    /// 待补 `qoderWork` / `qoderCli` 变体。
+    ///
+    /// Qoder：路径/时间方言为实测事实；**resume 命令与状态规则未核实 → 不臆造**。
     public static let qoder = AgentManifest(
         id: "qoder",
         rootsGlobs: ["~/.qoder/projects/**"],
