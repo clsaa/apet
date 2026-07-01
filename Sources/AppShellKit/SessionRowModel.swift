@@ -89,11 +89,13 @@ public enum SessionRowMapper {
         case .ended:                                dot = .stale   // shouldn't appear in active list
         }
 
-        // activateOnly: warp / other cannot do a precise tab jump
+        // activateOnly: 由终端能力分级单一事实源推导（与 TerminalFocusPlanner 一致）。
+        // 无终端信息（kind == nil）时不显降级提示。
         let activateOnly: Bool
-        switch session.terminal?.kind {
-        case .warp, .other: activateOnly = true
-        default:            activateOnly = false
+        if let kind = session.terminal?.kind {
+            activateOnly = TerminalCapabilities.capability(for: kind).isActivateOnly
+        } else {
+            activateOnly = false
         }
 
         // isInferred: jsonl-sourced session whose state is waiting (stop or attention).

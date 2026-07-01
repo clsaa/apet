@@ -153,6 +153,17 @@ final class SessionRowMapperTests: XCTestCase {
         XCTAssertFalse(row.activateOnly)
     }
 
+    // MARK: - TC-ROWMAP-FUNC-009  terminal .terminal（Apple Terminal）→ activateOnly false（窗口级精确）
+
+    func test_appleTerminal_activateOnlyFalse() {
+        // Arrange —— Terminal.app 走窗口级定位，不算 activate-only
+        let session = makeSession(terminal: TerminalRef(kind: .terminal, tty: "/dev/ttys001"))
+        // Act
+        let row = SessionRowMapper.make(session)
+        // Assert
+        XCTAssertFalse(row.activateOnly)
+    }
+
     // MARK: - TC-ROWMAP-INFER-001  jsonl + waiting(.stop) → isInferred true
 
     func test_jsonl_waitingStop_isInferred() {
