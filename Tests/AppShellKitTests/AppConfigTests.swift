@@ -172,6 +172,40 @@ final class AppConfigTests: XCTestCase {
                        "自动发现根的 isAutoDiscovered=true 应在 round-trip 后保留")
     }
 
+    // MARK: - F2：menuBarStyle 字段（状态栏样式）
+
+    /// defaults 中 menuBarStyle == "counts"（默认展示彩色计数）
+    func test_defaults_menuBarStyle_isCounts() {
+        XCTAssertEqual(AppConfig.defaults.menuBarStyle, "counts")
+    }
+
+    /// round-trip：save + load 保留 menuBarStyle
+    func test_menuBarStyle_roundTrip() throws {
+        let store = ConfigStore(url: configURL)
+        var custom = AppConfig.defaults
+        custom.menuBarStyle = "pawprint"
+        try store.save(custom)
+        XCTAssertEqual(store.load().menuBarStyle, "pawprint")
+    }
+
+    /// 旧版 config.json（无 menuBarStyle 字段）解码：其他设置保留，新字段默认 "counts"。
+    func test_decode_oldJson_withoutMenuBarStyle_defaultsCounts() throws {
+        let oldJson = """
+        {
+          "dataRoots": [{"agent": "claude-code", "path": "/tmp/root"}],
+          "displayMode": "menuBarOnly",
+          "endedAfterSec": 7200,
+          "notifyMode": "everyStop",
+          "selectedPet": "bichon",
+          "staleAfterSec": 300,
+          "waitingEndedAfterSec": 3600
+        }
+        """
+        let config = try JSONDecoder().decode(AppConfig.self, from: oldJson.data(using: .utf8)!)
+        XCTAssertEqual(config.displayMode, "menuBarOnly", "既有字段应保留")
+        XCTAssertEqual(config.menuBarStyle, "counts", "旧 json 无此字段时应默认 counts")
+    }
+
     // MARK: - 精修 3：readGrayAfterSec 字段
 
     /// defaults 中 readGrayAfterSec == 3600
