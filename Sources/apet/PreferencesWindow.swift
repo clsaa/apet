@@ -1,6 +1,7 @@
 import AppKit
 import SwiftUI
 import AppShellKit
+import AgentPetCore
 import UserNotifications
 
 // MARK: - Notification names
@@ -800,8 +801,8 @@ struct PreferencesView: View {
 
             // ── 内置宠物 ─────────────────────────────────────────────────────────
             Picker("选择宠物", selection: $config.selectedPet) {
-                Text("🐕 柴犬（Shiba）").tag("shiba")
-                Text("🐩 比熊（Bichon）").tag("bichon")
+                Text("🐕 \(PetDisplayName.builtin("shiba"))").tag("shiba")
+                Text("🐩 \(PetDisplayName.builtin("bichon"))").tag("bichon")
             }
             .pickerStyle(.radioGroup)
 
