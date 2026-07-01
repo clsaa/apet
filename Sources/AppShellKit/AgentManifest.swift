@@ -1,0 +1,86 @@
+import Foundation
+
+// MARK: - TimestampDialect
+
+/// 时间戳方言。Claude jsonl 用 ISO8601；Qoder 部分行用 epoch 毫秒（实测事实）。
+public enum TimestampDialect: Equatable {
+    case iso
+    case epochMillis
+
+    /// 解析为 Unix 秒（Double）。非法 → nil。纯解析（无当前时间读取）。
+    public func parse(_ raw: String) -> Double? {
+        switch self {
+        case .epochMillis:
+            let trimmed = raw.trimmingCharacters(in: .whitespaces)
+            guard !trimmed.isEmpty, let ms = Double(trimmed) else { return nil }
+            return ms / 1000.0
+        case .iso:
+            let f = ISO8601DateFormatter()
+            f.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+            if let d = f.date(from: raw) { return d.timeIntervalSince1970 }
+            // 回退：无小数秒
+            let f2 = ISO8601DateFormatter()
+            f2.formatOptions = [.withInternetDateTime]
+            return f2.date(from: raw)?.timeIntervalSince1970
+        }
+    }
+}
+
+// MARK: - AgentManifest
+
+/// 第三方 Agent 接入契约（§3 manifest 精简）。复用同一 DTO 描述路径/时间方言/恢复命令/状态规则。
+/// 恢复命令渲染：sessionId 先过 UUID 白名单，再作**单一 argv** 元素替换 `{id}`（防注入红线）。
+public struct AgentManifest: Equatable {
+    public let id: String
+    public let rootsGlobs: [String]
+    public let tsDialect: TimestampDialect
+    /// 恢复命令 argv 模板（含 `{id}` 占位）。nil = 未核实（不臆造）。
+    public let resumeArgvTemplate: [String]?
+    /// 是否提供状态派生规则；否则 UI 降级「状态粗略」（仅 mtime）。
+    public let hasStateRules: Bool
+
+    public init(id: String, rootsGlobs: [String], tsDialect: TimestampDialect,
+                resumeArgvTemplate: [String]?, hasStateRules: Bool) {
+        self.id = id; self.rootsGlobs = rootsGlobs; self.tsDialect = tsDialect
+        self.resumeArgvTemplate = resumeArgvTemplate; self.hasStateRules = hasStateRules
+    }
+
+    /// 渲染恢复命令 argv。模板缺失或 sessionId 非法 UUID → nil。
+    public func renderResumeArgv(sessionId: String) -> [String]? {
+        guard let template = resumeArgvTemplate, Self.isValidUUID(sessionId) else { return nil }
+        return template.map { $0 == "{id}" ? sessionId : $0 }
+    }
+
+    /// 严格 UUID（8-4-4-4-12 hex）。
+    static func isValidUUID(_ s: String) -> Bool {
+        let groups = [8, 4, 4, 4, 12]
+        let parts = s.split(separator: "-", omittingEmptySubsequences: false)
+        guard parts.count == groups.count else { return false }
+        for (part, expected) in zip(parts, groups) {
+            guard part.count == expected, part.allSatisfy({ $0.isHexDigit }) else { return false }
+        }
+        return true
+    }
+
+    // MARK: - 内置 manifest
+
+    public static let claude = AgentManifest(
+        id: "claude-code",
+        rootsGlobs: ["~/.claude/projects/**"],
+        tsDialect: .iso,
+        resumeArgvTemplate: ["claude", "--resume", "{id}"],
+        hasStateRules: true
+    )
+
+    /// Qoder：路径/时间方言为实测事实；**resume 命令与状态规则未核实 → 不臆造**（遵守 no-fabricated-commands）。
+    public static let qoder = AgentManifest(
+        id: "qoder",
+        rootsGlobs: ["~/.qoder/projects/**"],
+        tsDialect: .epochMillis,
+        resumeArgvTemplate: nil,
+        hasStateRules: false
+    )
+
+    /// 内置注册表。
+    public static let builtins: [AgentManifest] = [.claude, .qoder]
+}
