@@ -346,27 +346,17 @@ struct PreferencesView: View {
     }
 
     var body: some View {
-        ScrollView(.vertical, showsIndicators: true) {
-            VStack(alignment: .leading, spacing: 20) {
-                configHealthSection        // Part B: health overview at top
-                Divider()
-                dataRootsSection
-                Divider()
-                displayAndHotkeySection
-                Divider()
-                stateColorsSection
-                Divider()
-                thresholdsSection
-                Divider()
-                petSection
-                Divider()
-                startupSection
-                Divider()
-                saveSection
-            }
-            .padding(20)
+        TabView {
+            tabPage { displayModeGroup; Divider(); stateColorsSection; Divider(); petSection }
+                .tabItem { Label("外观", systemImage: "paintbrush") }
+            tabPage { notifyGroup }
+                .tabItem { Label("通知", systemImage: "bell") }
+            tabPage { configHealthSection; Divider(); dataRootsSection; Divider(); thresholdsSection }
+                .tabItem { Label("会话", systemImage: "list.bullet.rectangle") }
+            tabPage { hotkeyGroup; Divider(); startupSection; Divider(); saveSection }
+                .tabItem { Label("通用", systemImage: "gearshape") }
         }
-        .frame(minWidth: 480, idealWidth: 520, minHeight: 440)
+        .frame(minWidth: 520, idealWidth: 560, minHeight: 460)
         .onAppear { refreshLaunchAtLogin() }
         // 即时生效：任一设置变更立刻落盘+应用，无需点「保存」。
         .onChange(of: config, perform: { _ in performSave() })
@@ -386,6 +376,20 @@ struct PreferencesView: View {
         ) { note in
             guard let pet = note.userInfo?["selectedPet"] as? String else { return }
             config.selectedPet = pet
+        }
+    }
+
+    // MARK: - Tab page wrapper
+
+    /// 单个 tab 页：可滚动 + 统一内边距 + 左对齐。
+    @ViewBuilder
+    private func tabPage<Content: View>(@ViewBuilder _ content: () -> Content) -> some View {
+        ScrollView(.vertical, showsIndicators: true) {
+            VStack(alignment: .leading, spacing: 18) {
+                content()
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .padding(20)
         }
     }
 
@@ -529,12 +533,9 @@ struct PreferencesView: View {
         return String(format: "#%02X%02X%02X", r, g, b)
     }
 
-    private var displayAndHotkeySection: some View {
+    // ── 显示（外观 tab）─────────────────────────────────────────────
+    private var displayModeGroup: some View {
         VStack(alignment: .leading, spacing: 12) {
-            Label("显示与快捷键", systemImage: "macwindow.badge.plus")
-                .font(.headline)
-
-            // ── 显示模式 ─────────────────────────────────────────────────────
             VStack(alignment: .leading, spacing: 6) {
                 Text("显示模式")
                     .font(.subheadline)
@@ -548,7 +549,6 @@ struct PreferencesView: View {
                 .labelsHidden()
             }
 
-            // ── 状态栏样式（F2）─────────────────────────────────────────────
             VStack(alignment: .leading, spacing: 6) {
                 Text("状态栏样式")
                     .font(.subheadline)
@@ -564,8 +564,12 @@ struct PreferencesView: View {
                     .foregroundStyle(.secondary)
                     .fixedSize(horizontal: false, vertical: true)
             }
+        }
+    }
 
-            // ── 通知模式 ─────────────────────────────────────────────────────
+    // ── 通知（通知 tab）：模式 + F1 横幅/声音开关 + 免打扰 ────────────
+    private var notifyGroup: some View {
+        VStack(alignment: .leading, spacing: 12) {
             VStack(alignment: .leading, spacing: 6) {
                 Text("通知模式")
                     .font(.subheadline)
@@ -576,6 +580,16 @@ struct PreferencesView: View {
                 }
                 .pickerStyle(.segmented)
                 .labelsHidden()
+            }
+
+            // F1：横幅/声音分别开关
+            VStack(alignment: .leading, spacing: 4) {
+                Toggle("显示通知横幅", isOn: $config.notifyBannerEnabled)
+                Toggle("通知声音", isOn: $config.notifySoundEnabled)
+                    .disabled(!config.notifyBannerEnabled)
+                Text("关闭横幅则完全不弹；仅关声音则静默横幅。")
+                    .font(.caption)
+                    .foregroundStyle(.tertiary)
             }
 
             // ── 免打扰 ───────────────────────────────────────────────────────
@@ -627,8 +641,12 @@ struct PreferencesView: View {
                         .foregroundStyle(.secondary)
                 }
             }
+        }
+    }
 
-            // ── 呼出面板快捷键 ───────────────────────────────────────────────
+    // ── 呼出面板快捷键（通用 tab）─────────────────────────────────────
+    private var hotkeyGroup: some View {
+        VStack(alignment: .leading, spacing: 12) {
             VStack(alignment: .leading, spacing: 6) {
                 Text("呼出面板快捷键")
                     .font(.subheadline)

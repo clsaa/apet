@@ -206,6 +206,44 @@ final class AppConfigTests: XCTestCase {
         XCTAssertEqual(config.menuBarStyle, "counts", "旧 json 无此字段时应默认 counts")
     }
 
+    // MARK: - F1/F3：新字段默认 + 向后兼容
+
+    func test_defaults_notifyChannels_andColors() {
+        let d = AppConfig.defaults
+        XCTAssertTrue(d.notifyBannerEnabled)
+        XCTAssertTrue(d.notifySoundEnabled)
+        XCTAssertEqual(d.stateColors, .defaults)
+    }
+
+    func test_decode_oldJson_withoutNewFields_usesDefaults() throws {
+        let oldJson = """
+        {
+          "dataRoots": [{"agent": "claude-code", "path": "/tmp/root"}],
+          "displayMode": "pet",
+          "endedAfterSec": 7200,
+          "notifyMode": "attentionOnly",
+          "selectedPet": "shiba",
+          "staleAfterSec": 300,
+          "waitingEndedAfterSec": 3600
+        }
+        """
+        let c = try JSONDecoder().decode(AppConfig.self, from: oldJson.data(using: .utf8)!)
+        XCTAssertTrue(c.notifyBannerEnabled, "旧 json 无此字段 → 默认 true")
+        XCTAssertTrue(c.notifySoundEnabled)
+        XCTAssertEqual(c.stateColors, .defaults, "旧 json 无 stateColors → 默认系统色")
+    }
+
+    func test_stateColors_roundTrip() throws {
+        let store = ConfigStore(url: configURL)
+        var custom = AppConfig.defaults
+        custom.stateColors.running = "#123456"
+        custom.notifySoundEnabled = false
+        try store.save(custom)
+        let loaded = store.load()
+        XCTAssertEqual(loaded.stateColors.running, "#123456")
+        XCTAssertFalse(loaded.notifySoundEnabled)
+    }
+
     // MARK: - 精修 3：readGrayAfterSec 字段
 
     /// defaults 中 readGrayAfterSec == 3600
