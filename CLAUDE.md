@@ -83,5 +83,12 @@ swift test --filter SessionStoreOrderingTests   # 跑单个测试类
 - **M1 地基+桌宠** ✅ 事件协议 + SessionStore 状态机 + hook 内置插件 + 悬浮宠物窗 + 菜单栏 + iTerm2 精确跳转。
 - **M1.5 开箱即用+常规体验** ✅ jsonl 兜底（零配置看到会话含当前在跑的）+ 右键菜单 + 首启引导 + 配置健康 + just-in-time 授权。
 - **M2 宠物扩展+多源** ✅ 上传照片宠物（本地 Vision 抠图，零网络）+ 多 profile 并行发现（带授权）+ 通知模式可配 + 免打扰。
-- **M3**（进行中）：**M3-A0 体验热修** ✅（B1/B2/B3/A1）；**M3-A1 多终端+常驻** ✅（F12：Terminal.app 窗口级/Warp/Ghostty/VSCode 能力分级 + hook 采集 tty；A4：SMAppService 开机自启）。后续批次 M3-B 会话管理 / M3-A2 外观 / M3-C 多 Agent / M3-D AI 总结见 `docs/superpowers/specs/2026-06-28-apet-m3-design.md`。
+- **M3**（大体完成）：
+  - **M3-A0 体验热修** ✅（B1/B2/B3/A1）
+  - **M3-A1 多终端+常驻** ✅（Terminal.app 窗口级/Warp/Ghostty/VSCode 能力分级 + hook 采集 tty；SMAppService 开机自启；精确跳转未命中兜底激活 App）
+  - **M3-B 会话管理** ✅（搜索/等你置顶/收藏+重命名 F7/相对时间 F10/复制 ID+恢复命令 F11；SessionMeta 持久化）
+  - **M3-A2 外观/体验** ✅（首选项即时生效、状态圆点自定义色 F3、通知横幅/声音分开 F1、首选项四分页 F4、内置宠物名 F5、面板页脚瘦身）。F9 主动不改 ⌥⌘S（footgun）。
+  - **M3-C 多 Agent 框架** ✅（TimestampDialect epoch-ms + AgentManifest + resumeArgv 红队）。**接入目标 Qoder / Qoder Work / Qoder Cli 待逐一核实**（不臆造）。
+  - **M3-D AI 总结** ✅核心（LocalSummarizer 免费默认 + ProcessRunner 缝 + SummarizerService 严禁 --resume）；UI 待独立评审后接。
+  - 遗留：自定义宠物命名持久化、Qoder 真实接入、M3-D 摘要 UI。详见 `docs/superpowers/specs/2026-06-28-apet-m3-design.md` 与 `.superpowers/sdd/` 报告。
 - **M4 生态**（公开契约 + 第三方样例）。详见 README 与 spec。
