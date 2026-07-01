@@ -51,16 +51,25 @@ public final class TerminalFocusService {
     // MARK: - Private: activate-only
 
     private func activateBundle(_ bundleId: String) {
-        // 优先激活已运行实例
-        if let app = NSWorkspace.shared.runningApplications
-            .first(where: { $0.bundleIdentifier == bundleId }) {
-            app.activate(options: .activateIgnoringOtherApps)
-            return
+        // NSWorkspace/AppKit 激活必须在主线程（focus() 常从 Task.detached 调用）。
+        // 用 openApplication（等价于 `open -b`，Launch Services 请求）而非
+        // NSRunningApplication.activate——后者在后台线程/ macOS 14+ 跨应用激活下常静默失败。
+        let activate = {
+            if let url = NSWorkspace.shared.urlForApplication(withBundleIdentifier: bundleId) {
+                let cfg = NSWorkspace.OpenConfiguration()
+                cfg.activates = true
+                NSWorkspace.shared.openApplication(at: url, configuration: cfg, completionHandler: nil)
+                return
+            }
+            // 兜底：拿不到 URL 时直接激活运行实例。
+            NSWorkspace.shared.runningApplications
+                .first { $0.bundleIdentifier == bundleId }?
+                .activate(options: [.activateIgnoringOtherApps])
         }
-        // 未运行 → 尝试启动
-        if let url = NSWorkspace.shared.urlForApplication(withBundleIdentifier: bundleId) {
-            let cfg = NSWorkspace.OpenConfiguration()
-            NSWorkspace.shared.openApplication(at: url, configuration: cfg, completionHandler: nil)
+        if Thread.isMainThread {
+            activate()
+        } else {
+            DispatchQueue.main.async(execute: activate)
         }
     }
 
