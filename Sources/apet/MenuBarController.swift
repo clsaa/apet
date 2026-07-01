@@ -7,7 +7,9 @@ import AppShellKit
 
 /// Wraps ``SessionPanel`` with action footer buttons. Private to this file.
 private struct PanelRootView: View {
-    let rows: [SessionRowModel]
+    let sessions: [Session]
+    let now: Double
+    let palette: DotPalette
     let petVisible: Bool
     /// Fix 6: whether the hook is already installed for any data root.
     /// When `true`, the panel surfaces "已启用" instead of the call-to-action button.
@@ -15,6 +17,10 @@ private struct PanelRootView: View {
     /// 面板顶部快捷键提示，如 "⌥⌘P 打开/关闭"。
     let hotkeyHint: String?
     let onTap: (String) -> Void
+    let onToggleFavorite: (String) -> Void
+    let onRename: (String) -> Void
+    let onCopyId: (String) -> Void
+    let onCopyResume: (String) -> Void
     let onTogglePet: () -> Void
     let onOpenPreferences: () -> Void
     let onQuit: () -> Void
@@ -22,96 +28,67 @@ private struct PanelRootView: View {
 
     /// 是否存在未读 waiting 会话——仅此时显示「全部已读」（产品评审 MAJOR-1）。
     private var hasUnread: Bool {
-        rows.contains { $0.dot == .doneWaiting || $0.dot == .attention }
+        sessions.contains { s in
+            if case .waiting = s.state, !s.acknowledged { return true }
+            return false
+        }
     }
 
     var body: some View {
         VStack(spacing: 0) {
-            SessionPanel(rows: rows, onTap: onTap, hotkeyHint: hotkeyHint)
+            SessionPanel(sessions: sessions, now: now, onTap: onTap,
+                         onToggleFavorite: onToggleFavorite, onRename: onRename,
+                         onCopyId: onCopyId, onCopyResume: onCopyResume,
+                         hotkeyHint: hotkeyHint, palette: palette)
             Divider()
 
-            // 全部标记已读（仅在确有未读时显示）
-            if hasUnread {
-                Button {
-                    onAcknowledgeAll()
-                } label: {
-                    Label("全部标记已读", systemImage: "checkmark.circle")
+            // 未装 hook 时的 slim 开启入口；已装则完全隐藏（省空间，去掉冗余「已启用」状态行）。
+            if !hookInstalled {
+                Button { onOpenPreferences() } label: {
+                    Label("开启精确跳转/通知…", systemImage: "bolt.badge.a")
+                        .font(.caption)
                         .frame(maxWidth: .infinity)
-                        .padding(.vertical, 3)
+                        .padding(.vertical, 4)
                 }
                 .buttonStyle(.plain)
-                .foregroundStyle(.secondary)
-                .padding(.horizontal, 10)
-                .padding(.top, 6)
+                .foregroundStyle(Color.accentColor.opacity(0.75))
+                Divider()
             }
 
-            // 隐藏/显示宠物
-            Button {
-                onTogglePet()
-            } label: {
-                Text(petVisible ? "隐藏宠物" : "显示宠物")
-                    .frame(maxWidth: .infinity)
-                    .padding(.vertical, 3)
-            }
-            .buttonStyle(.plain)
-            .foregroundStyle(.secondary)
-            .padding(.horizontal, 10)
-            .padding(.top, 6)
-            .padding(.bottom, 2)
-
-            // 首选项…（齿轮入口）
-            Button {
-                onOpenPreferences()
-            } label: {
-                Label("首选项…", systemImage: "gearshape")
-                    .frame(maxWidth: .infinity)
-                    .padding(.vertical, 3)
-            }
-            .buttonStyle(.plain)
-            .foregroundStyle(.secondary)
-            .padding(.horizontal, 10)
-            .padding(.vertical, 2)
-
-            // Part D / Fix 6: 常驻增强入口。
-            // hook 已装 → 显示"已启用"状态（不再引导）；未装 → 显示可点击的开启入口。
-            if hookInstalled {
-                Label("精确跳转/通知：已启用", systemImage: "bolt.badge.a.fill")
-                    .frame(maxWidth: .infinity)
-                    .padding(.vertical, 2)
-                    .foregroundStyle(Color.green.opacity(0.7))
-                    .font(.caption)
-                    .padding(.horizontal, 10)
-                    .padding(.vertical, 2)
-            } else {
-                Button {
-                    onOpenPreferences()
-                } label: {
-                    Label("开启精确跳转/通知…", systemImage: "bolt.badge.a.fill")
-                        .frame(maxWidth: .infinity)
-                        .padding(.vertical, 2)
+            // 紧凑操作行：图标按钮，一行搞定，不再挤占列表空间。
+            HStack(spacing: 0) {
+                if hasUnread {
+                    PanelFooterButton(icon: "checkmark.circle", label: "已读", action: onAcknowledgeAll)
                 }
-                .buttonStyle(.plain)
-                .foregroundStyle(Color.accentColor.opacity(0.6))
-                .font(.caption)
-                .padding(.horizontal, 10)
-                .padding(.vertical, 2)
+                PanelFooterButton(icon: petVisible ? "eye.slash" : "eye",
+                                  label: petVisible ? "隐藏" : "显示", action: onTogglePet)
+                PanelFooterButton(icon: "gearshape", label: "首选项", action: onOpenPreferences)
+                PanelFooterButton(icon: "power", label: "退出", action: onQuit)
             }
-
-            // 退出
-            Button {
-                onQuit()
-            } label: {
-                Text("退出 AgentPet")
-                    .frame(maxWidth: .infinity)
-                    .padding(.vertical, 3)
-            }
-            .buttonStyle(.plain)
-            .foregroundStyle(.secondary)
-            .padding(.horizontal, 10)
-            .padding(.top, 2)
-            .padding(.bottom, 6)
+            .padding(.horizontal, 6)
+            .padding(.vertical, 4)
         }
         .frame(width: 320)
+    }
+}
+
+/// 面板底部紧凑图标按钮（图标 + 极小文字，等宽平铺）。菜单栏与宠物 popover 共用。
+struct PanelFooterButton: View {
+    let icon: String
+    let label: String
+    let action: () -> Void
+    var body: some View {
+        Button(action: action) {
+            VStack(spacing: 2) {
+                Image(systemName: icon).font(.system(size: 13))
+                Text(label).font(.system(size: 9))
+            }
+            .frame(maxWidth: .infinity)
+            .padding(.vertical, 4)
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .foregroundStyle(.secondary)
     }
 }
 
@@ -144,6 +121,12 @@ final class MenuBarController: NSObject {
     var onAcknowledge: ((SessionKey) -> Void)?
     /// 面板「全部标记已读」回调，由 AppCoordinator 注入 store.acknowledgeAll。
     var onAcknowledgeAll: (() -> Void)?
+    /// F7：收藏/取消收藏，由 AppCoordinator 注入（写 SessionMetaStore + 刷新）。
+    var onToggleFavorite: ((SessionKey) -> Void)?
+    /// F7：重命名（nil=恢复默认名），由 AppCoordinator 注入。
+    var onRenameSession: ((SessionKey, String?) -> Void)?
+    /// F3：状态圆点配色，由 AppCoordinator 从 config 注入。
+    var dotPalette: DotPalette = .system
     /// 面板顶部快捷键提示字符串，如 "⌥⌘P 打开/关闭"。nil 表示不显示 header。
     var hotkeyHint: String?
     /// 状态栏样式（F2）：`"counts"`（🟢🔴🟡⚪+数字）| `"pawprint"`（单图标+主色+总数）。
@@ -248,21 +231,27 @@ final class MenuBarController: NSObject {
 
     // MARK: - Private: popover
 
-    /// Build the SwiftUI root view with current rows and callbacks.
+    /// Build the SwiftUI root view with current sessions and callbacks.
     private func makePanelRootView() -> PanelRootView {
-        let rows = currentSessions.map(SessionRowMapper.make)
         return PanelRootView(
-            rows: rows,
+            sessions: currentSessions,
+            now: Date().timeIntervalSince1970,
+            palette: dotPalette,
             petVisible: petVisibilityProvider?() ?? false,
             hookInstalled: hookInstalledProvider?() ?? false,
             hotkeyHint: hotkeyHint,
             onTap: { [weak self] id in self?.handleSessionTap(id: id) },
+            onToggleFavorite: { [weak self] id in self?.handleToggleFavorite(id: id) },
+            onRename: { [weak self] id in self?.handleRename(id: id) },
+            onCopyId: { [weak self] id in self?.handleCopyId(id: id) },
+            onCopyResume: { [weak self] id in self?.handleCopyResume(id: id) },
             onTogglePet: { [weak self] in
                 self?.onTogglePet?()
-                // Re-render the panel so the button label flips immediately.
                 self?.panelHosting?.rootView = self?.makePanelRootView() ?? PanelRootView(
-                    rows: [], petVisible: false, hookInstalled: false, hotkeyHint: nil,
-                    onTap: { _ in }, onTogglePet: {}, onOpenPreferences: {}, onQuit: {}, onAcknowledgeAll: {}
+                    sessions: [], now: 0, palette: .system, petVisible: false, hookInstalled: false, hotkeyHint: nil,
+                    onTap: { _ in }, onToggleFavorite: { _ in }, onRename: { _ in },
+                    onCopyId: { _ in }, onCopyResume: { _ in },
+                    onTogglePet: {}, onOpenPreferences: {}, onQuit: {}, onAcknowledgeAll: {}
                 )
             },
             onOpenPreferences: { [weak self] in
@@ -272,6 +261,32 @@ final class MenuBarController: NSObject {
             onQuit: { NSApplication.shared.terminate(nil) },
             onAcknowledgeAll: { [weak self] in self?.onAcknowledgeAll?() }
         )
+    }
+
+    // MARK: - Private: F7/F11 row actions
+
+    private func sessionForId(_ id: String) -> Session? {
+        currentSessions.first { "\($0.key.agent)|\($0.key.root)|\($0.key.sessionId)" == id }
+    }
+
+    private func handleToggleFavorite(id: String) {
+        guard let s = sessionForId(id) else { return }
+        onToggleFavorite?(s.key)
+    }
+
+    private func handleRename(id: String) {
+        guard let s = sessionForId(id) else { return }
+        if case .set(let name) = SessionRowActions.promptRename(s) {
+            onRenameSession?(s.key, name)
+        }
+    }
+
+    private func handleCopyId(id: String) {
+        sessionForId(id).map(SessionRowActions.copyId)
+    }
+
+    private func handleCopyResume(id: String) {
+        sessionForId(id).map(SessionRowActions.copyResume)
     }
 
     /// 以编程方式打开/切换会话面板 popover（供全局热键在 menuBarOnly 模式下调用）。

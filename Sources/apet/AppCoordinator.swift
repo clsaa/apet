@@ -26,6 +26,9 @@ final class AppCoordinator {
     // MARK: - State
 
     private var store: SessionStore?
+    /// F7：会话元数据持久化（收藏/自定义名）+ 进程内镜像。
+    private var sessionMetaStore: SessionMetaStore?
+    private var sessionMetas: [String: SessionMeta] = [:]
     private var ingestor: NDJSONIngestor?
     private let reader = EventTailReader()
     private var checkpoint: Checkpoint?
@@ -92,6 +95,14 @@ final class AppCoordinator {
         let sessionStore = SessionStore()
         let ingestor = NDJSONIngestor(store: sessionStore)
         self.store = sessionStore
+
+        // F7：会话元数据（收藏/自定义名）持久化，落 Application Support。
+        let metaAppSupport = (NSHomeDirectory() as NSString)
+            .appendingPathComponent("Library/Application Support/AgentPet")
+        let metaURL = URL(fileURLWithPath: (metaAppSupport as NSString).appendingPathComponent("session-meta.json"))
+        let metaStore = SessionMetaStore(url: metaURL)
+        self.sessionMetaStore = metaStore
+        self.sessionMetas = metaStore.load()
         self.ingestor = ingestor
 
         // ─── 2a. Setup JSONL directory watchers（多 root 并行，M2-B）──────────────
@@ -152,6 +163,11 @@ final class AppCoordinator {
                     startMin: self?.config.dndStartMin  ?? 0,
                     endMin:   self?.config.dndEndMin    ?? 0
                 )
+            },
+            // F1：横幅/声音开关，每次读最新 config（即时生效）。
+            channelProvider: { [weak self] in
+                (banner: self?.config.notifyBannerEnabled ?? true,
+                 sound:  self?.config.notifySoundEnabled  ?? true)
             },
             // B1：点击通知 → 标记已读（红→黄）。store 变更经既有 changeHandler 刷新面板/桌宠。
             onAcknowledge: { [weak self] key in self?.store?.acknowledge(key: key) }
@@ -235,6 +251,20 @@ final class AppCoordinator {
             mb.onAcknowledgeAll = ackAll
             pw.onAcknowledgeAll = ackAll
 
+            // F7：收藏（按当前态取反）+ 重命名，写 SessionMetaStore 后立即刷新。
+            let toggleFav: (SessionKey) -> Void = { [weak self] key in
+                guard let self else { return }
+                let cur = self.sessionMetas[SessionMetaMerger.metaKey(key)]?.favorite ?? false
+                self.updateMeta(key) { $0.favorite = !cur }
+            }
+            let rename: (SessionKey, String?) -> Void = { [weak self] key, name in
+                self?.updateMeta(key) { $0.customName = name }
+            }
+            mb.onToggleFavorite = toggleFav
+            pw.onToggleFavorite = toggleFav
+            mb.onRenameSession = rename
+            pw.onRenameSession = rename
+
             // 面板顶部快捷键提示
             let hint = config.panelHotKey.displayString + " 打开/关闭"
             mb.hotkeyHint = hint
@@ -242,6 +272,11 @@ final class AppCoordinator {
 
             // 状态栏样式（F2）：counts=彩色计数 / pawprint=单图标。
             mb.menuBarStyle = config.menuBarStyle
+
+            // F3：状态圆点配色
+            let palette = DotPalette(from: config.stateColors)
+            mb.dotPalette = palette
+            pw.dotPalette = palette
 
             menuBar = mb
             petWindow = pw
@@ -277,7 +312,7 @@ final class AppCoordinator {
             let summary = store.summary()
             let line = "[change] \(changes) replay=\(isReplay) summary=\(summary)\n"
             self.appendToLog(line)
-            let sessions = store.activeSessions()
+            let sessions = self.applyMetas(store.activeSessions())
             self.menuBar?.update(summary: summary, sessions: sessions)
             self.petWindow?.update(summary: summary, sessions: sessions)
         }
@@ -321,7 +356,7 @@ final class AppCoordinator {
             store.reap(now: now,
                        endedAfter: self.config.endedAfterSec,
                        waitingEndedAfter: self.config.waitingEndedAfterSec)
-            let timerSessions = store.activeSessions()
+            let timerSessions = self.applyMetas(store.activeSessions())
             self.menuBar?.update(summary: store.summary(), sessions: timerSessions)
             self.petWindow?.update(summary: store.summary(), sessions: timerSessions)
         }
@@ -403,11 +438,44 @@ final class AppCoordinator {
         menuBar?.hotkeyHint = hint
         petWindow?.hotkeyHint = hint
 
-        // 状态栏样式（F2）立即生效：更新样式并用当前 summary 重绘。
+        // 状态栏样式（F2）+ 状态圆点配色（F3）立即生效：更新后用当前 summary 重绘。
+        let palette = DotPalette(from: newConfig.stateColors)
+        menuBar?.dotPalette = palette
+        petWindow?.dotPalette = palette
         if let store = store {
             menuBar?.menuBarStyle = newConfig.menuBarStyle
-            menuBar?.update(summary: store.summary(), sessions: store.activeSessions())
+            let sessions = applyMetas(store.activeSessions())
+            menuBar?.update(summary: store.summary(), sessions: sessions)
+            petWindow?.update(summary: store.summary(), sessions: sessions)
         }
+    }
+
+    // MARK: - Private: F7 会话元数据
+
+    /// 把持久化的 meta（收藏/自定义名）镜像进会话列表，供 UI 渲染。
+    private func applyMetas(_ sessions: [Session]) -> [Session] {
+        guard !sessionMetas.isEmpty else { return sessions }
+        return sessions.map { s in
+            SessionMetaMerger.apply(into: s, meta: sessionMetas[SessionMetaMerger.metaKey(s.key)])
+        }
+    }
+
+    /// 显式用户操作触发的 meta 变更：改内存 + 落盘 + 立即刷新 UI。空 meta 一并 GC。
+    private func updateMeta(_ key: SessionKey, _ mutate: (inout SessionMeta) -> Void) {
+        let mk = SessionMetaMerger.metaKey(key)
+        var meta = sessionMetas[mk] ?? SessionMeta()
+        mutate(&meta)
+        if meta == SessionMeta() { sessionMetas[mk] = nil } else { sessionMetas[mk] = meta }
+        try? sessionMetaStore?.save(sessionMetas)
+        refreshSessionUI()
+    }
+
+    /// 用当前 store 快照 + meta 重绘菜单栏与桌宠面板。
+    private func refreshSessionUI() {
+        guard let store = store else { return }
+        let sessions = applyMetas(store.activeSessions())
+        menuBar?.update(summary: store.summary(), sessions: sessions)
+        petWindow?.update(summary: store.summary(), sessions: sessions)
     }
 
     // MARK: - Private: helpers

@@ -18,14 +18,24 @@ public struct Session: Equatable {
     /// "已读"标记：用户从面板点开一个 waiting（停下等你/完成）会话后置 true，圆点由红变黄。
     /// 会话重新变 running 时自动清除（见 SessionStore.applyInner）。仅进程内态，不进 wire。
     public var acknowledged: Bool
+    /// 收藏（F7）。运行时镜像，真值在 SessionMeta，经 SessionMetaMerger 注入。
+    public var favorite: Bool
+    /// 用户自定义显示名（F7）。运行时镜像，真值在 SessionMeta。
+    public var customName: String?
+    /// 创建时间（F10，Unix 秒）。IO 缝注入首次见到的时间；与 SessionMeta.firstSeenAt 取 min。
+    public var createdAt: Double?
 
     public init(key: SessionKey, state: SessionState, cwd: String? = nil, title: String? = nil,
                 terminal: TerminalRef? = nil, lastSeq: Int, lastActiveAt: Double,
-                source: SessionSource = .hook, acknowledged: Bool = false) {
+                source: SessionSource = .hook, acknowledged: Bool = false,
+                favorite: Bool = false, customName: String? = nil, createdAt: Double? = nil) {
         self.key = key; self.state = state; self.cwd = cwd; self.title = title
         self.terminal = terminal; self.lastSeq = lastSeq; self.lastActiveAt = lastActiveAt
         self.source = source
         self.acknowledged = acknowledged
+        self.favorite = favorite
+        self.customName = customName
+        self.createdAt = createdAt
     }
 
     /// 多 profile 区分标签：从 root 派生。`~/.claude-profiles/work` → "work"；普通 `~/.claude` → nil。

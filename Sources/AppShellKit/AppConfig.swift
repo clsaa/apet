@@ -40,6 +40,27 @@ public struct DataRoot: Codable, Equatable, Identifiable {
 /// User-persisted application configuration.
 ///
 /// Stored as JSON at `~/Library/Application Support/AgentPet/config.json` via ``ConfigStore``.
+/// 5 状态圆点的自定义颜色（hex，nil=用内置默认）。绿=running 橙=attention 红=doneWaiting 黄=read 灰=stale。
+public struct StateColorConfig: Codable, Equatable {
+    public var running: String?
+    public var attention: String?
+    public var doneWaiting: String?
+    public var read: String?
+    public var stale: String?
+
+    public init(running: String? = nil, attention: String? = nil, doneWaiting: String? = nil,
+                read: String? = nil, stale: String? = nil) {
+        self.running = running; self.attention = attention; self.doneWaiting = doneWaiting
+        self.read = read; self.stale = stale
+    }
+
+    /// 内置默认（系统语义色）。
+    public static let defaults = StateColorConfig(
+        running: "#34C759", attention: "#FF9500", doneWaiting: "#FF3B30",
+        read: "#FFCC00", stale: "#8E8E93"
+    )
+}
+
 public struct AppConfig: Codable, Equatable {
     /// List of Claude profile directories to monitor.
     public var dataRoots: [DataRoot]
@@ -69,12 +90,19 @@ public struct AppConfig: Codable, Equatable {
     public var excludedRoots: [String]
     /// 状态栏样式：`"counts"`（彩色计数 🟢🔴🟡⚪+数字）| `"pawprint"`（单 pawprint 图标+主色+总数）。
     public var menuBarStyle: String
+    /// 5 状态圆点自定义颜色（F3）。缺省用 `StateColorConfig.defaults`。
+    public var stateColors: StateColorConfig
+    /// F1：通知横幅开关（关→完全不弹）。默认 true。
+    public var notifyBannerEnabled: Bool
+    /// F1：通知声音开关（关→静默横幅）。默认 true。
+    public var notifySoundEnabled: Bool
 
     // CodingKeys：含全部字段，供自定义 decoder 和 synthesized encoder 共同使用。
     private enum CodingKeys: String, CodingKey {
         case dataRoots, displayMode, notifyMode, staleAfterSec, endedAfterSec,
              waitingEndedAfterSec, selectedPet, readGrayAfterSec, panelHotKey,
-             dndEnabled, dndStartMin, dndEndMin, excludedRoots, menuBarStyle
+             dndEnabled, dndStartMin, dndEndMin, excludedRoots, menuBarStyle, stateColors,
+             notifyBannerEnabled, notifySoundEnabled
     }
 
     /// 自定义解码：旧版 config.json 缺少可选字段时用默认值，不丢失其他已有设置。
@@ -100,6 +128,9 @@ public struct AppConfig: Codable, Equatable {
         dndEndMin            = try c.decodeIfPresent(Int.self,           forKey: .dndEndMin)     ?? 0
         excludedRoots        = try c.decodeIfPresent([String].self,      forKey: .excludedRoots) ?? []
         menuBarStyle         = try c.decodeIfPresent(String.self,        forKey: .menuBarStyle)  ?? "counts"
+        stateColors          = try c.decodeIfPresent(StateColorConfig.self, forKey: .stateColors) ?? .defaults
+        notifyBannerEnabled  = try c.decodeIfPresent(Bool.self, forKey: .notifyBannerEnabled) ?? true
+        notifySoundEnabled   = try c.decodeIfPresent(Bool.self, forKey: .notifySoundEnabled)  ?? true
     }
 
     public init(
@@ -116,7 +147,10 @@ public struct AppConfig: Codable, Equatable {
         dndStartMin: Int = 0,
         dndEndMin: Int = 0,
         excludedRoots: [String] = [],
-        menuBarStyle: String = "counts"
+        menuBarStyle: String = "counts",
+        stateColors: StateColorConfig = .defaults,
+        notifyBannerEnabled: Bool = true,
+        notifySoundEnabled: Bool = true
     ) {
         self.dataRoots = dataRoots
         self.displayMode = displayMode
@@ -132,6 +166,9 @@ public struct AppConfig: Codable, Equatable {
         self.dndEndMin = dndEndMin
         self.excludedRoots = excludedRoots
         self.menuBarStyle = menuBarStyle
+        self.stateColors = stateColors
+        self.notifyBannerEnabled = notifyBannerEnabled
+        self.notifySoundEnabled = notifySoundEnabled
     }
 
     /// Factory that produces the out-of-the-box defaults.

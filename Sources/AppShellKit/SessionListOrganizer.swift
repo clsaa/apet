@@ -1,0 +1,116 @@
+import AgentPetCore
+
+// MARK: - Models
+
+/// 会话列表分组维度。
+public enum GroupDimension: Equatable { case status, date, agent }
+
+public struct SessionGroup: Equatable {
+    public let title: String
+    public let rows: [SessionRowModel]
+    public init(title: String, rows: [SessionRowModel]) {
+        self.title = title
+        self.rows = rows
+    }
+}
+
+/// 组织后的面板数据：`pinned`=未读「等你」置顶高亮区；`groups`=其余按维度分组。
+public struct OrganizedList: Equatable {
+    public let pinned: [SessionRowModel]
+    public let groups: [SessionGroup]
+    public init(pinned: [SessionRowModel], groups: [SessionGroup]) {
+        self.pinned = pinned
+        self.groups = groups
+    }
+}
+
+// MARK: - SessionListOrganizer
+
+/// 纯函数：搜索过滤 + 置顶未读「等你」+ 按维度分组。`filter` 一等入参、`now` 注入。
+public enum SessionListOrganizer {
+
+    public static func organize(
+        sessions: [Session],
+        dimension: GroupDimension,
+        filter: String,
+        now: Double
+    ) -> OrganizedList {
+        // 1) 搜索过滤（大小写不敏感 contains，匹配 title / cwd / sessionId）。
+        let needle = filter.trimmingCharacters(in: .whitespaces).lowercased()
+        let matched = sessions.filter { needle.isEmpty || matches($0, needle) }
+
+        // 2) 置顶：未读 waiting（红/橙），其余进分组。保留输入顺序（seq 序）。
+        var pinned: [SessionRowModel] = []
+        var rest: [Session] = []
+        for s in matched {
+            if isUnreadWaiting(s) { pinned.append(SessionRowMapper.make(s, now: now)) }
+            else { rest.append(s) }
+        }
+
+        // 3) 分组。
+        let groups = group(rest, by: dimension, now: now)
+        return OrganizedList(pinned: pinned, groups: groups)
+    }
+
+    // MARK: - Private
+
+    private static func matches(_ s: Session, _ needle: String) -> Bool {
+        if let t = s.title, t.lowercased().contains(needle) { return true }
+        if let c = s.cwd, c.lowercased().contains(needle) { return true }
+        if s.key.sessionId.lowercased().contains(needle) { return true }
+        return false
+    }
+
+    private static func isUnreadWaiting(_ s: Session) -> Bool {
+        if case .waiting = s.state, !s.acknowledged { return true }
+        return false
+    }
+
+    private static func group(_ sessions: [Session], by dimension: GroupDimension, now: Double) -> [SessionGroup] {
+        switch dimension {
+        case .status: return groupByStatus(sessions, now: now)
+        case .agent:  return groupByKey(sessions, now: now) { $0.key.agent }
+        case .date:   return groupByDate(sessions, now: now)
+        }
+    }
+
+    /// 状态维度固定顺序：进行中 → 已读 → 超时（置顶已取走未读 waiting）。
+    private static func groupByStatus(_ sessions: [Session], now: Double) -> [SessionGroup] {
+        let order: [(String, (Session) -> Bool)] = [
+            ("进行中", { if case .running = $0.state { return true }; return false }),
+            ("已读",   { if case .waiting = $0.state, $0.acknowledged { return true }; return false }),
+            ("超时",   { if case .stale = $0.state { return true }; return false }),
+        ]
+        return order.compactMap { title, pred in
+            let rows = sessions.filter(pred).map { SessionRowMapper.make($0, now: now) }
+            return rows.isEmpty ? nil : SessionGroup(title: title, rows: rows)
+        }
+    }
+
+    /// 按 key 分组，保留首次出现顺序。
+    private static func groupByKey(_ sessions: [Session], now: Double, _ key: (Session) -> String) -> [SessionGroup] {
+        var order: [String] = []
+        var buckets: [String: [SessionRowModel]] = [:]
+        for s in sessions {
+            let k = key(s)
+            if buckets[k] == nil { order.append(k) }
+            buckets[k, default: []].append(SessionRowMapper.make(s, now: now))
+        }
+        return order.map { SessionGroup(title: $0, rows: buckets[$0] ?? []) }
+    }
+
+    /// 日期维度：以 **UTC 日**（floor(ts/86400)）比较，确定性、可注入 now、便于跨午夜测试。
+    private static func groupByDate(_ sessions: [Session], now: Double) -> [SessionGroup] {
+        let nowDay = Int(now / 86_400)
+        let order: [(String, (Int) -> Bool)] = [
+            ("今天", { $0 == nowDay }),
+            ("昨天", { $0 == nowDay - 1 }),
+            ("本周", { $0 < nowDay - 1 && $0 > nowDay - 7 }),
+            ("更早", { $0 <= nowDay - 7 }),
+        ]
+        return order.compactMap { title, pred in
+            let rows = sessions.filter { pred(Int($0.lastActiveAt / 86_400)) }.map { SessionRowMapper.make($0, now: now) }
+            return rows.isEmpty ? nil : SessionGroup(title: title, rows: rows)
+        }
+    }
+}

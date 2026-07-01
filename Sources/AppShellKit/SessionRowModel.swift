@@ -37,6 +37,14 @@ public struct SessionRowModel: Equatable, Identifiable {
     /// state == .waiting). The session is paused/stopped but the terminal info comes from
     /// file scanning rather than a live hook event — so it may be stale.
     public let isInferred: Bool
+    /// 收藏（F7）。
+    public let favorite: Bool
+    /// 会话原始 sessionId（供复制 ID / 恢复命令）。
+    public let sessionId: String
+    /// 会话所属 agent（供按 agent 渲染恢复命令）。
+    public let agent: String
+    /// 相对时间文案（F10，如 "3 分钟前"）。由组织层注入 now 后填充；未注入为 ""。
+    public let relativeText: String
 
     public init(
         id: String,
@@ -46,7 +54,11 @@ public struct SessionRowModel: Equatable, Identifiable {
         dot: Dot,
         activateOnly: Bool,
         needsManualTabHint: Bool = false,
-        isInferred: Bool = false
+        isInferred: Bool = false,
+        favorite: Bool = false,
+        sessionId: String = "",
+        agent: String = "",
+        relativeText: String = ""
     ) {
         self.id = id
         self.title = title
@@ -56,6 +68,10 @@ public struct SessionRowModel: Equatable, Identifiable {
         self.activateOnly = activateOnly
         self.needsManualTabHint = needsManualTabHint
         self.isInferred = isInferred
+        self.favorite = favorite
+        self.sessionId = sessionId
+        self.agent = agent
+        self.relativeText = relativeText
     }
 }
 
@@ -63,15 +79,18 @@ public struct SessionRowModel: Equatable, Identifiable {
 
 /// Pure mapping from `Session` → `SessionRowModel`.
 public enum SessionRowMapper {
-    public static func make(_ session: Session) -> SessionRowModel {
+    /// `now` 注入时填充 `relativeText`（F10 相对时间）；nil 时留空。
+    public static func make(_ session: Session, now: Double? = nil) -> SessionRowModel {
         let key = session.key
 
         // Stable ID: "agent|root|sessionId"
         let id = "\(key.agent)|\(key.root)|\(key.sessionId)"
 
-        // Title fallback chain: explicit title → cwd basename → sessionId
+        // Title fallback chain: 自定义名(F7) → explicit title → cwd basename → sessionId
         let title: String
-        if let t = session.title, !t.isEmpty {
+        if let name = session.customName, !name.isEmpty {
+            title = name
+        } else if let t = session.title, !t.isEmpty {
             title = t
         } else if let cwd = session.cwd, !cwd.isEmpty {
             title = URL(fileURLWithPath: cwd).lastPathComponent
@@ -114,6 +133,8 @@ public enum SessionRowMapper {
         if case .waiting = session.state { isWaiting = true } else { isWaiting = false }
         let isInferred = session.source == .jsonl && isWaiting
 
+        let relativeText = now.map { RelativeTime.short(from: session.lastActiveAt, now: $0) } ?? ""
+
         return SessionRowModel(
             id: id,
             title: title,
@@ -122,7 +143,11 @@ public enum SessionRowMapper {
             dot: dot,
             activateOnly: activateOnly,
             needsManualTabHint: needsManualTabHint,
-            isInferred: isInferred
+            isInferred: isInferred,
+            favorite: session.favorite,
+            sessionId: key.sessionId,
+            agent: key.agent,
+            relativeText: relativeText
         )
     }
 }

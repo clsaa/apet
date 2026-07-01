@@ -39,6 +39,12 @@ final class PetWindowController: NSObject {
     var onOpenPreferences: (() -> Void)?
     /// 面板「全部标记已读」回调，由 AppCoordinator 注入 store.acknowledgeAll。
     var onAcknowledgeAll: (() -> Void)?
+    /// F7：收藏/取消收藏，由 AppCoordinator 注入（写 SessionMetaStore + 刷新）。
+    var onToggleFavorite: ((SessionKey) -> Void)?
+    /// F7：重命名（nil=恢复默认名），由 AppCoordinator 注入。
+    var onRenameSession: ((SessionKey, String?) -> Void)?
+    /// F3：状态圆点配色，由 AppCoordinator 从 config 注入。
+    var dotPalette: DotPalette = .system
 
     // MARK: - Dependencies
 
@@ -95,7 +101,7 @@ final class PetWindowController: NSObject {
             // Nothing changed — still update the popover if it is open.
             if let popover, popover.isShown,
                let panelVC = popover.contentViewController as? SessionPanelHostController {
-                panelVC.update(rows: sessions.map(SessionRowMapper.make))
+                panelVC.update(sessions: sessions)
             }
             return
         }
@@ -119,7 +125,7 @@ final class PetWindowController: NSObject {
         // Update popover session list in-place when visible
         if let popover, popover.isShown,
            let panelVC = popover.contentViewController as? SessionPanelHostController {
-            panelVC.update(rows: sessions.map(SessionRowMapper.make))
+            panelVC.update(sessions: sessions)
         }
     }
 
@@ -334,19 +340,23 @@ final class PetWindowController: NSObject {
         w.makeKeyAndOrderFront(nil)
         w.orderFrontRegardless()
 
-        let rows = currentSessions.map(SessionRowMapper.make)
         let panelVC = SessionPanelHostController(
-            rows: rows,
+            sessions: currentSessions,
+            palette: dotPalette,
             hotkeyHint: hotkeyHint,
             onTap: { [weak self] id in self?.handleSessionTap(id: id) },
+            onToggleFavorite: { [weak self] id in self?.handleToggleFavorite(id: id) },
+            onRename: { [weak self] id in self?.handleRename(id: id) },
+            onCopyId: { [weak self] id in self?.handleCopyId(id: id) },
+            onCopyResume: { [weak self] id in self?.handleCopyResume(id: id) },
             onOpenPreferences: { [weak self] in self?.onOpenPreferences?() },
             onAcknowledgeAll: { [weak self] in self?.onAcknowledgeAll?() }
         )
         let p = NSPopover()
         p.contentViewController = panelVC
         p.behavior = .transient
-        // 顶部快捷键提示约占 28px；底部页脚现含「全部已读」「首选项」「退出」三按钮(约 110px)，整体加高避免列表被截断。
-        p.contentSize = NSSize(width: 320, height: hotkeyHint != nil ? 512 : 484)
+        // 顶部快捷键提示约 28px + 搜索框 ~40px + 列表 + 紧凑页脚(一行图标 ~44px)。页脚瘦身后整体降高。
+        p.contentSize = NSSize(width: 320, height: hotkeyHint != nil ? 452 : 424)
         self.popover = p
 
         // Anchor to center of content view; let NSPopover pick the best edge
@@ -372,6 +382,21 @@ final class PetWindowController: NSObject {
         }
         attemptShow(1)
     }
+
+    // MARK: - F7/F11 row actions
+
+    private func sessionForId(_ id: String) -> Session? {
+        currentSessions.first { "\($0.key.agent)|\($0.key.root)|\($0.key.sessionId)" == id }
+    }
+    private func handleToggleFavorite(id: String) {
+        sessionForId(id).map { onToggleFavorite?($0.key) }
+    }
+    private func handleRename(id: String) {
+        guard let s = sessionForId(id) else { return }
+        if case .set(let name) = SessionRowActions.promptRename(s) { onRenameSession?(s.key, name) }
+    }
+    private func handleCopyId(id: String) { sessionForId(id).map(SessionRowActions.copyId) }
+    private func handleCopyResume(id: String) { sessionForId(id).map(SessionRowActions.copyResume) }
 }
 
 // MARK: - ApeFloatingWindow
@@ -448,63 +473,44 @@ private final class DragDetectorView: NSView {
 /// 桌宠面板必须自带通往首选项的入口，**不能只依赖状态栏图标**——状态栏图标会被
 /// 刘海 / 菜单栏溢出区藏掉，那样用户就再也打不开首选项（实测踩坑）。
 private struct PetPanelRootView: View {
-    let rows: [SessionRowModel]
+    let sessions: [Session]
+    let now: Double
+    let palette: DotPalette
     let hotkeyHint: String?
     let onTap: (String) -> Void
+    let onToggleFavorite: (String) -> Void
+    let onRename: (String) -> Void
+    let onCopyId: (String) -> Void
+    let onCopyResume: (String) -> Void
     let onOpenPreferences: () -> Void
     let onAcknowledgeAll: () -> Void
 
     /// 是否存在未读 waiting 会话（红/橙点）。仅此时显示「全部已读」，
     /// 避免全绿/全已读时按钮可见却点了无反应（产品评审 MAJOR-1）。
     private var hasUnread: Bool {
-        rows.contains { $0.dot == .doneWaiting || $0.dot == .attention }
+        sessions.contains { s in
+            if case .waiting = s.state, !s.acknowledged { return true }
+            return false
+        }
     }
 
     var body: some View {
         VStack(spacing: 0) {
-            SessionPanel(rows: rows, onTap: onTap, hotkeyHint: hotkeyHint)
+            SessionPanel(sessions: sessions, now: now, onTap: onTap,
+                         onToggleFavorite: onToggleFavorite, onRename: onRename,
+                         onCopyId: onCopyId, onCopyResume: onCopyResume,
+                         hotkeyHint: hotkeyHint, palette: palette)
             Divider()
-            if hasUnread {
-                Button {
-                    onAcknowledgeAll()
-                } label: {
-                    Label("全部标记已读", systemImage: "checkmark.circle")
-                        .frame(maxWidth: .infinity)
-                        .padding(.vertical, 4)
+            // 紧凑操作行：已读(仅未读时)/首选项/退出。退出保留（状态栏被刘海藏住时唯一出口，A1）。
+            HStack(spacing: 0) {
+                if hasUnread {
+                    PanelFooterButton(icon: "checkmark.circle", label: "已读", action: onAcknowledgeAll)
                 }
-                .buttonStyle(.plain)
-                .foregroundStyle(.secondary)
-                .padding(.horizontal, 10)
-                .padding(.top, 4)
+                PanelFooterButton(icon: "gearshape", label: "首选项", action: onOpenPreferences)
+                PanelFooterButton(icon: "power", label: "退出") { NSApplication.shared.terminate(nil) }
             }
-            Button {
-                onOpenPreferences()
-            } label: {
-                Label("首选项…", systemImage: "gearshape")
-                    .frame(maxWidth: .infinity)
-                    .padding(.vertical, 4)
-            }
-            .buttonStyle(.plain)
-            .foregroundStyle(.secondary)
-            .padding(.horizontal, 10)
+            .padding(.horizontal, 6)
             .padding(.vertical, 4)
-
-            // 退出入口——状态栏图标被刘海/溢出区藏住时，这是唯一能退出 App 的地方（A1）。
-            // 与「首选项」用 Divider + 间距 + 更弱配色拉开，降低顺手误点退出整个常驻 App 的概率（产品评审 MAJOR-2）。
-            Divider().padding(.top, 2)
-            Button {
-                NSApplication.shared.terminate(nil)
-            } label: {
-                Label("退出 apet", systemImage: "power")
-                    .font(.system(size: 11))
-                    .frame(maxWidth: .infinity)
-                    .padding(.vertical, 3)
-            }
-            .buttonStyle(.plain)
-            .foregroundStyle(.tertiary)
-            .padding(.horizontal, 10)
-            .padding(.top, 4)
-            .padding(.bottom, 4)
         }
     }
 }
@@ -514,23 +520,38 @@ private struct PetPanelRootView: View {
 /// Minimal NSViewController that wraps ``PetPanelRootView`` in a popover.
 private final class SessionPanelHostController: NSViewController {
 
-    private var rows: [SessionRowModel]
+    private var sessions: [Session]
+    private let palette: DotPalette
     private let hotkeyHint: String?
     private let onTap: (String) -> Void
+    private let onToggleFavorite: (String) -> Void
+    private let onRename: (String) -> Void
+    private let onCopyId: (String) -> Void
+    private let onCopyResume: (String) -> Void
     private let onOpenPreferences: () -> Void
     private let onAcknowledgeAll: () -> Void
     private var hostingController: NSHostingController<PetPanelRootView>?
 
     init(
-        rows: [SessionRowModel],
+        sessions: [Session],
+        palette: DotPalette,
         hotkeyHint: String?,
         onTap: @escaping (String) -> Void,
+        onToggleFavorite: @escaping (String) -> Void,
+        onRename: @escaping (String) -> Void,
+        onCopyId: @escaping (String) -> Void,
+        onCopyResume: @escaping (String) -> Void,
         onOpenPreferences: @escaping () -> Void,
         onAcknowledgeAll: @escaping () -> Void
     ) {
-        self.rows = rows
+        self.sessions = sessions
+        self.palette = palette
         self.hotkeyHint = hotkeyHint
         self.onTap = onTap
+        self.onToggleFavorite = onToggleFavorite
+        self.onRename = onRename
+        self.onCopyId = onCopyId
+        self.onCopyResume = onCopyResume
         self.onOpenPreferences = onOpenPreferences
         self.onAcknowledgeAll = onAcknowledgeAll
         super.init(nibName: nil, bundle: nil)
@@ -539,7 +560,11 @@ private final class SessionPanelHostController: NSViewController {
     required init?(coder: NSCoder) { fatalError("init(coder:) not supported") }
 
     private func makeRoot() -> PetPanelRootView {
-        PetPanelRootView(rows: rows, hotkeyHint: hotkeyHint, onTap: onTap,
+        PetPanelRootView(sessions: sessions, now: Date().timeIntervalSince1970,
+                         palette: palette,
+                         hotkeyHint: hotkeyHint, onTap: onTap,
+                         onToggleFavorite: onToggleFavorite, onRename: onRename,
+                         onCopyId: onCopyId, onCopyResume: onCopyResume,
                          onOpenPreferences: onOpenPreferences, onAcknowledgeAll: onAcknowledgeAll)
     }
 
@@ -551,8 +576,8 @@ private final class SessionPanelHostController: NSViewController {
         hostingController = hc
     }
 
-    func update(rows: [SessionRowModel]) {
-        self.rows = rows
+    func update(sessions: [Session]) {
+        self.sessions = sessions
         hostingController?.rootView = makeRoot()
     }
 }
