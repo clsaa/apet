@@ -321,6 +321,10 @@ struct PreferencesView: View {
     /// Changing this UUID forces `.task(id:)` to re-run `refreshHealthStatus`.
     @State private var healthRefreshID = UUID()
 
+    // 开机自启（A4）——真值在系统（SMAppService），@State 只作 UI 镜像。
+    @State private var launchAtLogin: Bool = false
+    @State private var launchAtLoginError: String?
+
     init(
         config: AppConfig,
         configStore: ConfigStore,
@@ -354,11 +358,14 @@ struct PreferencesView: View {
                 Divider()
                 petSection
                 Divider()
+                startupSection
+                Divider()
                 saveSection
             }
             .padding(20)
         }
         .frame(minWidth: 480, idealWidth: 520, minHeight: 440)
+        .onAppear { refreshLaunchAtLogin() }
         // Part B: load health status on appear; re-run whenever healthRefreshID changes.
         .task(id: healthRefreshID) {
             await refreshHealthStatus()
@@ -420,6 +427,54 @@ struct PreferencesView: View {
                 .disabled(newRootPath.trimmingCharacters(in: .whitespaces).isEmpty)
                 .help("添加新数据根")
             }
+        }
+    }
+
+    private var startupSection: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Label("通用", systemImage: "gearshape")
+                .font(.headline)
+
+            Toggle("开机自动启动 apet", isOn: $launchAtLogin)
+                .onChange(of: launchAtLogin, perform: { newValue in
+                    setLaunchAtLogin(newValue)
+                })
+
+            if let err = launchAtLoginError {
+                Text(err)
+                    .font(.system(size: 11))
+                    .foregroundStyle(.orange)
+                    .fixedSize(horizontal: false, vertical: true)
+            } else {
+                Text("登录后在后台自动拉起，无 Dock 图标。")
+                    .font(.system(size: 11))
+                    .foregroundStyle(.secondary)
+            }
+        }
+    }
+
+    /// 从系统读回当前登录项注册态，镜像到 @State（不触发 onChange 的写回：值相同时 SwiftUI 不发 onChange）。
+    private func refreshLaunchAtLogin() {
+        if #available(macOS 13.0, *) {
+            launchAtLogin = SMAppServiceLoginItem().isRegistered
+        }
+    }
+
+    /// 用户拨动开关 → 经受测的 coordinator 应用；失败回滚 UI 并提示。
+    private func setLaunchAtLogin(_ desired: Bool) {
+        guard #available(macOS 13.0, *) else {
+            launchAtLoginError = "开机自启需要 macOS 13 或更高版本。"
+            return
+        }
+        let result = LoginItemCoordinator(control: SMAppServiceLoginItem()).apply(desiredEnabled: desired)
+        switch result {
+        case .success(let registered):
+            launchAtLoginError = nil
+            if launchAtLogin != registered { launchAtLogin = registered }
+        case .failure:
+            launchAtLoginError = "无法\(desired ? "开启" : "关闭")开机自启，请在「系统设置 › 通用 › 登录项」里手动调整。"
+            // 回滚开关到真实态
+            refreshLaunchAtLogin()
         }
     }
 
