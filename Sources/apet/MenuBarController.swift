@@ -146,6 +146,8 @@ final class MenuBarController: NSObject {
     var onAcknowledgeAll: (() -> Void)?
     /// 面板顶部快捷键提示字符串，如 "⌥⌘P 打开/关闭"。nil 表示不显示 header。
     var hotkeyHint: String?
+    /// 状态栏样式（F2）：`"counts"`（🟢🔴🟡⚪+数字）| `"pawprint"`（单图标+主色+总数）。
+    var menuBarStyle: String = "counts"
 
     // MARK: - State
 
@@ -174,9 +176,18 @@ final class MenuBarController: NSObject {
     /// Refresh icon, tint, badge, and session panel rows.
     func update(summary: PetSummary, sessions: [Session]) {
         currentSessions = sessions
-        applyPresentation(MenuBarPresenter.make(from: summary))
+        renderStatusButton(summary: summary)
         // Push new rows into the live hosting controller so the popover updates in-place.
         panelHosting?.rootView = makePanelRootView()
+    }
+
+    /// 按当前 `menuBarStyle` 选择渲染方式。
+    private func renderStatusButton(summary: PetSummary) {
+        if menuBarStyle == "counts" {
+            applyCountsPresentation(MenuBarCountsPresenter.text(from: summary))
+        } else {
+            applyPresentation(MenuBarPresenter.make(from: summary))
+        }
     }
 
     // MARK: - Private: button setup
@@ -189,7 +200,7 @@ final class MenuBarController: NSObject {
         button.sendAction(on: [.leftMouseUp, .rightMouseUp])
         // Keep statusItem.menu nil — assigning it would intercept left-clicks permanently.
         statusItem.menu = nil
-        // 启动即可见：立即渲染 idle 态 pawprint 图标，避免首次 update() 调用前按钮为空白。
+        // 启动即可见：立即渲染 idle 态，避免首次 update() 调用前按钮为空白。
         let idleSummary = PetSummary(
             state: .idle,
             runningCount: 0,
@@ -198,10 +209,19 @@ final class MenuBarController: NSObject {
             staleCount: 0,
             acknowledgedCount: 0
         )
-        applyPresentation(MenuBarPresenter.make(from: idleSummary))
+        renderStatusButton(summary: idleSummary)
     }
 
     // MARK: - Private: button appearance
+
+    /// 彩色计数样式：标题即为 "🟢2 🔴1 …"（emoji 自带颜色），无 SF Symbol 图标、无 tint。
+    private func applyCountsPresentation(_ text: String) {
+        guard let button = statusItem.button else { return }
+        button.image = nil
+        button.contentTintColor = nil
+        button.title = text
+        button.imagePosition = .noImage
+    }
 
     private func applyPresentation(_ p: MenuBarPresentation) {
         guard let button = statusItem.button else { return }

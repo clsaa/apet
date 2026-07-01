@@ -240,6 +240,9 @@ final class AppCoordinator {
             mb.hotkeyHint = hint
             pw.hotkeyHint = hint
 
+            // 状态栏样式（F2）：counts=彩色计数 / pawprint=单图标。
+            mb.menuBarStyle = config.menuBarStyle
+
             menuBar = mb
             petWindow = pw
 
@@ -399,6 +402,12 @@ final class AppCoordinator {
         let hint = newConfig.panelHotKey.displayString + " 打开/关闭"
         menuBar?.hotkeyHint = hint
         petWindow?.hotkeyHint = hint
+
+        // 状态栏样式（F2）立即生效：更新样式并用当前 summary 重绘。
+        if let store = store {
+            menuBar?.menuBarStyle = newConfig.menuBarStyle
+            menuBar?.update(summary: store.summary(), sessions: store.activeSessions())
+        }
     }
 
     // MARK: - Private: helpers

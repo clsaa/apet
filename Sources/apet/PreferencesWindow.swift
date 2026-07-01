@@ -497,6 +497,23 @@ struct PreferencesView: View {
                 .labelsHidden()
             }
 
+            // ── 状态栏样式（F2）─────────────────────────────────────────────
+            VStack(alignment: .leading, spacing: 6) {
+                Text("状态栏样式")
+                    .font(.subheadline)
+                    .foregroundStyle(.secondary)
+                Picker("状态栏样式", selection: $config.menuBarStyle) {
+                    Text("彩色计数 🟢🔴🟡⚪").tag("counts")
+                    Text("宠物图标 🐾").tag("pawprint")
+                }
+                .pickerStyle(.segmented)
+                .labelsHidden()
+                Text("彩色计数：绿=进行中 · 红=停下等你 · 黄=已读 · 灰=超时/结束（全 0 时显示 🐾）。")
+                    .font(.system(size: 11))
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+
             // ── 通知模式 ─────────────────────────────────────────────────────
             VStack(alignment: .leading, spacing: 6) {
                 Text("通知模式")
