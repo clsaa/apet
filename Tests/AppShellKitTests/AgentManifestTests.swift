@@ -18,10 +18,23 @@ final class AgentManifestTests: XCTestCase {
         XCTAssertEqual(TimestampDialect.epochMillis.parse("1782554400000")!, 1782554400, accuracy: 0.001)
     }
 
+    func test_epochSeconds_parse() {
+        XCTAssertEqual(TimestampDialect.epochSeconds.parse("1780290835")!, 1780290835, accuracy: 0.001)
+    }
+
     func test_invalid_returnsNil() {
         XCTAssertNil(TimestampDialect.iso.parse("not-a-date"))
         XCTAssertNil(TimestampDialect.epochMillis.parse("abc"))
         XCTAssertNil(TimestampDialect.epochMillis.parse(""))
+        XCTAssertNil(TimestampDialect.epochSeconds.parse("x"))
+    }
+
+    func test_qoderWorkManifest_verifiedFacts() {
+        let m = AgentManifest.qoderWork
+        XCTAssertEqual(m.id, "qoder-work")
+        XCTAssertEqual(m.tsDialect, .epochSeconds)
+        XCTAssertNil(m.renderResumeArgv(sessionId: "8dd7ca5f-e655-47b7-8a5f-ad28336c1d34"),
+                     "resume 未核实 → nil，不臆造")
     }
 
     // MARK: - 内置 manifest

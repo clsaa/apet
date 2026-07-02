@@ -43,6 +43,8 @@ final class AppCoordinator {
     private var isStopped = false
 
     private var jsonlWatchers: [JSONLDirectoryWatcher] = []
+    /// M3-C：QoderWork（agents.db）轮询源。QoderWork 未安装时为 nil。
+    private var qoderWorkWatcher: QoderWorkWatcher?
     private var hotKeyManager: HotKeyManager?
     /// 进程内单调计数器，用于 jsonl 合成事件的唯一 eventId（替代 UUID，防 seenEventIds 慢泄漏）。
     private var jsonlSeqCounter: Int = 0
@@ -147,6 +149,20 @@ final class AppCoordinator {
                 emit: { [weak self] result in self?.applyScanResult(result) }
             )
             jsonlWatchers.append(w)
+        }
+
+        // ─── 2a-2. QoderWork 源（M3-C）：agents.db 存在才建，走与 jsonl 相同的静默通道 ──
+        let qwDBPath = QoderWorkDBReader.defaultDBPath
+        if FileManager.default.fileExists(atPath: qwDBPath) {
+            let qwReader = QoderWorkDBReader(dbPath: qwDBPath)
+            let qwRoot = (qwDBPath as NSString).deletingLastPathComponent // …/QoderWork/data
+            qoderWorkWatcher = QoderWorkWatcher(
+                read: { qwReader.read() },
+                root: qwRoot,
+                now: { Date().timeIntervalSince1970 },
+                emit: { [weak self] result in self?.applyScanResult(result) }
+            )
+            appendToLog("[info] 发现 QoderWork agents.db，已接入会话监控（粗略状态）\n")
         }
         // ──────────────────────────────────────────────────────────────────────────
         // 2b. Create and start NotificationService (safe to call before replay).
@@ -341,6 +357,8 @@ final class AppCoordinator {
         //     使当前正在跑的会话立即上屏（hook 的 ended 终态仍保护，不被 jsonl 复活）。
         jsonlWatchers.forEach { $0.scanOnce() }     // seed（replay=false；jsonl 不接 NotificationService，天然静默）
         jsonlWatchers.forEach { $0.start(every: 8) } // 每 8 秒定期扫描，queue:.main
+        qoderWorkWatcher?.scanOnce()                 // QoderWork seed（同 jsonl 语义：静默、面板可见）
+        qoderWorkWatcher?.start(every: 10)           // DB 轮询稍稀，减少读放大
 
         // 5. Live file watch via DispatchSource
         openWatchSource()
@@ -375,6 +393,7 @@ final class AppCoordinator {
         reapTimer?.cancel()
         reapTimer = nil
         jsonlWatchers.forEach { $0.stop() }
+        qoderWorkWatcher?.stop()
         jsonlWatchers.removeAll()
         hotKeyManager?.unregister()
         hotKeyManager = nil
@@ -531,6 +550,10 @@ final class AppCoordinator {
                     ts: ""
                 )
                 ev.source = .jsonl
+                // M3-C：QoderWork 会话点击 → 激活 QoderWork.app（无终端概念，App 级跳转）。
+                if key.agent == "qoder-work" {
+                    ev.terminal = TerminalRef(kind: .other, bundleId: "com.qoder.work")
+                }
                 jsonlSeqCounter += 1
                 changed = !ingestor.ingest(event: ev, now: now, replay: false).isEmpty
                 // ⚠️ 绝不调用 notificationService.consider（jsonl 不发通知，架构-B1）
