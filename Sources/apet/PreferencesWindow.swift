@@ -430,6 +430,14 @@ struct PreferencesView: View {
                     hookMarker: hookMarker,
                     runnerPath: runnerPath,
                     onRemove: {
+                        // 评审修复（产品 m8）：一击即删且不会被自动发现找回——加确认，标准对齐「卸载 Hook」。
+                        let alert = NSAlert()
+                        alert.messageText = "移除数据根？"
+                        alert.informativeText = "将停止监控 \(root.path) 的会话，且不再被自动发现（可手动加回）。"
+                        alert.addButton(withTitle: "移除")
+                        alert.addButton(withTitle: "取消")
+                        NSApp.activate(ignoringOtherApps: true)
+                        guard alert.runModal() == .alertFirstButtonReturn else { return }
                         // 移除数据根：同时加入 excludedRoots 防止自动发现再次加入（M2-B）。
                         config.dataRoots.removeAll { $0.path == root.path }
                         if !config.excludedRoots.contains(root.path) {

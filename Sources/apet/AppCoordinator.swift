@@ -326,8 +326,14 @@ final class AppCoordinator {
             // 注册全局热键（不需辅助功能权限）
             let hkm = HotKeyManager()
             hkm.onActivate = { [weak self] in self?.togglePanel() }
-            hkm.register(keyCode: config.panelHotKey.keyCode, modifiers: config.panelHotKey.modifiers)
+            let hotkeyOK = hkm.register(keyCode: config.panelHotKey.keyCode, modifiers: config.panelHotKey.modifiers)
             self.hotKeyManager = hkm
+            if !hotkeyOK {
+                // 评审修复（产品 M4）：失败不再静默——面板 hint 换成失败提示（假提示比没提示更伤信任）。
+                appendToLog("[warn] 全局热键 \(config.panelHotKey.displayString) 注册失败（可能被其他 App 占用）\n")
+                mb.hotkeyHint = "⚠️ 快捷键注册失败（可能被占用），请在首选项改键"
+                pw.hotkeyHint = mb.hotkeyHint
+            }
 
             // ── 首启引导（just-in-time，非 headless 模式专属）──────────────────────
             // 用 UserDefaults 持久化"已展示"标志，避免 AppConfig 改动；
@@ -465,13 +471,16 @@ final class AppCoordinator {
         }
 
         // Re-register hot key if changed.
+        var hotkeyOK = true
         if newConfig.panelHotKey != oldHotKey {
-            hotKeyManager?.register(keyCode: newConfig.panelHotKey.keyCode,
-                                    modifiers: newConfig.panelHotKey.modifiers)
+            hotkeyOK = hotKeyManager?.register(keyCode: newConfig.panelHotKey.keyCode,
+                                               modifiers: newConfig.panelHotKey.modifiers) ?? true
         }
 
-        // Update panel hotkey hint.
-        let hint = newConfig.panelHotKey.displayString + " 打开/关闭"
+        // Update panel hotkey hint（评审修复 产品M4：失败显真话，不显假提示）。
+        let hint = hotkeyOK
+            ? newConfig.panelHotKey.displayString + " 打开/关闭"
+            : "⚠️ 快捷键注册失败（可能被占用），请在首选项改键"
         menuBar?.hotkeyHint = hint
         petWindow?.hotkeyHint = hint
 
