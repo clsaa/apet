@@ -79,6 +79,18 @@ final class AgentManifestTests: XCTestCase {
         XCTAssertEqual(ResumeCommand.argv(agent: "qoder-work", sessionId: id),
                        AgentManifest.qoderWork.renderResumeArgv(sessionId: id),
                        "两边都应是 nil（未核实）")
+        XCTAssertEqual(ResumeCommand.argv(agent: "qoder-ide", sessionId: id),
+                       AgentManifest.qoderIDE.renderResumeArgv(sessionId: id),
+                       "两边都应是 nil（未核实）")
+    }
+
+    // Qoder IDE（实测 2026-07-03）：ISO 方言、无 resume、无 stateRules。
+    func test_qoderIDEManifest_verifiedFacts() {
+        let m = AgentManifest.qoderIDE
+        XCTAssertEqual(m.id, "qoder-ide")
+        XCTAssertEqual(m.tsDialect, .iso)
+        XCTAssertNil(m.renderResumeArgv(sessionId: "8eb2fbd6-8607-426d-b1be-8d20e35419c8"))
+        XCTAssertFalse(m.hasStateRules)
     }
 
     // MARK: - 恢复命令 argv 红队（sessionId 过 UUID 白名单作单一 argv）

@@ -124,6 +124,19 @@ public struct AgentManifest: Equatable {
         hasStateRules: false
     )
 
+    /// Qoder IDE（**实测接入**，2026-07-03）：`com.qoder.ide`（VSCode fork）。会话 jsonl 在
+    /// `~/Library/Application Support/Qoder/SharedClientCache/cli/projects/<编码cwd>/
+    /// task-<id>.session.execution.jsonl`——user/assistant 行 ISO 时间戳，与 Claude 同构。
+    /// sessionId 形如 `task-xxx`（非 UUID）；resume 未核实 → nil；无 stateRules（内容信号
+    /// 可用则用，否则 mtime 兜底）。点击激活 IDE。
+    public static let qoderIDE = AgentManifest(
+        id: "qoder-ide",
+        rootsGlobs: ["~/Library/Application Support/Qoder/SharedClientCache/cli/projects/**"],
+        tsDialect: .iso,
+        resumeArgvTemplate: nil,
+        hasStateRules: false
+    )
+
     /// 内置注册表（无 glob 重叠——评审修复 AI M4：废弃 stub 已移出）。
-    public static let builtins: [AgentManifest] = [.claude, .qoderWork, .qoderCli]
+    public static let builtins: [AgentManifest] = [.claude, .qoderWork, .qoderCli, .qoderIDE]
 }
