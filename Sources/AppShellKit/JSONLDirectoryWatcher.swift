@@ -53,6 +53,8 @@ public final class JSONLDirectoryWatcher {
     private let emit: (ScanResult) -> Void
     private let runningWindow: Double
     private let idleWindow: Double
+    /// 会话归属 agent（进 SessionKey）。Claude 数据根 "claude"；Qoder CLI 数据根 "qoder-cli"。
+    private let agent: String
 
     // MARK: Internal state
 
@@ -75,7 +77,8 @@ public final class JSONLDirectoryWatcher {
         parse: @escaping (String) -> ScannedFile?,
         emit: @escaping (ScanResult) -> Void,
         runningWindow: Double = 120,
-        idleWindow: Double = 1800
+        idleWindow: Double = 1800,
+        agent: String = "claude"
     ) {
         self.projectsDir = projectsDir
         self.root = root
@@ -85,6 +88,7 @@ public final class JSONLDirectoryWatcher {
         self.emit = emit
         self.runningWindow = runningWindow
         self.idleWindow = idleWindow
+        self.agent = agent
     }
 
     // MARK: - Scan
@@ -101,7 +105,8 @@ public final class JSONLDirectoryWatcher {
                 file,
                 now: now(),
                 runningWindow: runningWindow,
-                idleWindow: idleWindow
+                idleWindow: idleWindow,
+                agent: agent
             )
 
             switch raw {

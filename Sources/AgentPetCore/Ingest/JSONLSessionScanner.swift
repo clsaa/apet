@@ -111,7 +111,8 @@ public enum JSONLSessionScanner {
         _ f: ScannedFile,
         now: Double,
         runningWindow: Double = 120,
-        idleWindow: Double = 1800
+        idleWindow: Double = 1800,
+        agent: String = "claude"
     ) -> ScanResult {
 
         // 优先级 1：subagent / sidechain
@@ -146,7 +147,7 @@ public enum JSONLSessionScanner {
         }
 
         // 过滤全未命中 → 状态派生（内容信号优先 + away 时间感知 + effectiveTs 兜底）
-        let key = SessionKey(agent: "claude", root: f.root, sessionId: f.sessionId)
+        let key = SessionKey(agent: agent, root: f.root, sessionId: f.sessionId)
         let displayTitle = f.title ?? f.lastPrompt
 
         // I1 修复：queue-operation 时间窗口判断（在有 now 的 scanner 侧做）
