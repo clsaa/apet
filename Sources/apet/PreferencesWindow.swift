@@ -12,6 +12,8 @@ extension Notification.Name {
     /// ``PreferencesView`` observes this to update only `config.selectedPet` in-place,
     /// preserving other unsaved @State edits (MAJOR-1 fix).
     static let apetSelectedPetChanged = Notification.Name("apet.selectedPetChanged")
+    /// F5：宠物名字在首选项之外被改（上传即命名）时广播，PreferencesView 重载 petNames。
+    static let apetPetNamesChanged = Notification.Name("apet.petNamesChanged")
 }
 
 // MARK: - HookRowView
@@ -387,6 +389,12 @@ struct PreferencesView: View {
         ) { note in
             guard let pet = note.userInfo?["selectedPet"] as? String else { return }
             config.selectedPet = pet
+        }
+        // F5：上传即命名后刷新名字列表。
+        .onReceive(
+            NotificationCenter.default.publisher(for: .apetPetNamesChanged)
+        ) { _ in
+            petNames = petNameStore.load()
         }
     }
 

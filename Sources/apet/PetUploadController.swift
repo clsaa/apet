@@ -21,12 +21,18 @@ final class PetUploadController {
     private let store: CustomPetStore
     /// AppCoordinator-supplied callback: updates live pet + writes config.selectedPet + saves.
     private let applyPet: (PetKind) -> Void
+    /// F5：上传即命名——名字落 PetNameStore（与首选项共用同一文件）。
+    private let nameStore: PetNameStore
     /// In-flight cutout task — cancelled before starting a new one (MINOR-6).
     private var cutoutTask: Task<Void, Never>?
 
     init(store: CustomPetStore, applyPet: @escaping (PetKind) -> Void) {
         self.store = store
         self.applyPet = applyPet
+        let appSupport = (NSHomeDirectory() as NSString)
+            .appendingPathComponent("Library/Application Support/AgentPet")
+        self.nameStore = PetNameStore(
+            url: URL(fileURLWithPath: (appSupport as NSString).appendingPathComponent("pet-names.json")))
     }
 
     // MARK: - Upload
@@ -50,8 +56,29 @@ final class PetUploadController {
                 self.showAlert("导入失败", detail: error.localizedDescription)
                 return
             }
+            self.promptName(id: id)
             self.promptCutout(id: id)
         }
+    }
+
+    /// F5：上传后立刻起名（每只宠物都是有名字的个体——01=用户本人、02/03=家人…）。
+    /// 留空则沿用默认编号（04 顺延）。名字写 PetNameStore 并广播，首选项即时刷新。
+    private func promptName(id: String) {
+        let alert = NSAlert()
+        alert.messageText = "给这只宠物起个名字"
+        alert.informativeText = "比如对应的人或宠物的名字。留空则用默认编号。"
+        let tf = NSTextField(frame: NSRect(x: 0, y: 0, width: 220, height: 24))
+        tf.placeholderString = "名字（可留空）"
+        alert.accessoryView = tf
+        alert.window.initialFirstResponder = tf
+        alert.addButton(withTitle: "好")
+        alert.runModal()
+        let name = tf.stringValue.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !name.isEmpty else { return }
+        var names = nameStore.load()
+        names[id] = name
+        try? nameStore.save(names)
+        NotificationCenter.default.post(name: .apetPetNamesChanged, object: nil)
     }
 
     // MARK: - Re-cutout

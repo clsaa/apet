@@ -1,5 +1,6 @@
 import AppKit
 import AgentPetCore
+import AppShellKit
 
 /// 会话行操作的共享执行（F7 重命名、F11 复制 ID/恢复命令）。菜单栏 popover 与宠物 popover 共用。
 /// 收藏/重命名的**持久化**由 AppCoordinator 经 SessionMetaStore 完成；这里只管剪贴板与输入弹窗。
@@ -20,6 +21,27 @@ enum SessionRowActions {
             copyToPasteboard(cmd)
         } else {
             copyToPasteboard(s.key.sessionId)  // 未知 agent 兜底复制 ID
+        }
+    }
+
+    /// M3-D①：免费本地摘要——定位 jsonl → 读尾部 → 提取对话 → 启发式一句话，弹窗展示。
+    /// 全程本地零网络零成本；找不到文件/无内容时如实提示。
+    static func showLocalSummary(_ s: Session) {
+        let summary: String
+        if let path = SessionTranscriptLocator.find(root: s.key.root, sessionId: s.key.sessionId),
+           case .ok(let lines) = TailLineReader.lastLines(path: path, maxLines: 100, maxBytes: 524_288) {
+            summary = LocalSummarizer.summarize(turns: ConversationTailParser.turns(lines: lines))
+        } else {
+            summary = "（找不到该会话的记录文件，无法生成摘要）"
+        }
+        let alert = NSAlert()
+        alert.messageText = "会话摘要（本地）"
+        alert.informativeText = summary
+        alert.alertStyle = .informational
+        alert.addButton(withTitle: "好")
+        alert.addButton(withTitle: "复制")
+        if alert.runModal() == .alertSecondButtonReturn {
+            copyToPasteboard(summary)
         }
     }
 

@@ -349,6 +349,7 @@ final class PetWindowController: NSObject {
             onRename: { [weak self] id in self?.handleRename(id: id) },
             onCopyId: { [weak self] id in self?.handleCopyId(id: id) },
             onCopyResume: { [weak self] id in self?.handleCopyResume(id: id) },
+            onLocalSummary: { [weak self] id in self?.handleLocalSummary(id: id) },
             onOpenPreferences: { [weak self] in self?.onOpenPreferences?() },
             onAcknowledgeAll: { [weak self] in self?.onAcknowledgeAll?() }
         )
@@ -397,6 +398,7 @@ final class PetWindowController: NSObject {
     }
     private func handleCopyId(id: String) { sessionForId(id).map(SessionRowActions.copyId) }
     private func handleCopyResume(id: String) { sessionForId(id).map(SessionRowActions.copyResume) }
+    private func handleLocalSummary(id: String) { sessionForId(id).map(SessionRowActions.showLocalSummary) }
 }
 
 // MARK: - ApeFloatingWindow
@@ -482,6 +484,7 @@ private struct PetPanelRootView: View {
     let onRename: (String) -> Void
     let onCopyId: (String) -> Void
     let onCopyResume: (String) -> Void
+    let onLocalSummary: (String) -> Void
     let onOpenPreferences: () -> Void
     let onAcknowledgeAll: () -> Void
 
@@ -499,6 +502,7 @@ private struct PetPanelRootView: View {
             SessionPanel(sessions: sessions, now: now, onTap: onTap,
                          onToggleFavorite: onToggleFavorite, onRename: onRename,
                          onCopyId: onCopyId, onCopyResume: onCopyResume,
+                         onLocalSummary: onLocalSummary,
                          hotkeyHint: hotkeyHint, palette: palette)
             Divider()
             // 紧凑操作行：已读(仅未读时)/首选项/退出。退出保留（状态栏被刘海藏住时唯一出口，A1）。
@@ -528,6 +532,7 @@ private final class SessionPanelHostController: NSViewController {
     private let onRename: (String) -> Void
     private let onCopyId: (String) -> Void
     private let onCopyResume: (String) -> Void
+    private let onLocalSummary: (String) -> Void
     private let onOpenPreferences: () -> Void
     private let onAcknowledgeAll: () -> Void
     private var hostingController: NSHostingController<PetPanelRootView>?
@@ -541,6 +546,7 @@ private final class SessionPanelHostController: NSViewController {
         onRename: @escaping (String) -> Void,
         onCopyId: @escaping (String) -> Void,
         onCopyResume: @escaping (String) -> Void,
+        onLocalSummary: @escaping (String) -> Void,
         onOpenPreferences: @escaping () -> Void,
         onAcknowledgeAll: @escaping () -> Void
     ) {
@@ -552,6 +558,7 @@ private final class SessionPanelHostController: NSViewController {
         self.onRename = onRename
         self.onCopyId = onCopyId
         self.onCopyResume = onCopyResume
+        self.onLocalSummary = onLocalSummary
         self.onOpenPreferences = onOpenPreferences
         self.onAcknowledgeAll = onAcknowledgeAll
         super.init(nibName: nil, bundle: nil)
@@ -565,6 +572,7 @@ private final class SessionPanelHostController: NSViewController {
                          hotkeyHint: hotkeyHint, onTap: onTap,
                          onToggleFavorite: onToggleFavorite, onRename: onRename,
                          onCopyId: onCopyId, onCopyResume: onCopyResume,
+                         onLocalSummary: onLocalSummary,
                          onOpenPreferences: onOpenPreferences, onAcknowledgeAll: onAcknowledgeAll)
     }
 
