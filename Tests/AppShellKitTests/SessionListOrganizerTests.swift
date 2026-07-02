@@ -41,6 +41,14 @@ final class SessionListOrganizerTests: XCTestCase {
         XCTAssertEqual(r.groups.flatMap { $0.rows }.count, 1)
     }
 
+    func test_filter_matchesCustomName() {
+        // F7 重命名后按新名字搜索必须命中（产品评审 M5：看得见的名字要搜得到）
+        var s = session(id: "1", state: .running, title: "orig-title")
+        s.customName = "大促需求"
+        let r = SessionListOrganizer.organize(sessions: [s], dimension: .agent, filter: "大促", now: 0)
+        XCTAssertEqual(r.groups.flatMap { $0.rows }.count, 1)
+    }
+
     func test_filter_empty_returnsAll() {
         let sessions = [session(id: "1", state: .running), session(id: "2", state: .running)]
         let r = SessionListOrganizer.organize(sessions: sessions, dimension: .agent, filter: "", now: 0)

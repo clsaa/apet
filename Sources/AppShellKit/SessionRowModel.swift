@@ -79,8 +79,8 @@ public struct SessionRowModel: Equatable, Identifiable {
 
 /// Pure mapping from `Session` → `SessionRowModel`.
 public enum SessionRowMapper {
-    /// `now` 注入时填充 `relativeText`（F10 相对时间）；nil 时留空。
-    public static func make(_ session: Session, now: Double? = nil) -> SessionRowModel {
+    /// `now` 注入时填充 `relativeText`（F10 相对时间）；nil 时留空。`tzOffset` 供本地日界。
+    public static func make(_ session: Session, now: Double? = nil, tzOffset: Double = 0) -> SessionRowModel {
         let key = session.key
 
         // Stable ID: "agent|root|sessionId"
@@ -133,7 +133,7 @@ public enum SessionRowMapper {
         if case .waiting = session.state { isWaiting = true } else { isWaiting = false }
         let isInferred = session.source == .jsonl && isWaiting
 
-        let relativeText = now.map { RelativeTime.short(from: session.lastActiveAt, now: $0) } ?? ""
+        let relativeText = now.map { RelativeTime.short(from: session.lastActiveAt, now: $0, tzOffset: tzOffset) } ?? ""
 
         return SessionRowModel(
             id: id,
