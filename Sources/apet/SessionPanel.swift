@@ -33,7 +33,8 @@ struct SessionPanel: View {
     @State private var filter: String = ""
 
     private var organized: OrganizedList {
-        SessionListOrganizer.organize(sessions: sessions, dimension: .status, filter: filter, now: now)
+        SessionListOrganizer.organize(sessions: sessions, dimension: .status, filter: filter, now: now,
+                                      tzOffset: Double(TimeZone.current.secondsFromGMT()))
     }
 
     var body: some View {
@@ -121,7 +122,10 @@ struct SessionPanel: View {
                 Button("本地摘要") { onLocalSummary(row.id) }
                 Divider()
                 Button("复制 sessionID") { onCopyId(row.id) }
-                Button("复制恢复命令") { onCopyResume(row.id) }
+                // 仅对有已核实恢复命令的 agent 显示（产品评审 M3：不静默复制假命令）。
+                if SessionRowActions.hasResumeCommand(agent: row.agent, sessionId: row.sessionId) {
+                    Button("复制恢复命令") { onCopyResume(row.id) }
+                }
             }
     }
 
@@ -172,6 +176,16 @@ private struct SessionRowCell: View {
                             .padding(.horizontal, 5).padding(.vertical, 1)
                             .background(Color.accentColor.opacity(0.13))
                             .cornerRadius(4).lineLimit(1)
+                    }
+                    // M3-C：非 Claude 会话显 agent 徽标（多 Agent 辨识度，产品/用户评审双确认）+
+                    // 「状态粗略」语义随徽标传达（设计 §7.2）。
+                    if row.agent != "claude" && row.agent != "claude-code" && !row.agent.isEmpty {
+                        Text(row.agent)
+                            .font(.system(size: 10, weight: .medium))
+                            .padding(.horizontal, 5).padding(.vertical, 1)
+                            .background(Color.purple.opacity(0.15))
+                            .cornerRadius(4).lineLimit(1)
+                            .help("来自 \(row.agent)（状态按活动时间粗略推断）")
                     }
                     if row.isInferred {
                         Text("推断")

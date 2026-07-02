@@ -326,8 +326,14 @@ final class AppCoordinator {
             // 注册全局热键（不需辅助功能权限）
             let hkm = HotKeyManager()
             hkm.onActivate = { [weak self] in self?.togglePanel() }
-            hkm.register(keyCode: config.panelHotKey.keyCode, modifiers: config.panelHotKey.modifiers)
+            let hotkeyOK = hkm.register(keyCode: config.panelHotKey.keyCode, modifiers: config.panelHotKey.modifiers)
             self.hotKeyManager = hkm
+            if !hotkeyOK {
+                // 评审修复（产品 M4）：失败不再静默——面板 hint 换成失败提示（假提示比没提示更伤信任）。
+                appendToLog("[warn] 全局热键 \(config.panelHotKey.displayString) 注册失败（可能被其他 App 占用）\n")
+                mb.hotkeyHint = "⚠️ 快捷键注册失败（可能被占用），请在首选项改键"
+                pw.hotkeyHint = mb.hotkeyHint
+            }
 
             // ── 首启引导（just-in-time，非 headless 模式专属）──────────────────────
             // 用 UserDefaults 持久化"已展示"标志，避免 AppConfig 改动；
@@ -465,13 +471,16 @@ final class AppCoordinator {
         }
 
         // Re-register hot key if changed.
+        var hotkeyOK = true
         if newConfig.panelHotKey != oldHotKey {
-            hotKeyManager?.register(keyCode: newConfig.panelHotKey.keyCode,
-                                    modifiers: newConfig.panelHotKey.modifiers)
+            hotkeyOK = hotKeyManager?.register(keyCode: newConfig.panelHotKey.keyCode,
+                                               modifiers: newConfig.panelHotKey.modifiers) ?? true
         }
 
-        // Update panel hotkey hint.
-        let hint = newConfig.panelHotKey.displayString + " 打开/关闭"
+        // Update panel hotkey hint（评审修复 产品M4：失败显真话，不显假提示）。
+        let hint = hotkeyOK
+            ? newConfig.panelHotKey.displayString + " 打开/关闭"
+            : "⚠️ 快捷键注册失败（可能被占用），请在首选项改键"
         menuBar?.hotkeyHint = hint
         petWindow?.hotkeyHint = hint
 
@@ -551,7 +560,9 @@ final class AppCoordinator {
 
         case .observe(let state, let key, let cwd, let title):
             let now = Date().timeIntervalSince1970
-            var changed = false
+            // 评审修复（架构 M2/产品 M1/测试 B2 三重确认）：本方法不再手动刷新 UI。
+            // store 的每次变更都会 emit → changeHandler → applyMetas 后刷新；原先此处的
+            // 裸 activeSessions() 刷新会用无 favorite/customName 的列表覆盖面板（F7 闪烁回归）。
             switch state {
             case .running, .waitingStop:
                 // .running → 合成 busy；.waitingStop → 合成 stop（会话进入 waiting 等用户）
@@ -573,21 +584,19 @@ final class AppCoordinator {
                     ev.terminal = TerminalRef(kind: .other, bundleId: "com.qoder.work")
                 }
                 jsonlSeqCounter += 1
-                changed = !ingestor.ingest(event: ev, now: now, replay: false).isEmpty
+                _ = ingestor.ingest(event: ev, now: now, replay: false)
                 // ⚠️ 绝不调用 notificationService.consider（jsonl 不发通知，架构-B1）
+                // 评审修复（架构 m6）：QoderWork 是**粗略态**（仅按活动时间，无内容信号），
+                // 其 waitingStop 不代表真实「等你」——预置已读（黄点），不进「等你」置顶、
+                // 不污染未读徽标；真实 attention 语义只留给有内容信号的源。
+                if key.agent == "qoder-work", kind == .stop {
+                    _ = store.acknowledge(key: key)
+                }
 
             case .stale:
                 // 文件消失/过期：仅 jsonl 来源的会话才打灰（hook 会话由 hook 路径或定时器管理）。
-                // Fix 4：守卫逻辑收敛到 store.markStaleSessionIfJSONL（便于单测、保证 hook 不被降级）。
-                changed = !store.markStaleSessionIfJSONL(key, now: now).isEmpty
+                _ = store.markStaleSessionIfJSONL(key, now: now)
             }
-
-            // 仅在 store 真有变更时刷新 UI（避免每 8s 对未变会话空算，Task8 评审 Minor#1）
-            guard changed else { return }
-            let summary = store.summary()
-            let sessions = store.activeSessions()
-            menuBar?.update(summary: summary, sessions: sessions)
-            petWindow?.update(summary: summary, sessions: sessions)
         }
     }
 

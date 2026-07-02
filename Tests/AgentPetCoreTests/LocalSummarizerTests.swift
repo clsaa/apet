@@ -32,4 +32,21 @@ final class LocalSummarizerTests: XCTestCase {
         let s = LocalSummarizer.summarize(turns: [ConversationTurn(role: "assistant", text: "分析完成", stopReason: "end_turn")])
         XCTAssertTrue(s.contains("分析完成"))
     }
+
+    // 评审修复（AI m6）：不可信文本消毒——控制字符/bidi 覆盖符被滤除，stopReason 也限长。
+    func test_sanitizes_controlAndBidiChars() {
+        let evil = "正常\u{202E}倒序欺骗\u{0007}响铃"
+        let s = LocalSummarizer.summarize(turns: [ConversationTurn(role: "user", text: evil, stopReason: nil)])
+        XCTAssertFalse(s.contains("\u{202E}"), "RTL 覆盖符必须滤除")
+        XCTAssertFalse(s.contains("\u{0007}"), "控制字符必须滤除")
+        XCTAssertTrue(s.contains("正常"))
+    }
+
+    func test_stopReason_alsoTruncatedAndSanitized() {
+        let longReason = String(repeating: "x", count: 500) + "\u{202E}"
+        let s = LocalSummarizer.summarize(
+            turns: [ConversationTurn(role: "assistant", text: "", stopReason: longReason)], maxLen: 20)
+        XCTAssertFalse(s.contains("\u{202E}"))
+        XCTAssertLessThan(s.count, 60, "stopReason 同样限长")
+    }
 }

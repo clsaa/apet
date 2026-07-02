@@ -1,5 +1,6 @@
 import XCTest
 @testable import AppShellKit
+import AgentPetCore
 
 /// M3-C 多 Agent 框架：时间戳方言解析 + manifest 恢复命令 argv 渲染（红队）。
 final class AgentManifestTests: XCTestCase {
@@ -46,14 +47,38 @@ final class AgentManifestTests: XCTestCase {
         XCTAssertEqual(m.tsDialect, .iso)
     }
 
-    func test_qoderManifest_epochMillis_and_unknownResume() {
-        let m = AgentManifest.qoder
-        // Qoder ts 是 epoch 毫秒（实测事实）
-        XCTAssertEqual(m.tsDialect, .epochMillis)
-        // Qoder resume 命令未核实 → 不臆造，返回 nil
+    // 评审修复（AI M4）：builtins 无 glob 重叠（废弃的 qoder stub 已移出注册表）。
+    func test_builtins_noGlobOverlap() {
+        let allGlobs = AgentManifest.builtins.flatMap { $0.rootsGlobs }
+        XCTAssertEqual(allGlobs.count, Set(allGlobs).count, "builtins 各 manifest 的 roots glob 不得重叠")
+        XCTAssertFalse(AgentManifest.builtins.contains { $0.id == "qoder" }, "废弃 stub 不进注册表")
+    }
+
+    // 评审修复（AI m8⑤）：模板元素部分含 {id} → 拒绝渲染（防静默产出坏命令）。
+    func test_renderResumeArgv_rejectsPartialPlaceholder() {
+        let m = AgentManifest(id: "x", rootsGlobs: [], tsDialect: .iso,
+                              resumeArgvTemplate: ["tool", "--resume={id}"], hasStateRules: false)
         XCTAssertNil(m.renderResumeArgv(sessionId: "8eb2fbd6-8607-426d-b1be-8d20e35419c8"))
-        // 非 Claude 且未提供 stateRules → 降级「状态粗略」
-        XCTAssertFalse(m.hasStateRules)
+    }
+
+    // 评审修复（测试 m9）：全角十六进制"数字"必须被拒（isHexDigit 会放行）。
+    func test_uuid_rejectsFullWidthHexDigits() {
+        let fullWidth = "８ｅｂ２ｆｂｄ６-8607-426d-b1be-8d20e35419c8"
+        XCTAssertNil(AgentManifest.claude.renderResumeArgv(sessionId: fullWidth))
+    }
+
+    // 防漂移 tripwire（架构 M4/AI m7：resume 命令双真相）——ResumeCommand（core 硬编码，
+    // UI 实际消费）与 AgentManifest（对外契约）对每个已核实 agent 必须渲染出**相同 argv**。
+    // 任何一边单独改动都会在此爆红，倒逼两边同步（结构性收敛列入 M4 契约工作）。
+    func test_resumeCommand_manifest_consistency() {
+        let id = "8eb2fbd6-8607-426d-b1be-8d20e35419c8"
+        XCTAssertEqual(ResumeCommand.argv(agent: "claude-code", sessionId: id),
+                       AgentManifest.claude.renderResumeArgv(sessionId: id))
+        XCTAssertEqual(ResumeCommand.argv(agent: "qoder-cli", sessionId: id),
+                       AgentManifest.qoderCli.renderResumeArgv(sessionId: id))
+        XCTAssertEqual(ResumeCommand.argv(agent: "qoder-work", sessionId: id),
+                       AgentManifest.qoderWork.renderResumeArgv(sessionId: id),
+                       "两边都应是 nil（未核实）")
     }
 
     // MARK: - 恢复命令 argv 红队（sessionId 过 UUID 白名单作单一 argv）

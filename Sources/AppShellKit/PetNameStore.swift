@@ -22,9 +22,12 @@ public struct PetNameStore {
     }
 }
 
-/// 内置宠物占 01/02/03（默认/柴犬/比熊），自定义照片默认名从 04 顺延（纯函数）。
+/// 宠物默认名（纯函数）。编号语义是**家庭成员序号**：01=用户本人（无内置资产，
+/// 期待第一张上传照片补位）、02=柴犬、03=比熊；再往后 04 顺延。
+/// 评审修复（用户 B1）："01" 未被占用时，第一张上传照片默认命名 "01"。
 public enum PetDefaultName {
-    public static func next(existingCustomCount: Int) -> String {
-        String(format: "%02d", 4 + existingCustomCount)
+    public static func next(existingCustomCount: Int, usedNames: Set<String> = []) -> String {
+        if !usedNames.contains("01") { return "01" }
+        return String(format: "%02d", 4 + existingCustomCount)
     }
 }

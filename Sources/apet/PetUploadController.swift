@@ -56,29 +56,63 @@ final class PetUploadController {
                 self.showAlert("导入失败", detail: error.localizedDescription)
                 return
             }
-            self.promptName(id: id)
-            self.promptCutout(id: id)
+            self.promptNameAndCutout(id: id)
         }
     }
 
-    /// F5：上传后立刻起名（每只宠物都是有名字的个体——01=用户本人、02/03=家人…）。
-    /// 留空则沿用默认编号（04 顺延）。名字写 PetNameStore 并广播，首选项即时刷新。
-    private func promptName(id: String) {
+    /// F5 + 评审修复（用户 M2 三连弹窗）：命名与「抠图/用原图」合并为**一个**弹窗。
+    /// 取消 → 删除导入、不留名字（无孤儿）。名字留空则沿用默认编号（首张自动 01=你本人）。
+    private func promptNameAndCutout(id: String) {
         let alert = NSAlert()
         alert.messageText = "给这只宠物起个名字"
-        alert.informativeText = "比如对应的人或宠物的名字。留空则用默认编号。"
-        let tf = NSTextField(frame: NSRect(x: 0, y: 0, width: 220, height: 24))
+        let visionAvailable: Bool
+        if #available(macOS 14.0, *) { visionAvailable = true } else { visionAvailable = false }
+        alert.informativeText = visionAvailable
+            ? "比如对应的人或宠物的名字（留空用默认编号）。\n「抠图」在本地识别主体去背景（零网络）；「用原图」则圆形裁切显示。"
+            : "比如对应的人或宠物的名字（留空用默认编号）。将使用原图（圆形裁切显示）。"
+        let tf = NSTextField(frame: NSRect(x: 0, y: 0, width: 240, height: 24))
         tf.placeholderString = "名字（可留空）"
         alert.accessoryView = tf
         alert.window.initialFirstResponder = tf
-        alert.addButton(withTitle: "好")
-        alert.runModal()
+        if visionAvailable {
+            alert.addButton(withTitle: "抠图")
+            alert.addButton(withTitle: "用原图")
+            alert.addButton(withTitle: "取消")
+        } else {
+            alert.addButton(withTitle: "好")
+            alert.addButton(withTitle: "取消")
+        }
+        NSApp.activate(ignoringOtherApps: true)   // LSUIElement：确保弹窗在最前
+        let response = alert.runModal()
+
+        // 取消（有 Vision 时第三键，无 Vision 时第二键）→ 清理导入，不留任何痕迹。
+        let cancelReturn: NSApplication.ModalResponse =
+            visionAvailable ? .alertThirdButtonReturn : .alertSecondButtonReturn
+        if response == cancelReturn {
+            try? store.delete(id: id)
+            return
+        }
+
+        // 保存名字（非取消才落盘，杜绝孤儿名字）。
         let name = tf.stringValue.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !name.isEmpty else { return }
-        var names = nameStore.load()
-        names[id] = name
-        try? nameStore.save(names)
-        NotificationCenter.default.post(name: .apetPetNamesChanged, object: nil)
+        if !name.isEmpty {
+            var names = nameStore.load()
+            names[id] = name
+            try? nameStore.save(names)
+            NotificationCenter.default.post(name: .apetPetNamesChanged, object: nil)
+        }
+
+        if visionAvailable && response == .alertFirstButtonReturn {
+            runCutout(
+                id: id,
+                srcPath: store.originalPath(id: id),
+                dstPath: store.cutoutPath(id: id),
+                onFailureTitle: "抠图未完成"
+            )
+        } else {
+            // 用原图（或 macOS 13 无 Vision）——PetView 圆形裁切。
+            applyPet(.custom(id: id))
+        }
     }
 
     // MARK: - Re-cutout
@@ -102,39 +136,6 @@ final class PetUploadController {
     }
 
     // MARK: - Private helpers
-
-    private func promptCutout(id: String) {
-        // MINOR-8: macOS 13 → Vision 不可用，跳过抠图对话框直接用原图。
-        guard #available(macOS 14.0, *) else {
-            applyPet(.custom(id: id))
-            return
-        }
-
-        let alert = NSAlert()
-        alert.messageText = "一键抠图？"
-        alert.informativeText = """
-            apet 将在本地识别宠物主体并去除背景（macOS 14+，零网络）。
-            或直接使用原图（圆形裁切显示）。
-            """
-        alert.addButton(withTitle: "抠图")
-        alert.addButton(withTitle: "用原图")
-        alert.addButton(withTitle: "取消")
-        switch alert.runModal() {
-        case .alertFirstButtonReturn:
-            runCutout(
-                id: id,
-                srcPath: store.originalPath(id: id),
-                dstPath: store.cutoutPath(id: id),
-                onFailureTitle: "抠图未完成"
-            )
-        case .alertSecondButtonReturn:
-            // User explicitly chose original — PetView circle-clips it (spec §3 用原图).
-            applyPet(.custom(id: id))
-        default:
-            // MINOR-5: 取消时删除孤立的导入文件，避免出现无法被选取的僵尸记录。
-            try? store.delete(id: id)
-        }
-    }
 
     /// Runs Vision cutout asynchronously.
     /// - On success: `applyPet(.custom(id:))`.

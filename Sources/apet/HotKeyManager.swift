@@ -40,7 +40,9 @@ final class HotKeyManager {
     ///   - keyCode: 虚拟键码（如 P = 35，与 `HotKeyConfig.keyCode` 一致）。
     ///   - modifiers: Carbon 修饰键位（cmdKey=256 / shiftKey=512 / optionKey=2048 / controlKey=4096，
     ///     与 `HotKeyConfig.modifiers` 一致，可直接透传）。
-    func register(keyCode: UInt32, modifiers: UInt32) {
+    /// - Returns: 注册是否成功（评审修复 产品M4：失败不再静默，供 UI 提示"可能被占用"）。
+    @discardableResult
+    func register(keyCode: UInt32, modifiers: UInt32) -> Bool {
         unregister()
 
         // 事件类型：键盘类 hot-key-pressed
@@ -73,7 +75,7 @@ final class HotKeyManager {
             selfPtr,
             &eventHandlerRef
         )
-        guard installStatus == noErr else { return }
+        guard installStatus == noErr else { return false }
 
         // 注册热键（signature 'apet' = 0x61706574，id 固定为 1）
         let hotKeyID = EventHotKeyID(signature: 0x61706574, id: 1)
@@ -86,12 +88,14 @@ final class HotKeyManager {
             &hotKeyRef
         )
         if regStatus != noErr {
-            // 注册失败（如快捷键被其他 App 占用）——静默处理，不崩溃
+            // 注册失败（如快捷键被其他 App 占用）——清理并上报（不崩溃）
             if let ref = eventHandlerRef {
                 RemoveEventHandler(ref)
                 eventHandlerRef = nil
             }
+            return false
         }
+        return true
     }
 
     /// 注销当前热键及事件处理器。

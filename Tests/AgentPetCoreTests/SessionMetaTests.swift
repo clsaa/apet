@@ -65,4 +65,23 @@ final class SessionMetaTests: XCTestCase {
         let b = SessionMeta(firstSeenAt: 200)
         XCTAssertEqual(SessionMeta.merge(a, b).firstSeenAt, 200)
     }
+
+    // 评审补齐（测试 m8）：cachedSummary/summaryAnchor last-non-nil-wins。
+    func test_merge_cachedSummaryAndAnchor_lastNonNilWins() {
+        let old = SessionMeta(cachedSummary: "旧摘要", summaryAnchor: 5)
+        XCTAssertEqual(SessionMeta.merge(old, SessionMeta()).cachedSummary, "旧摘要")
+        XCTAssertEqual(SessionMeta.merge(old, SessionMeta()).summaryAnchor, 5)
+        let new = SessionMeta(cachedSummary: "新摘要", summaryAnchor: 9)
+        XCTAssertEqual(SessionMeta.merge(old, new).cachedSummary, "新摘要")
+        XCTAssertEqual(SessionMeta.merge(old, new).summaryAnchor, 9)
+    }
+
+    // 评审记录（测试 m8）：merge 的 favorite 是 OR 语义——**经 merge 无法取消收藏**。
+    // 这是当前取舍：取消收藏只经 updateMeta 直接 mutate，不走 merge。若未来引入
+    // 多机同步/导入走 merge，此语义需重审。本用例把取舍显式化，防止无意依赖。
+    func test_merge_favorite_orSemantics_cannotUnfavorite() {
+        let favored = SessionMeta(favorite: true)
+        let unfavored = SessionMeta(favorite: false)
+        XCTAssertTrue(SessionMeta.merge(favored, unfavored).favorite)
+    }
 }

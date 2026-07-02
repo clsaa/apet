@@ -33,28 +33,37 @@ public enum SessionListOrganizer {
         sessions: [Session],
         dimension: GroupDimension,
         filter: String,
-        now: Double
+        now: Double,
+        tzOffset: Double = 0
     ) -> OrganizedList {
-        // 1) 搜索过滤（大小写不敏感 contains，匹配 title / cwd / sessionId）。
+        // 1) 搜索过滤（大小写不敏感 contains，匹配 customName / title / cwd / sessionId）。
         let needle = filter.trimmingCharacters(in: .whitespaces).lowercased()
         let matched = sessions.filter { needle.isEmpty || matches($0, needle) }
 
-        // 2) 置顶：未读 waiting（红/橙），其余进分组。保留输入顺序（seq 序）。
+        // 2) 置顶：未读 waiting（红/橙），其余进分组。收藏优先（F8「收藏置顶」），组内保留输入顺序。
         var pinned: [SessionRowModel] = []
         var rest: [Session] = []
         for s in matched {
-            if isUnreadWaiting(s) { pinned.append(SessionRowMapper.make(s, now: now)) }
+            if isUnreadWaiting(s) { pinned.append(SessionRowMapper.make(s, now: now, tzOffset: tzOffset)) }
             else { rest.append(s) }
         }
+        pinned.sort { $0.favorite && !$1.favorite }
+        // 收藏优先进组（稳定排序保 seq 序）。
+        rest = rest.enumerated().sorted { a, b in
+            if a.element.favorite != b.element.favorite { return a.element.favorite }
+            return a.offset < b.offset
+        }.map { $0.element }
 
         // 3) 分组。
-        let groups = group(rest, by: dimension, now: now)
+        let groups = group(rest, by: dimension, now: now, tzOffset: tzOffset)
         return OrganizedList(pinned: pinned, groups: groups)
     }
 
     // MARK: - Private
 
     private static func matches(_ s: Session, _ needle: String) -> Bool {
+        // customName 展示时优先于 title，搜索也必须能命中（F7 × 搜索，产品评审 M5）
+        if let n = s.customName, n.lowercased().contains(needle) { return true }
         if let t = s.title, t.lowercased().contains(needle) { return true }
         if let c = s.cwd, c.lowercased().contains(needle) { return true }
         if s.key.sessionId.lowercased().contains(needle) { return true }
@@ -66,42 +75,43 @@ public enum SessionListOrganizer {
         return false
     }
 
-    private static func group(_ sessions: [Session], by dimension: GroupDimension, now: Double) -> [SessionGroup] {
+    private static func group(_ sessions: [Session], by dimension: GroupDimension, now: Double, tzOffset: Double) -> [SessionGroup] {
         switch dimension {
-        case .status: return groupByStatus(sessions, now: now)
-        case .agent:  return groupByKey(sessions, now: now) { $0.key.agent }
-        case .date:   return groupByDate(sessions, now: now)
+        case .status: return groupByStatus(sessions, now: now, tzOffset: tzOffset)
+        case .agent:  return groupByKey(sessions, now: now, tzOffset: tzOffset) { $0.key.agent }
+        case .date:   return groupByDate(sessions, now: now, tzOffset: tzOffset)
         }
     }
 
     /// 状态维度固定顺序：进行中 → 已读 → 超时（置顶已取走未读 waiting）。
-    private static func groupByStatus(_ sessions: [Session], now: Double) -> [SessionGroup] {
+    private static func groupByStatus(_ sessions: [Session], now: Double, tzOffset: Double) -> [SessionGroup] {
         let order: [(String, (Session) -> Bool)] = [
             ("进行中", { if case .running = $0.state { return true }; return false }),
             ("已读",   { if case .waiting = $0.state, $0.acknowledged { return true }; return false }),
             ("超时",   { if case .stale = $0.state { return true }; return false }),
         ]
         return order.compactMap { title, pred in
-            let rows = sessions.filter(pred).map { SessionRowMapper.make($0, now: now) }
+            let rows = sessions.filter(pred).map { SessionRowMapper.make($0, now: now, tzOffset: tzOffset) }
             return rows.isEmpty ? nil : SessionGroup(title: title, rows: rows)
         }
     }
 
     /// 按 key 分组，保留首次出现顺序。
-    private static func groupByKey(_ sessions: [Session], now: Double, _ key: (Session) -> String) -> [SessionGroup] {
+    private static func groupByKey(_ sessions: [Session], now: Double, tzOffset: Double, _ key: (Session) -> String) -> [SessionGroup] {
         var order: [String] = []
         var buckets: [String: [SessionRowModel]] = [:]
         for s in sessions {
             let k = key(s)
             if buckets[k] == nil { order.append(k) }
-            buckets[k, default: []].append(SessionRowMapper.make(s, now: now))
+            buckets[k, default: []].append(SessionRowMapper.make(s, now: now, tzOffset: tzOffset))
         }
         return order.map { SessionGroup(title: $0, rows: buckets[$0] ?? []) }
     }
 
-    /// 日期维度：以 **UTC 日**（floor(ts/86400)）比较，确定性、可注入 now、便于跨午夜测试。
-    private static func groupByDate(_ sessions: [Session], now: Double) -> [SessionGroup] {
-        let nowDay = Int(now / 86_400)
+    /// 日期维度：以**本地日**（floor((ts+tzOffset)/86400)）比较；tzOffset 由 IO 边界注入
+    /// TimeZone.current.secondsFromGMT()。默认 0（UTC）保测试确定性（评审修复：东八区错位）。
+    private static func groupByDate(_ sessions: [Session], now: Double, tzOffset: Double) -> [SessionGroup] {
+        let nowDay = Int((now + tzOffset) / 86_400)
         let order: [(String, (Int) -> Bool)] = [
             ("今天", { $0 == nowDay }),
             ("昨天", { $0 == nowDay - 1 }),
@@ -109,7 +119,7 @@ public enum SessionListOrganizer {
             ("更早", { $0 <= nowDay - 7 }),
         ]
         return order.compactMap { title, pred in
-            let rows = sessions.filter { pred(Int($0.lastActiveAt / 86_400)) }.map { SessionRowMapper.make($0, now: now) }
+            let rows = sessions.filter { pred(Int(($0.lastActiveAt + tzOffset) / 86_400)) }.map { SessionRowMapper.make($0, now: now, tzOffset: tzOffset) }
             return rows.isEmpty ? nil : SessionGroup(title: title, rows: rows)
         }
     }

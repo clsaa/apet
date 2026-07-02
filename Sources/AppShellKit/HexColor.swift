@@ -13,7 +13,8 @@ public enum HexColor {
     public static func parse(_ raw: String) -> RGBA? {
         var s = raw.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
         if s.hasPrefix("#") { s.removeFirst() }
-        guard s.allSatisfy({ $0.isHexDigit }) else { return nil }
+        // 仅 ASCII hex（评审修复 测试 m9：isHexDigit 接受全角"数字"，会被静默解析成黑色）。
+        guard s.allSatisfy({ c in (c >= "0" && c <= "9") || (c >= "a" && c <= "f") }) else { return nil }
 
         let hex: String
         switch s.count {

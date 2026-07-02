@@ -10,7 +10,13 @@
 # Optional env:
 #   AGENTPET_ROOT       data-root string (default: ~/.claude)
 #   ITERM_SESSION_ID    iTerm2 session id (e.g. w0t1p0:ABC)
-#   TERM_PROGRAM        terminal app name (Apple_Terminal | WarpTerminal | …)
+#   TERM_PROGRAM        terminal app name (Apple_Terminal | WarpTerminal | ghostty | vscode)
+#
+# Wire contract (for third-party adapters mirroring this script):
+#   Legal event kinds: session_start | busy | stop | attention | session_end | plugin_error
+#   Unmapped hook events pass through as lowercase(hook_event_name) and land in
+#   EventKind.unknown on the app side (kept, not dropped) — do NOT rely on that
+#   for real states; emit one of the legal kinds above.
 
 set -uo pipefail
 

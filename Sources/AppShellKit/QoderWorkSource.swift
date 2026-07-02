@@ -57,25 +57,32 @@ public struct QoderWorkDBReader {
             .appendingPathComponent("Library/Application Support/QoderWork/data/agents.db")
     }
 
-    /// 读取全部未删除任务会话。DB 不存在/打不开 → []（QoderWork 未安装是常态）。
-    public func read() -> [QoderWorkChatRow] {
+    /// 读取全部未删除任务会话。
+    /// 语义（评审修复 AI M5/架构 M3/测试 M5）：**失败 ≠ 空**——
+    /// - DB 文件不存在 → `[]`（QoderWork 未安装是常态，确实无会话）
+    /// - 打不开 / prepare 失败 / step 遇 BUSY 等半读 → `nil`（本轮读取失败，调用方应跳过）
+    public func read() -> [QoderWorkChatRow]? {
         guard FileManager.default.fileExists(atPath: dbPath) else { return [] }
         var db: OpaquePointer?
         guard sqlite3_open_v2(dbPath, &db, SQLITE_OPEN_READONLY, nil) == SQLITE_OK, let db else {
-            return []
+            return nil
         }
         defer { sqlite3_close_v2(db) }
+        // 锁竞争缓解：QoderWork 写库时等待至多 200ms 而非立即 SQLITE_BUSY。
+        sqlite3_busy_timeout(db, 200)
 
-        // sub_chats 与 chats 一一对应（实测）；LEFT JOIN 容忍缺 sub_chat/project 的行。
+        // GROUP BY 去重（测试 M5：双 sub_chat 不得产出重复会话行）；
+        // 外层 MAX(聚合) 包内层 MAX(标量) 取 chats/sub_chats 全组最新时间。
         let sql = """
-        SELECT c.id, c.name, p.path, s.session_id, MAX(c.updated_at, IFNULL(s.updated_at, 0))
+        SELECT c.id, c.name, p.path, MAX(s.session_id), MAX(MAX(c.updated_at, IFNULL(s.updated_at, 0)))
         FROM chats c
         LEFT JOIN projects p ON p.id = c.project_id
         LEFT JOIN sub_chats s ON s.chat_id = c.id
         WHERE c.deleted_at IS NULL
+        GROUP BY c.id
         """
         var stmt: OpaquePointer?
-        guard sqlite3_prepare_v2(db, sql, -1, &stmt, nil) == SQLITE_OK, let stmt else { return [] }
+        guard sqlite3_prepare_v2(db, sql, -1, &stmt, nil) == SQLITE_OK, let stmt else { return nil }
         defer { sqlite3_finalize(stmt) }
 
         func text(_ col: Int32) -> String? {
@@ -83,16 +90,21 @@ public struct QoderWorkDBReader {
         }
 
         var rows: [QoderWorkChatRow] = []
-        while sqlite3_step(stmt) == SQLITE_ROW {
-            guard let chatId = text(0) else { continue }
-            rows.append(QoderWorkChatRow(
-                chatId: chatId,
-                name: text(1),
-                projectPath: text(2),
-                sessionId: text(3),
-                updatedAt: Double(sqlite3_column_int64(stmt, 4))
-            ))
+        var rc = sqlite3_step(stmt)
+        while rc == SQLITE_ROW {
+            if let chatId = text(0) {
+                rows.append(QoderWorkChatRow(
+                    chatId: chatId,
+                    name: text(1),
+                    projectPath: text(2),
+                    sessionId: text(3),
+                    updatedAt: Double(sqlite3_column_int64(stmt, 4))
+                ))
+            }
+            rc = sqlite3_step(stmt)
         }
+        // 非正常收尾（SQLITE_BUSY/IOERR…）→ 半读结果不可信，按失败上报。
+        guard rc == SQLITE_DONE else { return nil }
         return rows
     }
 }
@@ -102,7 +114,7 @@ public struct QoderWorkDBReader {
 /// 定时轮询 agents.db → 纯扫描 → 差分 emit（对齐 JSONLDirectoryWatcher 的差分/幽灵语义）。
 /// 粗略状态只在窗口边界翻转，无需滞回。
 public final class QoderWorkWatcher {
-    private let read: () -> [QoderWorkChatRow]
+    private let read: () -> [QoderWorkChatRow]?
     private let root: String
     private let now: () -> Double
     private let emit: (ScanResult) -> Void
@@ -113,7 +125,7 @@ public final class QoderWorkWatcher {
     private var timer: DispatchSourceTimer?
 
     public init(
-        read: @escaping () -> [QoderWorkChatRow],
+        read: @escaping () -> [QoderWorkChatRow]?,
         root: String,
         now: @escaping () -> Double,
         emit: @escaping (ScanResult) -> Void,
@@ -125,7 +137,10 @@ public final class QoderWorkWatcher {
     }
 
     public func scanOnce() {
-        let results = QoderWorkScanner.scan(rows: read(), root: root, now: now(),
+        // 评审修复（AI M5/架构 M3）：读失败（nil，如写锁竞争半读）→ 整轮跳过，
+        // 不差分、不发幽灵 stale——一次锁抖动绝不能把全部活跃会话打灰。
+        guard let rows = read() else { return }
+        let results = QoderWorkScanner.scan(rows: rows, root: root, now: now(),
                                             runningWindow: runningWindow, idleWindow: idleWindow)
         var observed: Set<SessionKey> = []
         for result in results {
@@ -145,6 +160,7 @@ public final class QoderWorkWatcher {
     }
 
     public func start(every interval: Double) {
+        stop()  // 幂等：重复 start 不产生双 timer（测试评审 M6）
         let src = DispatchSource.makeTimerSource(queue: .main)
         src.schedule(deadline: .now() + interval, repeating: interval)
         src.setEventHandler { [weak self] in self?.scanOnce() }

@@ -214,8 +214,20 @@ final class PetWindowController: NSObject {
         let terminal = session.terminal
         let fs = focusService
         // osascript blocks; run off main thread (same pattern as MenuBarController / Fix B2).
+        // 评审修复（产品 m7）：跳转失败给反馈——与菜单栏面板行为对等，不再静默吞结果。
         Task.detached {
-            _ = fs.focus(terminal)
+            let result = fs.focus(terminal)
+            if result == .targetGone || result == .unsupported {
+                await MainActor.run {
+                    NSApp.activate(ignoringOtherApps: true)
+                    let alert = NSAlert()
+                    alert.messageText = "无法跳转到会话"
+                    alert.informativeText = "无法跳转到会话终端（可能已关闭，或终端信息不可用）。"
+                    alert.alertStyle = .informational
+                    alert.addButton(withTitle: "好的")
+                    alert.runModal()
+                }
+            }
         }
         popover?.performClose(nil)
     }

@@ -50,7 +50,7 @@ swift test --filter SessionStoreOrderingTests   # 跑单个测试类
 
 源自设计文档 §3/§4/§6/§7 与红队对抗评审，**违反即是 bug**：
 
-1. **零外部依赖** —— 只用 Foundation 标准库。
+1. **零第三方包依赖** —— SwiftPM 依赖恒为零。分层细则：**AgentPetCore 只用 Foundation**；AppShellKit/apet 可用 Apple 系统框架（AppKit/SwiftUI/Vision/SQLite3/ServiceManagement 等），新增系统框架须在 commit message 说明理由。
 2. **不用 `Date()` / `Date.now`** —— 需要「当前时间」一律通过参数 `now: Double`（Unix 秒）注入，便于测试 STALE。
 3. **排序唯一事实是 `seq`**（由 `NDJSONIngestor` 按 append 顺序赋的单调序），**绝不用墙钟 `ts` 排序**。去重唯一键是 `eventId`。归一键是 `(agent, root, sessionId)`（必须含 `root`，否则多 profile 会撞车）。
 4. **终态 `ended` 不可回退**；`stale` 可复活。`busy` 落在 `running` 上只刷新计时、**不广播**。
@@ -88,7 +88,8 @@ swift test --filter SessionStoreOrderingTests   # 跑单个测试类
   - **M3-A1 多终端+常驻** ✅（Terminal.app 窗口级/Warp/Ghostty/VSCode 能力分级 + hook 采集 tty；SMAppService 开机自启；精确跳转未命中兜底激活 App）
   - **M3-B 会话管理** ✅（搜索/等你置顶/收藏+重命名 F7/相对时间 F10/复制 ID+恢复命令 F11；SessionMeta 持久化）
   - **M3-A2 外观/体验** ✅（首选项即时生效、状态圆点自定义色 F3、通知横幅/声音分开 F1、首选项四分页 F4、内置宠物名 F5、面板页脚瘦身）。F9 主动不改 ⌥⌘S（footgun）。
-  - **M3-C 多 Agent 框架** ✅（TimestampDialect epoch-ms + AgentManifest + resumeArgv 红队）。**接入目标 Qoder / Qoder Work / Qoder Cli 待逐一核实**（不臆造）。
-  - **M3-D AI 总结** ✅核心（LocalSummarizer 免费默认 + ProcessRunner 缝 + SummarizerService 严禁 --resume）；UI 待独立评审后接。
-  - 遗留：自定义宠物命名持久化、Qoder 真实接入、M3-D 摘要 UI。详见 `docs/superpowers/specs/2026-06-28-apet-m3-design.md` 与 `.superpowers/sdd/` 报告。
+  - **M3-C 多 Agent** ✅（AgentManifest 契约 + **QoderWork 实测接入**：SQLite agents.db 只读轮询/粗略态/点击激活 App + **Qoder CLI 实测接入**：~/.qoder jsonl 与 Claude 同构/resume=`qodercli --resume`）。
+  - **M3-D AI 总结** ✅（本地摘要已接面板右键；模型摘要核心+安全缝已备、UI 待接）。F5 宠物命名持久化 ✅（pet-names.json，01=用户本人语义）。
+  - **六视角对抗评审** ✅（架构/产品/AI/用户/测试/开源 2026-07-03，Blocker/Major 已修复：applyMetas 绕过、ProcessRunner cwd/PATH/argv0、SQLite busy 半读、时区日界、幽灵01、围栏逃逸等，见 `.superpowers/sdd/`）。
+  - 真实遗留：**Qoder IDE 接入**（数据已定位 `~/Library/Application Support/Qoder/SharedClientCache/cli/projects/**.jsonl`）、模型摘要 UI、F10 createdAt 注入。
 - **M4 生态**（公开契约 + 第三方样例）。详见 README 与 spec。
