@@ -65,7 +65,9 @@
 
 ## §3 公开插件契约 v2（扩展性核心）
 
-未来第三方 Agent 厂商可自助接入，无需改本 App 源码。契约公开、版本化、语言无关，并以 **JSON Schema 规范文档**交付（非示例片段）。下文为字段定义，权威以仓库内 `contracts/event.schema.json` 与 `contracts/manifest.schema.json` 为准。
+未来第三方 Agent 厂商可自助接入，无需改本 App 源码。契约公开、版本化、语言无关，并以 **JSON Schema 规范文档**交付（非示例片段）。下文为字段定义。
+
+> **权威性注记（2026-07-03，开源评审 M5）**：`contracts/*.schema.json` 属 **M4 交付物，当前尚不存在**。在其交付前，权威以**本节文字 + 代码内 `Sources/AppShellKit/AgentManifest.swift`**（精简 DTO，含已实测的 claude/qoderWork/qoderCli 条目）为准；M4 交付 schema 时须对齐两者形态差异（本节 manifest.json 的 signature/publisher/compat 字段在代码 DTO 中尚未落地）。
 
 ### (a) 事件协议（每行一个 JSON 事件）
 
