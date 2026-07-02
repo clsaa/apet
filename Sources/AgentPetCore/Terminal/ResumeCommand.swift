@@ -11,6 +11,9 @@ public enum ResumeCommand {
         switch agent {
         case "claude", "claude-code":
             return ["claude", "--resume", sessionId]
+        case "qoder-cli":
+            // 实测确认（qodercli v1.0.36 --help）：`-r, --resume [id]`。
+            return ["qodercli", "--resume", sessionId]
         default:
             return nil
         }

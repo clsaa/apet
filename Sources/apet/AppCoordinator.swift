@@ -151,6 +151,24 @@ final class AppCoordinator {
             jsonlWatchers.append(w)
         }
 
+        // ─── 2a-1b. Qoder CLI 数据根（M3-C）：~/.qoder 存在即挂 jsonl watcher（agent=qoder-cli）──
+        // CLI 与 Claude Code 同构，transcript 预期 ~/.qoder/projects/**；目录未生成时扫描安全为空。
+        // 非 Claude 无 stateRules：内容信号解析失败自动退化 mtime 粗略态（M3-C 降级设计）。
+        let qoderCliRoot = (NSHomeDirectory() as NSString).appendingPathComponent(".qoder")
+        if FileManager.default.fileExists(atPath: qoderCliRoot) {
+            let qcProjects = (qoderCliRoot as NSString).appendingPathComponent("projects")
+            let qw = JSONLDirectoryWatcher(
+                projectsDir: qcProjects,
+                root: qoderCliRoot,
+                now: { Date().timeIntervalSince1970 },
+                parse: { JSONLParse.parse(path: $0, root: qoderCliRoot) },
+                emit: { [weak self] result in self?.applyScanResult(result) },
+                agent: "qoder-cli"
+            )
+            jsonlWatchers.append(qw)
+            appendToLog("[info] 发现 ~/.qoder，已挂 Qoder CLI 会话监控（agent=qoder-cli）\n")
+        }
+
         // ─── 2a-2. QoderWork 源（M3-C）：agents.db 存在才建，走与 jsonl 相同的静默通道 ──
         let qwDBPath = QoderWorkDBReader.defaultDBPath
         if FileManager.default.fileExists(atPath: qwDBPath) {

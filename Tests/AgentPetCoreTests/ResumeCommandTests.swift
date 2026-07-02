@@ -34,10 +34,18 @@ final class ResumeCommandTests: XCTestCase {
         XCTAssertNil(ResumeCommand.argv(agent: "claude-code", sessionId: "not-a-uuid"))
     }
 
-    // MARK: - 未知 agent（M3-C 接 Qoder 再补）
+    // MARK: - qoder-cli（实测确认：qodercli --resume [id]，2026-07-02 v1.0.36 --help）
+
+    func test_argv_qoderCli() {
+        XCTAssertEqual(ResumeCommand.argv(agent: "qoder-cli", sessionId: validId),
+                       ["qodercli", "--resume", validId])
+    }
+
+    // MARK: - 未知 agent（qoder IDE / qoder-work resume 未核实）
 
     func test_argv_unknownAgent_nil() {
         XCTAssertNil(ResumeCommand.argv(agent: "qoder", sessionId: validId))
+        XCTAssertNil(ResumeCommand.argv(agent: "qoder-work", sessionId: validId))
         XCTAssertNil(ResumeCommand.display(agent: "qoder", sessionId: validId))
     }
 }
