@@ -809,12 +809,13 @@ struct PreferencesView: View {
             Label("宠物形象", systemImage: "pawprint")
                 .font(.headline)
 
-            // ── 内置宠物 ─────────────────────────────────────────────────────────
-            Picker("选择宠物", selection: $config.selectedPet) {
-                Text("🐕 \(PetDisplayName.builtin("shiba"))").tag("shiba")
-                Text("🐩 \(PetDisplayName.builtin("bichon"))").tag("bichon")
-            }
-            .pickerStyle(.radioGroup)
+            // ── 内置宠物（可重命名，代表不同成员/宠物）───────────────────────────
+            Text("内置宠物名默认 01/02/03，可改成对应的人（如「大儿子」「小女儿」）。")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+            builtinPetRow(key: "shiba", emoji: "🐕")
+            builtinPetRow(key: "bichon", emoji: "🐩")
 
             // ── 已上传自定义宠物 ─────────────────────────────────────────────────
             if let store = customStore {
@@ -845,18 +846,47 @@ struct PreferencesView: View {
         petNames[id] ?? PetDefaultName.next(existingCustomCount: index)
     }
 
-    /// 重命名自定义宠物（弹输入框），持久化到 PetNameStore。
-    private func renamePet(id: String, index: Int) {
+    /// 内置宠物展示名：已命名取存储名，否则内置默认（01 默认 / 02 / 03…可代表家人）。
+    private func builtinPetName(_ key: String) -> String {
+        petNames[key] ?? PetDisplayName.builtin(key)
+    }
+
+    /// 内置宠物一行：emoji + 可编辑名 + 选中勾 + 重命名/设为当前。
+    private func builtinPetRow(key: String, emoji: String) -> some View {
+        let isSelected = config.selectedPet == key
+        return HStack(spacing: 8) {
+            Text(emoji).font(.system(size: 18))
+            Text(builtinPetName(key))
+                .font(.system(size: 13, weight: .semibold))
+                .lineLimit(1)
+            Spacer()
+            if isSelected {
+                Image(systemName: "checkmark")
+                    .foregroundStyle(Color.accentColor)
+                    .font(.system(size: 12, weight: .semibold))
+            }
+            Button("重命名") { renameStoredPet(key: key, currentName: builtinPetName(key)) }
+                .controlSize(.small).buttonStyle(.bordered)
+            Button("设为当前") { config.selectedPet = key }
+                .controlSize(.small).buttonStyle(.bordered)
+                .disabled(isSelected)
+        }
+        .padding(.vertical, 2)
+    }
+
+    /// 通用重命名（内置 key 或自定义 id 皆可），持久化到 PetNameStore。留空恢复默认。
+    private func renameStoredPet(key: String, currentName: String) {
         let alert = NSAlert()
         alert.messageText = "重命名宠物"
+        alert.informativeText = "可命名为对应的人/宠物（留空恢复默认）。"
         let tf = NSTextField(frame: NSRect(x: 0, y: 0, width: 220, height: 24))
-        tf.stringValue = petDisplayName(id: id, index: index)
+        tf.stringValue = currentName
         alert.accessoryView = tf
         alert.addButton(withTitle: "保存")
         alert.addButton(withTitle: "取消")
         guard alert.runModal() == .alertFirstButtonReturn else { return }
         let name = tf.stringValue.trimmingCharacters(in: .whitespacesAndNewlines)
-        if name.isEmpty { petNames[id] = nil } else { petNames[id] = name }
+        if name.isEmpty { petNames[key] = nil } else { petNames[key] = name }
         try? petNameStore.save(petNames)
     }
 
@@ -910,7 +940,7 @@ struct PreferencesView: View {
                     .font(.system(size: 12, weight: .semibold))
             }
 
-            Button("重命名") { renamePet(id: id, index: index) }
+            Button("重命名") { renameStoredPet(key: id, currentName: petDisplayName(id: id, index: index)) }
                 .controlSize(.small)
                 .buttonStyle(.bordered)
 
