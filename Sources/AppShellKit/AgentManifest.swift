@@ -106,9 +106,12 @@ public struct AgentManifest: Equatable {
         hasStateRules: false
     )
 
-    /// Qoder CLI（**部分实测**，2026-07-02 v1.0.36）：config root `~/.qoder`（安装脚本确认）；
-    /// **resume 已核实**：`qodercli --resume [id]`（--help）。CLI 与 Claude Code 高度同构，
-    /// transcript 预期落 `~/.qoder/projects/**`（登录后待最终确认；watcher 对不存在目录安全为空）。
+    /// Qoder CLI（**全量实测**，2026-07-02 v1.0.36 真实会话验证）：
+    /// - config root `~/.qoder`；transcript `~/.qoder/projects/<编码cwd>/<sessionId>.jsonl`（已确认）
+    /// - 对话行（user/assistant）ISO8601 时间戳 + entrypoint="cli" + message.stop_reason ——
+    ///   与 Claude 格式同构，现有 JSONLParse/Scanner 直接兼容（端到端验证：会话入 store）
+    /// - `runtime-config` 元数据行为 epoch 毫秒整数（被解析器天然忽略，无害）
+    /// - **resume 已核实**：`qodercli --resume [id]`
     public static let qoderCli = AgentManifest(
         id: "qoder-cli",
         rootsGlobs: ["~/.qoder/projects/**"],
