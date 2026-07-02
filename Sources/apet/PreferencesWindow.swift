@@ -305,6 +305,10 @@ struct PreferencesView: View {
     private let uploadController: PetUploadController?
     private let customStore: CustomPetStore?
 
+    // MARK: - 自定义宠物命名（F5 持久化）
+    private let petNameStore: PetNameStore
+    @State private var petNames: [String: String] = [:]
+
     // MARK: - 快捷键录制状态
     @State private var isRecordingHotKey = false
     @StateObject private var hotKeyRecorder = HotKeyRecorder()
@@ -334,6 +338,12 @@ struct PreferencesView: View {
         customStore: CustomPetStore? = nil
     ) {
         _config = State(initialValue: config)
+        // 自定义宠物名持久化：Application Support/AgentPet/pet-names.json
+        let appSupport = (NSHomeDirectory() as NSString)
+            .appendingPathComponent("Library/Application Support/AgentPet")
+        let namesURL = URL(fileURLWithPath: (appSupport as NSString).appendingPathComponent("pet-names.json"))
+        self.petNameStore = PetNameStore(url: namesURL)
+        _petNames = State(initialValue: PetNameStore(url: namesURL).load())
         self.configStore = configStore
         self.onSave = onSave
         self.uploadController = uploadController
@@ -815,8 +825,8 @@ struct PreferencesView: View {
                         .font(.subheadline)
                         .foregroundStyle(.secondary)
 
-                    ForEach(ids, id: \.self) { id in
-                        customPetRow(id: id, store: store)
+                    ForEach(Array(ids.enumerated()), id: \.element) { index, id in
+                        customPetRow(id: id, index: index, store: store)
                     }
                 }
             }
@@ -830,15 +840,34 @@ struct PreferencesView: View {
         }
     }
 
-    @ViewBuilder
-    private func customPetRow(id: String, store: CustomPetStore) -> some View {
+    /// 自定义宠物展示名：已命名取存储名，否则按位置给默认 04/05…（内置占 01-03）。
+    private func petDisplayName(id: String, index: Int) -> String {
+        petNames[id] ?? PetDefaultName.next(existingCustomCount: index)
+    }
+
+    /// 重命名自定义宠物（弹输入框），持久化到 PetNameStore。
+    private func renamePet(id: String, index: Int) {
+        let alert = NSAlert()
+        alert.messageText = "重命名宠物"
+        let tf = NSTextField(frame: NSRect(x: 0, y: 0, width: 220, height: 24))
+        tf.stringValue = petDisplayName(id: id, index: index)
+        alert.accessoryView = tf
+        alert.addButton(withTitle: "保存")
+        alert.addButton(withTitle: "取消")
+        guard alert.runModal() == .alertFirstButtonReturn else { return }
+        let name = tf.stringValue.trimmingCharacters(in: .whitespacesAndNewlines)
+        if name.isEmpty { petNames[id] = nil } else { petNames[id] = name }
+        try? petNameStore.save(petNames)
+    }
+
+    private func customPetRow(id: String, index: Int, store: CustomPetStore) -> some View {
         let hasCutout = FileManager.default.fileExists(atPath: store.cutoutPath(id: id))
         let isSelected = config.selectedPet == "custom:\(id)"
         // MAJOR-4: 优先展示抠图缩略图，无则退回原图缩略图（24×24 pt）。
         let thumbPath = hasCutout ? store.cutoutPath(id: id) : store.originalPath(id: id)
         let thumbImage = NSImage(contentsOfFile: thumbPath)
 
-        HStack(spacing: 8) {
+        return HStack(spacing: 8) {
             // ── 24×24 缩略图 ──────────────────────────────────────────────────────
             if let img = thumbImage {
                 Image(nsImage: img)
@@ -862,16 +891,14 @@ struct PreferencesView: View {
                     )
             }
 
-            // ── 状态描述 ─────────────────────────────────────────────────────────
+            // ── 名字 + 状态 ─────────────────────────────────────────────────────
             VStack(alignment: .leading, spacing: 2) {
+                Text(petDisplayName(id: id, index: index))
+                    .font(.system(size: 13, weight: .semibold))
+                    .lineLimit(1)
                 Text(hasCutout ? "✓ 已抠图" : "⚠ 使用原图")
                     .font(.caption)
-                    .foregroundStyle(hasCutout ? .primary : .secondary)
-                Text(id)
-                    .font(.system(.caption2, design: .monospaced))
-                    .foregroundStyle(.tertiary)
-                    .lineLimit(1)
-                    .truncationMode(.middle)
+                    .foregroundStyle(hasCutout ? .secondary : .tertiary)
             }
 
             Spacer()
@@ -882,6 +909,10 @@ struct PreferencesView: View {
                     .foregroundStyle(Color.accentColor)
                     .font(.system(size: 12, weight: .semibold))
             }
+
+            Button("重命名") { renamePet(id: id, index: index) }
+                .controlSize(.small)
+                .buttonStyle(.bordered)
 
             Button("设为当前") {
                 uploadController?.setCurrent(id: id)
