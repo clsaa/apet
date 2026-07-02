@@ -19,17 +19,28 @@ public enum LocalSummarizer {
 
         var parts: [String] = []
         if let u = lastUser {
-            parts.append("指令：\(truncate(u.text, maxLen))")
+            parts.append("指令：\(sanitize(u.text, maxLen))")
         }
         if let a = lastAssistant {
-            let desc = a.text.isEmpty ? (a.stopReason ?? "完成") : truncate(a.text, maxLen)
+            // stopReason 同样来自不可信 jsonl——一并消毒限长（评审修复 AI m6）
+            let desc = a.text.isEmpty ? sanitize(a.stopReason ?? "完成", maxLen) : sanitize(a.text, maxLen)
             parts.append("最近：\(desc)")
         }
         return parts.isEmpty ? "（无可总结内容）" : parts.joined(separator: " · ")
     }
 
-    private static func truncate(_ s: String, _ maxLen: Int) -> String {
-        let flat = s.replacingOccurrences(of: "\n", with: " ")
+    /// 不可信文本消毒：滤控制字符（C0/C1）与 bidi 覆盖符（RTL 欺骗）、拉平换行、限长。
+    private static func sanitize(_ s: String, _ maxLen: Int) -> String {
+        let bidi: Set<Character> = ["\u{202A}", "\u{202B}", "\u{202C}", "\u{202D}", "\u{202E}",
+                                    "\u{2066}", "\u{2067}", "\u{2068}", "\u{2069}"]
+        let flat = String(s.map { c -> Character in
+            if c == "\n" || c == "\r" || c == "\t" { return " " }
+            return c
+        }).filter { c in
+            guard let scalar = c.unicodeScalars.first else { return false }
+            if scalar.value < 0x20 || (scalar.value >= 0x7F && scalar.value <= 0x9F) { return false }
+            return !bidi.contains(c)
+        }
         if flat.count <= maxLen { return flat }
         return String(flat.prefix(maxLen)) + "…"
     }

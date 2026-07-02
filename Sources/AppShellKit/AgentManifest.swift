@@ -52,18 +52,24 @@ public struct AgentManifest: Equatable {
     }
 
     /// 渲染恢复命令 argv。模板缺失或 sessionId 非法 UUID → nil。
+    /// 评审修复（AI m8⑤）：模板元素**部分含** `{id}`（如 `"--resume={id}"`）会静默不替换
+    /// 渲染出坏命令——显式拒绝，占位符只允许作为独立元素。
     public func renderResumeArgv(sessionId: String) -> [String]? {
         guard let template = resumeArgvTemplate, Self.isValidUUID(sessionId) else { return nil }
+        guard template.allSatisfy({ !$0.contains("{id}") || $0 == "{id}" }) else { return nil }
         return template.map { $0 == "{id}" ? sessionId : $0 }
     }
 
-    /// 严格 UUID（8-4-4-4-12 hex）。
+    /// 严格 UUID（8-4-4-4-12 hex，**仅 ASCII**）。
+    /// 评审修复（测试 m9）：`Character.isHexDigit` 接受全角十六进制数字（如"８Ｆ"），改用 ASCII 区间。
     static func isValidUUID(_ s: String) -> Bool {
         let groups = [8, 4, 4, 4, 12]
         let parts = s.split(separator: "-", omittingEmptySubsequences: false)
         guard parts.count == groups.count else { return false }
         for (part, expected) in zip(parts, groups) {
-            guard part.count == expected, part.allSatisfy({ $0.isHexDigit }) else { return false }
+            guard part.count == expected, part.allSatisfy({ c in
+                (c >= "0" && c <= "9") || (c >= "a" && c <= "f") || (c >= "A" && c <= "F")
+            }) else { return false }
         }
         return true
     }
@@ -78,16 +84,14 @@ public struct AgentManifest: Equatable {
         hasStateRules: true
     )
 
-    /// Qoder 系接入目标（用户指定）：**Qoder / Qoder Work / Qoder Cli** 三个产品。
-    /// 各自的真实路径 / jsonl 格式 / resume 命令 **待逐一核实**，核实前只留可扩展 manifest 接口、
-    /// 不臆造（遵守 no-fabricated-urls-commands）。下面 `qoder` 为占位 stub，
-    /// 待补 `qoderWork` / `qoderCli` 变体。
-    ///
-    /// Qoder：路径/时间方言为实测事实；**resume 命令与状态规则未核实 → 不臆造**。
+    /// ⚠️ 已废弃 stub（评审修复 AI M4：与 `qoderCli` 同 glob 且方言标注以偏概全——
+    /// 实测对话行是 ISO8601，epoch 毫秒只属于 `runtime-config` 元数据行）。
+    /// 保留仅为源码历史可读性，**不在 builtins**；Qoder IDE 真实 manifest 待接入时新建。
+    @available(*, deprecated, message: "被 qoderCli(实测) 取代；勿用于扫描注册")
     public static let qoder = AgentManifest(
         id: "qoder",
         rootsGlobs: ["~/.qoder/projects/**"],
-        tsDialect: .epochMillis,
+        tsDialect: .iso,
         resumeArgvTemplate: nil,
         hasStateRules: false
     )
@@ -120,6 +124,6 @@ public struct AgentManifest: Equatable {
         hasStateRules: false
     )
 
-    /// 内置注册表。
-    public static let builtins: [AgentManifest] = [.claude, .qoder, .qoderWork, .qoderCli]
+    /// 内置注册表（无 glob 重叠——评审修复 AI M4：废弃 stub 已移出）。
+    public static let builtins: [AgentManifest] = [.claude, .qoderWork, .qoderCli]
 }

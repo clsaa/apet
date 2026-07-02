@@ -53,4 +53,19 @@ final class QoderWorkScannerTests: XCTestCase {
         guard case .observe(let state, _, _, _) = r[0] else { return XCTFail() }
         XCTAssertEqual(state, .waitingStop, "恰好等于窗口边界 → 不算 running")
     }
+
+    // 评审补齐（测试 m10）：idle 边界与 running 边界对称覆盖。
+    func test_boundary_exactlyIdleWindow_isExcluded() {
+        let r = QoderWorkScanner.scan(rows: [row(updatedAt: 1000)], root: "/db", now: 1000 + 1800,
+                                      runningWindow: 120, idleWindow: 1800)
+        XCTAssertTrue(r.isEmpty, "恰好等于 idleWindow → 排除（guard age < idleWindow）")
+    }
+
+    // 评审补齐（测试 m10）：未来时间（时钟漂移）→ 负 age → running，不崩不排除。
+    func test_futureUpdatedAt_isRunning() {
+        let r = QoderWorkScanner.scan(rows: [row(updatedAt: 2000)], root: "/db", now: 1000,
+                                      runningWindow: 120, idleWindow: 1800)
+        guard case .observe(let state, _, _, _) = r[0] else { return XCTFail() }
+        XCTAssertEqual(state, .running)
+    }
 }

@@ -40,4 +40,10 @@ final class HexColorTests: XCTestCase {
         XCTAssertNil(HexColor.parse("#12345"))
         XCTAssertNil(HexColor.parse("nope"))
     }
+
+    // 评审修复（测试 m9）：全角 hex"数字"必须拒绝，不得静默解析成黑色。
+    func test_fullWidthHex_returnsNil() {
+        XCTAssertNil(HexColor.parse("ＦＦ００００"))
+        XCTAssertNil(HexColor.parse("#ＦＦ0000"))
+    }
 }

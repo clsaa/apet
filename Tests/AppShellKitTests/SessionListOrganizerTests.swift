@@ -119,4 +119,20 @@ final class SessionListOrganizerTests: XCTestCase {
         XCTAssertTrue(titles.contains("昨天"))
         XCTAssertTrue(titles.contains("更早"))
     }
+
+    // 评审补齐（测试 M4）：「本周」桶 + 组序 + 每组归属全值断言（2/6/7/8 天前四会话）。
+    func test_group_byDate_thisWeekBucket_andFullOrder() {
+        let dayN = 100
+        let noon = Double(dayN) * 86_400 + 43_200  // 第100日正午
+        let sessions = [
+            session(id: "d2", state: .running, lastActiveAt: noon - 86_400 * 2),  // 本周
+            session(id: "d6", state: .running, lastActiveAt: noon - 86_400 * 6),  // 本周
+            session(id: "d7", state: .running, lastActiveAt: noon - 86_400 * 7),  // 更早（== nowDay-7）
+            session(id: "d8", state: .running, lastActiveAt: noon - 86_400 * 8),  // 更早
+        ]
+        let r = SessionListOrganizer.organize(sessions: sessions, dimension: .date, filter: "", now: noon)
+        XCTAssertEqual(r.groups.map { $0.title }, ["本周", "更早"], "组序固定：本周在更早之前")
+        XCTAssertEqual(r.groups[0].rows.map { $0.sessionId }, ["d2", "d6"])
+        XCTAssertEqual(r.groups[1].rows.map { $0.sessionId }, ["d7", "d8"], "7 天整属「更早」")
+    }
 }
