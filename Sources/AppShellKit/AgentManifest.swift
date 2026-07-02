@@ -2,10 +2,12 @@ import Foundation
 
 // MARK: - TimestampDialect
 
-/// 时间戳方言。Claude jsonl 用 ISO8601；Qoder 部分行用 epoch 毫秒（实测事实）。
+/// 时间戳方言。Claude jsonl 用 ISO8601；Qoder jsonl 部分行用 epoch 毫秒；
+/// QoderWork agents.db 用 epoch 秒（均为实测事实）。
 public enum TimestampDialect: Equatable {
     case iso
     case epochMillis
+    case epochSeconds
 
     /// 解析为 Unix 秒（Double）。非法 → nil。纯解析（无当前时间读取）。
     public func parse(_ raw: String) -> Double? {
@@ -14,6 +16,10 @@ public enum TimestampDialect: Equatable {
             let trimmed = raw.trimmingCharacters(in: .whitespaces)
             guard !trimmed.isEmpty, let ms = Double(trimmed) else { return nil }
             return ms / 1000.0
+        case .epochSeconds:
+            let trimmed = raw.trimmingCharacters(in: .whitespaces)
+            guard !trimmed.isEmpty, let s = Double(trimmed) else { return nil }
+            return s
         case .iso:
             let f = ISO8601DateFormatter()
             f.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
@@ -86,6 +92,20 @@ public struct AgentManifest: Equatable {
         hasStateRules: false
     )
 
+    /// QoderWork（**已实测接入**，2026-07-02）：数据在 SQLite 而非 jsonl——
+    /// `~/Library/Application Support/QoderWork/data/agents.db`（chats/projects/sub_chats，
+    /// session_id 为 UUID，时间为 **epoch 秒**）。bundleId `com.qoder.work`。
+    /// 读取走 `QoderWorkDBReader`（只读）+ `QoderWorkWatcher` 轮询；状态粗略（无 stateRules）。
+    /// resume 命令未核实 → nil。Qoder IDE（com.qoder.ide，state.vscdb 键值库）与 Qoder Cli
+    ///（本机未装）仍待核实。
+    public static let qoderWork = AgentManifest(
+        id: "qoder-work",
+        rootsGlobs: ["~/Library/Application Support/QoderWork/data/agents.db"],
+        tsDialect: .epochSeconds,
+        resumeArgvTemplate: nil,
+        hasStateRules: false
+    )
+
     /// 内置注册表。
-    public static let builtins: [AgentManifest] = [.claude, .qoder]
+    public static let builtins: [AgentManifest] = [.claude, .qoder, .qoderWork]
 }
