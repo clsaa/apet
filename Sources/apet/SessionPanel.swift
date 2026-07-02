@@ -122,7 +122,10 @@ struct SessionPanel: View {
                 Button("本地摘要") { onLocalSummary(row.id) }
                 Divider()
                 Button("复制 sessionID") { onCopyId(row.id) }
-                Button("复制恢复命令") { onCopyResume(row.id) }
+                // 仅对有已核实恢复命令的 agent 显示（产品评审 M3：不静默复制假命令）。
+                if SessionRowActions.hasResumeCommand(agent: row.agent, sessionId: row.sessionId) {
+                    Button("复制恢复命令") { onCopyResume(row.id) }
+                }
             }
     }
 

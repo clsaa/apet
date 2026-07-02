@@ -40,6 +40,7 @@ enum SessionRowActions {
         alert.alertStyle = .informational
         alert.addButton(withTitle: "好")
         alert.addButton(withTitle: "复制")
+        NSApp.activate(ignoringOtherApps: true)   // LSUIElement：不激活则弹窗可能不在最前（用户评审 M5）
         if alert.runModal() == .alertSecondButtonReturn {
             copyToPasteboard(summary)
         }
@@ -55,8 +56,14 @@ enum SessionRowActions {
         alert.accessoryView = tf
         alert.addButton(withTitle: "保存")
         alert.addButton(withTitle: "取消")
+        NSApp.activate(ignoringOtherApps: true)   // LSUIElement：确保弹窗在最前（用户评审 M5）
         guard alert.runModal() == .alertFirstButtonReturn else { return .cancel }
         let name = tf.stringValue.trimmingCharacters(in: .whitespacesAndNewlines)
         return .set(name.isEmpty ? nil : name)
+    }
+
+    /// 该会话是否有已核实的恢复命令（决定菜单项显示，产品评审 M3：不静默复制假命令）。
+    static func hasResumeCommand(agent: String, sessionId: String) -> Bool {
+        ResumeCommand.argv(agent: agent, sessionId: sessionId) != nil
     }
 }

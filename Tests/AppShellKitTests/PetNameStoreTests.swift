@@ -23,10 +23,15 @@ final class PetNameStoreTests: XCTestCase {
         XCTAssertEqual(PetNameStore(url: url).load(), [:])
     }
 
-    // 内置占 01/02/03，自定义从 04 起顺延。
-    func test_defaultName_startsAt04() {
-        XCTAssertEqual(PetDefaultName.next(existingCustomCount: 0), "04")
-        XCTAssertEqual(PetDefaultName.next(existingCustomCount: 1), "05")
-        XCTAssertEqual(PetDefaultName.next(existingCustomCount: 6), "10")
+    // 评审修复（用户 B1 幽灵01）：01=用户本人，无内置资产——第一张上传照片默认给 "01"；
+    // "01" 已被占用则回落 04 顺延（02/03 是内置柴犬/比熊）。
+    func test_defaultName_firstUpload_takes01_whenUnused() {
+        XCTAssertEqual(PetDefaultName.next(existingCustomCount: 0, usedNames: []), "01")
+    }
+
+    func test_defaultName_fallsTo04Sequence_when01Used() {
+        XCTAssertEqual(PetDefaultName.next(existingCustomCount: 1, usedNames: ["01"]), "05")
+        XCTAssertEqual(PetDefaultName.next(existingCustomCount: 0, usedNames: ["01"]), "04")
+        XCTAssertEqual(PetDefaultName.next(existingCustomCount: 6, usedNames: ["01", "自定义"]), "10")
     }
 }

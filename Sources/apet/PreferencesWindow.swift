@@ -818,7 +818,7 @@ struct PreferencesView: View {
                 .font(.headline)
 
             // ── 内置宠物（可重命名，代表不同成员/宠物）───────────────────────────
-            Text("内置宠物名默认 01/02/03，可改成对应的人（如「大儿子」「小女儿」）。")
+            Text("内置：柴犬=02、比熊=03（可改成「大儿子」「小女儿」等）。01 留给你自己——上传一张你的照片即可，第一张会自动命名为 01。")
                 .font(.caption)
                 .foregroundStyle(.secondary)
                 .fixedSize(horizontal: false, vertical: true)
@@ -849,9 +849,13 @@ struct PreferencesView: View {
         }
     }
 
-    /// 自定义宠物展示名：已命名取存储名，否则按位置给默认 04/05…（内置占 01-03）。
+    /// 自定义宠物展示名：已命名取存储名；否则第一只未命名的补位 "01"（=你本人），
+    /// 其余按 04/05… 顺延（02/03 是内置柴犬/比熊）。
     private func petDisplayName(id: String, index: Int) -> String {
-        petNames[id] ?? PetDefaultName.next(existingCustomCount: index)
+        if let name = petNames[id] { return name }
+        var used = Set(petNames.values)
+        if index > 0 { used.insert("01") }   // 01 只给列表中第一只未命名的
+        return PetDefaultName.next(existingCustomCount: index, usedNames: used)
     }
 
     /// 内置宠物展示名：已命名取存储名，否则内置默认（01 默认 / 02 / 03…可代表家人）。
