@@ -23,6 +23,8 @@ struct SessionPanel: View {
     var onCopyId: (String) -> Void = { _ in }
     /// 复制恢复命令（claude --resume <id>）。
     var onCopyResume: (String) -> Void = { _ in }
+    /// M3-D①：免费本地摘要（一句话概括最近进展）。
+    var onLocalSummary: (String) -> Void = { _ in }
     /// 面板顶部快捷键提示，如 "⌥⌘P 打开/关闭"。为 nil 不显示。
     var hotkeyHint: String? = nil
     /// 状态圆点配色（F3）。默认系统色。
@@ -115,6 +117,8 @@ struct SessionPanel: View {
             .contextMenu {
                 Button(row.favorite ? "取消收藏" : "收藏") { onToggleFavorite(row.id) }
                 Button("重命名…") { onRename(row.id) }
+                Divider()
+                Button("本地摘要") { onLocalSummary(row.id) }
                 Divider()
                 Button("复制 sessionID") { onCopyId(row.id) }
                 Button("复制恢复命令") { onCopyResume(row.id) }

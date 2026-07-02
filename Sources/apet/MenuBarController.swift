@@ -21,6 +21,7 @@ private struct PanelRootView: View {
     let onRename: (String) -> Void
     let onCopyId: (String) -> Void
     let onCopyResume: (String) -> Void
+    let onLocalSummary: (String) -> Void
     let onTogglePet: () -> Void
     let onOpenPreferences: () -> Void
     let onQuit: () -> Void
@@ -39,6 +40,7 @@ private struct PanelRootView: View {
             SessionPanel(sessions: sessions, now: now, onTap: onTap,
                          onToggleFavorite: onToggleFavorite, onRename: onRename,
                          onCopyId: onCopyId, onCopyResume: onCopyResume,
+                         onLocalSummary: onLocalSummary,
                          hotkeyHint: hotkeyHint, palette: palette)
             Divider()
 
@@ -245,12 +247,13 @@ final class MenuBarController: NSObject {
             onRename: { [weak self] id in self?.handleRename(id: id) },
             onCopyId: { [weak self] id in self?.handleCopyId(id: id) },
             onCopyResume: { [weak self] id in self?.handleCopyResume(id: id) },
+            onLocalSummary: { [weak self] id in self?.handleLocalSummary(id: id) },
             onTogglePet: { [weak self] in
                 self?.onTogglePet?()
                 self?.panelHosting?.rootView = self?.makePanelRootView() ?? PanelRootView(
                     sessions: [], now: 0, palette: .system, petVisible: false, hookInstalled: false, hotkeyHint: nil,
                     onTap: { _ in }, onToggleFavorite: { _ in }, onRename: { _ in },
-                    onCopyId: { _ in }, onCopyResume: { _ in },
+                    onCopyId: { _ in }, onCopyResume: { _ in }, onLocalSummary: { _ in },
                     onTogglePet: {}, onOpenPreferences: {}, onQuit: {}, onAcknowledgeAll: {}
                 )
             },
@@ -287,6 +290,10 @@ final class MenuBarController: NSObject {
 
     private func handleCopyResume(id: String) {
         sessionForId(id).map(SessionRowActions.copyResume)
+    }
+
+    private func handleLocalSummary(id: String) {
+        sessionForId(id).map(SessionRowActions.showLocalSummary)
     }
 
     /// 以编程方式打开/切换会话面板 popover（供全局热键在 menuBarOnly 模式下调用）。
