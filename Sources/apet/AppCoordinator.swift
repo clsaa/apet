@@ -169,6 +169,25 @@ final class AppCoordinator {
             appendToLog("[info] 发现 ~/.qoder，已挂 Qoder CLI 会话监控（agent=qoder-cli）\n")
         }
 
+        // ─── 2a-1c. Qoder IDE 数据根（M3-C）：SharedClientCache/cli/projects 存在即挂 ──
+        // 实测（2026-07-02）：`task-<id>.session.execution.jsonl`，user/assistant 行 + ISO 时间戳
+        // + sessionId/cwd/isSidechain，与 Claude 格式同构，现有 JSONLParse 直接兼容。
+        let qoderIDECli = (NSHomeDirectory() as NSString)
+            .appendingPathComponent("Library/Application Support/Qoder/SharedClientCache/cli")
+        let qoderIDEProjects = (qoderIDECli as NSString).appendingPathComponent("projects")
+        if FileManager.default.fileExists(atPath: qoderIDEProjects) {
+            let qi = JSONLDirectoryWatcher(
+                projectsDir: qoderIDEProjects,
+                root: qoderIDECli,
+                now: { Date().timeIntervalSince1970 },
+                parse: { JSONLParse.parse(path: $0, root: qoderIDECli) },
+                emit: { [weak self] result in self?.applyScanResult(result) },
+                agent: "qoder-ide"
+            )
+            jsonlWatchers.append(qi)
+            appendToLog("[info] 发现 Qoder IDE 会话目录，已挂监控（agent=qoder-ide）\n")
+        }
+
         // ─── 2a-2. QoderWork 源（M3-C）：agents.db 存在才建，走与 jsonl 相同的静默通道 ──
         let qwDBPath = QoderWorkDBReader.defaultDBPath
         if FileManager.default.fileExists(atPath: qwDBPath) {
@@ -579,9 +598,11 @@ final class AppCoordinator {
                     ts: ""
                 )
                 ev.source = .jsonl
-                // M3-C：QoderWork 会话点击 → 激活 QoderWork.app（无终端概念，App 级跳转）。
+                // M3-C：QoderWork/Qoder IDE 会话点击 → 激活对应 App（无终端概念，App 级跳转）。
                 if key.agent == "qoder-work" {
                     ev.terminal = TerminalRef(kind: .other, bundleId: "com.qoder.work")
+                } else if key.agent == "qoder-ide" {
+                    ev.terminal = TerminalRef(kind: .other, bundleId: "com.qoder.ide")
                 }
                 jsonlSeqCounter += 1
                 _ = ingestor.ingest(event: ev, now: now, replay: false)
