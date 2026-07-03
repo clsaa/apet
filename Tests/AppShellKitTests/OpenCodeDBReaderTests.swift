@@ -35,6 +35,10 @@ final class OpenCodeDBReaderTests: XCTestCase {
           id text PRIMARY KEY, session_id text NOT NULL, type text NOT NULL,
           seq integer NOT NULL, time_created integer NOT NULL,
           time_updated integer NOT NULL, data text NOT NULL);
+        CREATE TABLE message (
+          id text PRIMARY KEY, session_id text NOT NULL,
+          time_created integer NOT NULL, time_updated integer NOT NULL,
+          data text NOT NULL);
         CREATE TABLE migration (id text PRIMARY KEY, time_completed integer NOT NULL);
         """)
         populate(db)
@@ -165,6 +169,67 @@ final class OpenCodeDBReaderTests: XCTestCase {
         }
         let row = try XCTUnwrap(OpenCodeDBReader(dbPath: dbPath).read().rows?.first)
         XCTAssertEqual(row.assistantSignal, .completed)
+    }
+
+    // ── 真机实测门发现(2026-07-03,v1.17.13):CLI 实际写 v1 `message` 表(role 在 data JSON、
+    // 无 seq、按 time_created 排序),`session_message`(v2)存在但为空——Reader 必须回退 v1,
+    // 否则完成信号在真机上永远缺席、只走窗口兜底。──
+
+    func test_v1MessageFallback_completed() throws {
+        makeFixture { db in
+            exec(db, """
+            INSERT INTO session VALUES ('ses_a','p',NULL,'/w','t','v',1783089382403,1783089385874,NULL);
+            INSERT INTO message VALUES ('msg_1','ses_a',1783089382447,1783089382447,
+              '{"role":"user","time":{"created":1783089382447}}');
+            INSERT INTO message VALUES ('msg_2','ses_a',1783089382551,1783089385871,
+              '{"role":"assistant","time":{"created":1783089382551,"completed":1783089385871}}');
+            """)
+        }
+        let row = try XCTUnwrap(OpenCodeDBReader(dbPath: dbPath).read().rows?.first)
+        XCTAssertEqual(row.assistantSignal, .completed, "v2 空表 → 信号回退 v1 message")
+    }
+
+    func test_v1MessageFallback_inFlight_latestByTimeWins() throws {
+        makeFixture { db in
+            exec(db, """
+            INSERT INTO session VALUES ('ses_a','p',NULL,'/w','t','v',1000000,1000000,NULL);
+            INSERT INTO message VALUES ('msg_1','ses_a',1000000,1000000,
+              '{"role":"assistant","time":{"created":1000000,"completed":1000500}}');
+            INSERT INTO message VALUES ('msg_2','ses_a',2000000,2000000,
+              '{"role":"assistant","time":{"created":2000000}}');
+            """)
+        }
+        let row = try XCTUnwrap(OpenCodeDBReader(dbPath: dbPath).read().rows?.first)
+        XCTAssertEqual(row.assistantSignal, .inFlight,
+                       "v1 无 seq,按 time_created 最新的 assistant 说了算")
+        XCTAssertEqual(row.lastActivity, 2000, "v1 message 行插入时间进活动链")
+    }
+
+    func test_v2Populated_winsOverV1() throws {
+        makeFixture { db in
+            exec(db, """
+            INSERT INTO session VALUES ('ses_a','p',NULL,'/w','t','v',1000000,1000000,NULL);
+            INSERT INTO message VALUES ('msg_1','ses_a',1000000,1000000,
+              '{"role":"assistant","time":{"created":1000000}}');
+            INSERT INTO session_message VALUES ('sm_1','ses_a','assistant',1,2000000,2000000,
+              '{"time":{"created":2000000,"completed":2100000}}');
+            """)
+        }
+        let row = try XCTUnwrap(OpenCodeDBReader(dbPath: dbPath).read().rows?.first)
+        XCTAssertEqual(row.assistantSignal, .completed, "v2 有数据时优先(v1 的 in-flight 不遮蔽)")
+    }
+
+    /// v1 回退链的坏 JSON 防御(SQLite 不保证 AND 短路,json_extract 遇坏 data 仍可能抛错)。
+    func test_v1MalformedData_doesNotPoisonWholeRead() throws {
+        makeFixture { db in
+            exec(db, """
+            INSERT INTO session VALUES ('ses_a','p',NULL,'/w','t','v',1000000,2000000,NULL);
+            INSERT INTO message VALUES ('msg_1','ses_a',2000000,2000000,'not-json');
+            """)
+        }
+        let rows = try XCTUnwrap(OpenCodeDBReader(dbPath: dbPath).read().rows,
+                                 "v1 坏 data 不得毒化整轮")
+        XCTAssertEqual(rows.first?.assistantSignal, AssistantSignal.none)
     }
 
     /// 方言一致性 tripwire(评审:防 /1000 两次的静默失败——那会让面板永远空)。

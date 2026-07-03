@@ -227,10 +227,14 @@ public struct OpenCodeDBReader {
         }
         let hasPart = tables.contains("part")
         let hasMsg = tables.contains("session_message")
+        let hasV1Msg = tables.contains("message")
 
         // 活动降级链(评审 B1/M1:time_updated 只在提问时刷新;part/message 只有**行插入**时间可靠,
         // upsert 更新不刷 time_created——running 判定不依赖这里,靠 assistantSignal)。
         var activityExprs = ["s.time_updated"]
+        if hasV1Msg {
+            activityExprs.insert("(SELECT MAX(v.time_created) FROM message v WHERE v.session_id = s.id)", at: 0)
+        }
         if hasMsg {
             activityExprs.insert("(SELECT MAX(m.time_created) FROM session_message m WHERE m.session_id = s.id)", at: 0)
         }
@@ -242,16 +246,32 @@ public struct OpenCodeDBReader {
         // ⚠️ json_valid 护栏(实现评审 Blocker):json_extract 对 malformed JSON 是**抛错**而非
         // 返回 NULL——错误发生在 step 期间会把整轮打成 .failed,单条坏 data 毒化全库读取。
         // 坏 data → NULL → .none 走窗口兜底,与 spec §3.1「json_extract 失败 → 信号缺席」一致。
-        let signalExpr = hasMsg
-            ? """
+        // 真机实测门(2026-07-03,v1.17.13):CLI 实际写 **v1 `message` 表**(role 在 data JSON、
+        // 无 seq、按 time_created 排序),session_message(v2)存在但为空——v2 无行时回退 v1,
+        // 否则完成信号在真机上永远缺席。COALESCE 链:v2(有行才产出非 NULL)→ v1 → NULL(none)。
+        var signalExprs: [String] = []
+        if hasMsg {
+            signalExprs.append("""
               (SELECT CASE WHEN json_valid(m.data) = 0 THEN NULL
                            WHEN json_extract(m.data, '$.time.completed') IS NULL THEN 0
                            ELSE 1 END
                  FROM session_message m
                 WHERE m.session_id = s.id AND m.type = 'assistant'
                 ORDER BY m.seq DESC LIMIT 1)
-              """
-            : "NULL"
+              """)
+        }
+        if hasV1Msg {
+            signalExprs.append("""
+              (SELECT CASE WHEN json_extract(v.data, '$.time.completed') IS NULL THEN 0
+                           ELSE 1 END
+                 FROM message v
+                WHERE v.session_id = s.id AND json_valid(v.data) = 1
+                  AND json_extract(v.data, '$.role') = 'assistant'
+                ORDER BY v.time_created DESC, v.id DESC LIMIT 1)
+              """)
+        }
+        let signalExpr = signalExprs.isEmpty ? "NULL"
+            : (signalExprs.count > 1 ? "COALESCE(\(signalExprs.joined(separator: ", ")))" : signalExprs[0])
         // 窗口过滤在 Swift 层(scanner)做:不能按 time_updated 下推(B1 同根)。
         // SQLite 的 COALESCE 至少 2 参——session-only 降级时单表达式不包裹。
         let activityExpr = activityExprs.count > 1

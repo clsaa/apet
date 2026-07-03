@@ -34,7 +34,7 @@
 | session 表关键列 | `id, project_id, parent_id, directory, title, time_created, time_updated, time_archived` | `core/src/session/sql.ts` |
 | **⚠️ time_updated 语义** | **只在用户提交 prompt 时 touch**;流式/工具执行/完成均不刷新(评审 B1,全设计最关键事实) | `opencode/src/session/prompt.ts:1058`、`core/src/session/projector.ts:96-110` |
 | 实时活动信号 | `part`/`session_message` 新**行插入**时间可用;⚠️ **upsert 更新不刷时间**——part 的 `onConflictDoUpdate` 只 set `data`(time_created 冻结),长工具/长文本期间无新行 → 活动时间链停摆(计划评审 M1) | `projector.ts:319-324` |
-| 进行/完成信号 | 最后一条 `type='assistant'` 的 `session_message.data` JSON 内 `$.time.completed`:**IS NULL = in-flight(进行中),非 NULL = 本轮完成**——上游 `getCurrentAssistant` 同款判据;epoch 毫秒数字编码 | `session-message.ts:185-188`、`projector.ts:134-151` |
+| 进行/完成信号 | 最后一条 assistant 消息的 `$.time.completed`:**IS NULL = in-flight,非 NULL = 本轮完成**——上游 `getCurrentAssistant` 同款判据;epoch 毫秒数字编码。⚠️ **真机实测(2026-07-03,v1.17.13)**:CLI 实际写 **v1 `message` 表**(role 在 data JSON、无 seq、按 time_created 排序),`session_message`(v2)存在但为空——Reader 信号链 v2 → v1 回退(COALESCE),活动链亦纳入 v1 | `session-message.ts:185-188`、`projector.ts:134-151`、真机 opencode.db |
 | 时间方言 | epoch **毫秒**(time_created/time_updated/time_archived/part.time_created 全部) | `schema.sql.ts:4-9` |
 | sessionId | `ses_` + **26 位**(前缀外;全长 30):前 12 位为**取反时间戳小写 hex**(降序用),后 14 位 base62。上游 schema 校验只查 `startsWith("ses")`,SDK 可自带异形 id 入库 → 我们的白名单比上游严,异形 id 仅失去恢复命令、不影响面板展示 | `schema/src/identifier.ts:14-30`、`session-id.ts:5`、`core/src/session.ts:209` |
 | 恢复命令 | `opencode [project] --session <id>`:**目录是位置参数**;TUI 按 cwd 解析 project 并 chdir,跨目录裸跑会以错误项目上下文打开(评审:resume 必须带目录) | `opencode/src/cli/cmd/tui.ts:66-79,198-208` |

@@ -19,7 +19,7 @@ macOS 原生 App（Swift / SwiftUI / AppKit，背景常驻 `LSUIElement`，无 D
 
 ## 状态
 
-✅ **M1 / M1.5 / M2 / M3 完成**：**708 个单元测试全绿**，多轮多视角（架构/产品/AI/用户/测试/开源）对抗评审 + 修复。零配置开箱即用：不装 hook 也能靠只读扫描 `~/.claude/projects/**.jsonl` 看到所有会话（含当前在跑的）；hook 为可选增强（精确跳转 + 通知），安装前预览确认、自动备份、一键卸载。
+✅ **M1 / M1.5 / M2 / M3 完成**：**712 个单元测试全绿**，多轮多视角（架构/产品/AI/用户/测试/开源）对抗评审 + 修复。零配置开箱即用：不装 hook 也能靠只读扫描 `~/.claude/projects/**.jsonl` 看到所有会话（含当前在跑的）；hook 为可选增强（精确跳转 + 通知），安装前预览确认、自动备份、一键卸载。
 
 ## 架构
 
@@ -49,7 +49,7 @@ Resources/apet-emit-event.sh  ← Claude hook 调用，把事件写进 events.nd
 ## 构建 / 运行
 
 ```bash
-swift test                       # 708 tests 全绿
+swift test                       # 712 tests 全绿
 bash scripts/package-app.sh      # 产出 ./AgentPet.app（unsigned，本地可运行）
 open AgentPet.app                # 菜单栏彩色计数 + 桌面宠物 + 首启精简引导
 ```
