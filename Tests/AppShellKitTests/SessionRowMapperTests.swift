@@ -236,4 +236,20 @@ final class SessionRowMapperTests: XCTestCase {
         // Assert
         XCTAssertFalse(row.isInferred)
     }
+
+    // MARK: - noJumpHint(M3-C+ 评审 B3:预期在点击前对齐,不是点完才弹错误)
+
+    /// opencode:DB 轮询源、无 terminal 信息、无 hook 升级路径 → 行内「无跳转」提示。
+    func test_noJumpHint_opencode_noTerminal() {
+        let s = makeSession(agent: "opencode", state: .waiting(.stop))
+        XCTAssertTrue(SessionRowMapper.make(s).noJumpHint)
+    }
+
+    func test_noJumpHint_false_forClaudeAndTerminalBackedAgents() {
+        let claude = makeSession(agent: "claude-code")
+        XCTAssertFalse(SessionRowMapper.make(claude).noJumpHint, "claude 有 hook 升级路径,不显")
+        let qw = makeSession(agent: "qoder-work",
+                             terminal: TerminalRef(kind: .other, bundleId: "com.qoder.work"))
+        XCTAssertFalse(SessionRowMapper.make(qw).noJumpHint, "有 terminal 可激活 App,不显")
+    }
 }

@@ -45,6 +45,9 @@ public struct SessionRowModel: Equatable, Identifiable {
     public let agent: String
     /// 相对时间文案（F10，如 "3 分钟前"）。由组织层注入 now 后填充；未注入为 ""。
     public let relativeText: String
+    /// 无跳转提示（M3-C+ 评审 B3）：DB 轮询源且无终端信息——点击只能走「复制恢复命令」
+    /// 弹窗，预期在点击前对齐。
+    public let noJumpHint: Bool
 
     public init(
         id: String,
@@ -58,7 +61,8 @@ public struct SessionRowModel: Equatable, Identifiable {
         favorite: Bool = false,
         sessionId: String = "",
         agent: String = "",
-        relativeText: String = ""
+        relativeText: String = "",
+        noJumpHint: Bool = false
     ) {
         self.id = id
         self.title = title
@@ -72,6 +76,7 @@ public struct SessionRowModel: Equatable, Identifiable {
         self.sessionId = sessionId
         self.agent = agent
         self.relativeText = relativeText
+        self.noJumpHint = noJumpHint
     }
 }
 
@@ -133,6 +138,10 @@ public enum SessionRowMapper {
         if case .waiting = session.state { isWaiting = true } else { isWaiting = false }
         let isInferred = session.source == .jsonl && isWaiting
 
+        // opencode 等 DB 源无 terminal 且无 hook 升级路径 → 行内「无跳转」(M3-C+ 评审 B3)。
+        let noJumpHint = session.terminal == nil
+            && AgentManifest.dbBackedAgents.contains(key.agent)
+
         let relativeText = now.map { RelativeTime.short(from: session.lastActiveAt, now: $0, tzOffset: tzOffset) } ?? ""
 
         return SessionRowModel(
@@ -147,7 +156,8 @@ public enum SessionRowMapper {
             favorite: session.favorite,
             sessionId: key.sessionId,
             agent: key.agent,
-            relativeText: relativeText
+            relativeText: relativeText,
+            noJumpHint: noJumpHint
         )
     }
 }
