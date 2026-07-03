@@ -1495,9 +1495,13 @@ public struct OpenCodeDBReader {
               """
             : "NULL"
         // 窗口过滤在 Swift 层(scanner)做:不能按 time_updated 下推(B1 同根)。
+        // SQLite 的 COALESCE 至少 2 参——session-only 降级时单表达式不包裹(实现时发现,回写)。
+        let activityExpr = activityExprs.count > 1
+            ? "COALESCE(\(activityExprs.joined(separator: ", ")))"
+            : activityExprs[0]
         let sql = """
         SELECT s.id, s.directory, s.title, s.time_created,
-               COALESCE(\(activityExprs.joined(separator: ", "))) AS last_activity,
+               \(activityExpr) AS last_activity,
                \(signalExpr) AS assistant_signal
         FROM session s
         WHERE s.parent_id IS NULL AND s.time_archived IS NULL

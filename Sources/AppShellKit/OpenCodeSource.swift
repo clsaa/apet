@@ -1,4 +1,5 @@
 import Foundation
+import SQLite3
 import AgentPetCore
 
 // MARK: - OpenCodeSessionRow
@@ -67,5 +68,228 @@ public enum OpenCodeScanner {
             }
             return .observe(state: state, key: key, cwd: row.directory, title: row.title)
         }
+    }
+}
+
+// MARK: - OpenCodeDBReader(IO 缝,只读 SQLite)
+
+/// 读取结果三态(评审 Blocker:失败路径必须携带版本信号):
+/// ok(rows: [], ...) = 不存在/空库(「装了没跑过」是常态);failed = 打不开/prepare 失败/半读。
+public enum OpenCodeReadOutcome: Equatable {
+    case ok(rows: [OpenCodeSessionRow], maxMigrationId: String?)
+    case failed(maxMigrationId: String?)
+
+    public var rows: [OpenCodeSessionRow]? {
+        if case .ok(let rows, _) = self { return rows }
+        return nil
+    }
+    public var maxMigrationId: String? {
+        switch self {
+        case .ok(_, let id), .failed(let id): return id
+        }
+    }
+}
+
+/// 只读打开 opencode.db(READONLY,WAL 兼容)。上游对该 DB 无 stability 承诺,防御为先。
+public struct OpenCodeDBReader {
+    private let dbPath: String
+    private let busyTimeoutMs: Int32
+
+    public init(dbPath: String, busyTimeoutMs: Int32 = 200) {
+        self.dbPath = dbPath; self.busyTimeoutMs = busyTimeoutMs
+    }
+
+    /// 已验证的上游迁移 id 上界(**全名**,v1.17.13 / commit 04d236c;上游落库 id 形如
+    /// `<14位时间戳>_<名字>`,migration.ts:30-35——裸时间戳比较会在已验证版本上恒误报)。
+    /// ⚠️ 维护流程(上游 ~8 迁移/月,此值常态过期):上游出新迁移后
+    /// ① 重跑 spec §2 事实核对;② 本常量改为新迁移全名;
+    /// ③ `APET_OPENCODE_LIVE=1 swift test --filter OpenCodeLiveTests` 重跑;
+    /// ④ 同步 README「已验证版本」行。
+    public static let verifiedMaxMigrationId = "20260622202450_simplify_session_input"
+
+    /// maxId 是否新于已验证版本:取两侧**前导数字前缀**比较(等长 14 位时间戳,字典序=数值序);
+    /// 无数字前缀 → false(保守不误报)。
+    public static func isNewerThanVerified(_ maxId: String) -> Bool {
+        let lhs = maxId.prefix(while: { $0.isASCII && $0.isNumber })
+        let rhs = verifiedMaxMigrationId.prefix(while: { $0.isASCII && $0.isNumber })
+        guard !lhs.isEmpty else { return false }
+        return lhs > rhs
+    }
+
+    /// DB 路径解析(评审 Blocker:GUI 进程读不到 shell rc 的环境变量):
+    /// 1. `OPENCODE_DB`(env → launchctl):绝对路径整体覆盖;**相对路径 join 到数据目录**
+    ///    (上游 database.ts:44-47 语义,评审 m1:勿按"忽略相对"实现);
+    /// 2. `XDG_DATA_HOME`(env → launchctl;绝对非空才算设了);默认 `~/.local/share`;
+    /// 3. 目录内 glob `opencode*.db` 取 mtime 最新(channel 后缀;`.db` 后缀天然排除 -wal/-shm)。
+    public static func defaultDBPath(
+        env: [String: String],
+        launchctlGetenv: (String) -> String? = Self.launchctlGetenv,
+        listDir: ((String) -> [(name: String, mtime: Double)])? = nil
+    ) -> String {
+        func lookup(_ name: String) -> String? {
+            if let v = env[name], !v.isEmpty { return v }
+            return launchctlGetenv(name)
+        }
+        let dataHome: String
+        if let xdg = lookup("XDG_DATA_HOME"), xdg.hasPrefix("/") {
+            dataHome = xdg
+        } else {
+            dataHome = NSHomeDirectory() + "/.local/share"
+        }
+        let dir = dataHome + "/opencode"
+        if let ov = lookup("OPENCODE_DB"), !ov.isEmpty {
+            return ov.hasPrefix("/") ? ov : dir + "/" + ov
+        }
+        let list = listDir ?? Self.realListDir
+        let candidates = list(dir).filter { $0.name.hasPrefix("opencode") && $0.name.hasSuffix(".db") }
+        if let newest = candidates.max(by: { $0.mtime < $1.mtime }) {
+            return dir + "/" + newest.name
+        }
+        return dir + "/opencode.db"
+    }
+
+    /// GUI 进程(launchd 拉起)env 兜底:`launchctl getenv`。只在启动路径解析时调用一次,非轮询热路径。
+    /// public 仅因默认参数引用需要;不建议单独调用。
+    public static func launchctlGetenv(_ name: String) -> String? {
+        let p = Process()
+        p.executableURL = URL(fileURLWithPath: "/bin/launchctl")
+        p.arguments = ["getenv", name]
+        let pipe = Pipe()
+        p.standardOutput = pipe
+        p.standardError = Pipe()
+        guard (try? p.run()) != nil else { return nil }
+        p.waitUntilExit()
+        guard p.terminationStatus == 0 else { return nil }
+        let out = String(data: pipe.fileHandleForReading.readDataToEndOfFile(), encoding: .utf8)?
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        return (out?.isEmpty ?? true) ? nil : out
+    }
+
+    private static func realListDir(_ dir: String) -> [(name: String, mtime: Double)] {
+        let fm = FileManager.default
+        guard let names = try? fm.contentsOfDirectory(atPath: dir) else { return [] }
+        return names.map { name in
+            let attrs = try? fm.attributesOfItem(atPath: dir + "/" + name)
+            let mtime = (attrs?[.modificationDate] as? Date)?.timeIntervalSince1970 ?? 0
+            return (name, mtime)
+        }
+    }
+
+    public func read() -> OpenCodeReadOutcome {
+        guard FileManager.default.fileExists(atPath: dbPath) else {
+            return .ok(rows: [], maxMigrationId: nil)
+        }
+        var db: OpaquePointer?
+        guard sqlite3_open_v2(dbPath, &db, SQLITE_OPEN_READONLY, nil) == SQLITE_OK, let db else {
+            return .failed(maxMigrationId: nil)
+        }
+        defer { sqlite3_close_v2(db) }
+        sqlite3_busy_timeout(db, busyTimeoutMs)
+
+        // 表存在性探测:session 缺 → 空库常态;part/session_message 缺 → 降级 session-only。
+        guard let tables = tableNames(db) else { return .failed(maxMigrationId: nil) }
+        // 版本探测**先于**主查询(评审 Blocker:排后面则 schema 破坏性升级时主查询先失败,
+        // 版本信号永远带不出来——恰是唯一需要它的场景)。migration 表结构 5 个月未变,最稳。
+        let maxMigration: String? = tables.contains("migration") ? maxMigrationId(db) : nil
+        guard tables.contains("session") else {
+            return .ok(rows: [], maxMigrationId: maxMigration)
+        }
+        let hasPart = tables.contains("part")
+        let hasMsg = tables.contains("session_message")
+
+        // 活动降级链(评审 B1/M1:time_updated 只在提问时刷新;part/message 只有**行插入**时间可靠,
+        // upsert 更新不刷 time_created——running 判定不依赖这里,靠 assistantSignal)。
+        var activityExprs = ["s.time_updated"]
+        if hasMsg {
+            activityExprs.insert("(SELECT MAX(m.time_created) FROM session_message m WHERE m.session_id = s.id)", at: 0)
+        }
+        if hasPart {
+            activityExprs.insert("(SELECT MAX(p.time_created) FROM part p WHERE p.session_id = s.id)", at: 0)
+        }
+        // assistant 信号:NULL=无 assistant 行(none);0=completed IS NULL(inFlight);1=completed(completed)。
+        // CASE 包裹使 ISO 串等未来编码也归 completed(非 NULL 即完成,评审 m3)。
+        let signalExpr = hasMsg
+            ? """
+              (SELECT CASE WHEN json_extract(m.data, '$.time.completed') IS NULL THEN 0 ELSE 1 END
+                 FROM session_message m
+                WHERE m.session_id = s.id AND m.type = 'assistant'
+                ORDER BY m.seq DESC LIMIT 1)
+              """
+            : "NULL"
+        // 窗口过滤在 Swift 层(scanner)做:不能按 time_updated 下推(B1 同根)。
+        // SQLite 的 COALESCE 至少 2 参——session-only 降级时单表达式不包裹。
+        let activityExpr = activityExprs.count > 1
+            ? "COALESCE(\(activityExprs.joined(separator: ", ")))"
+            : activityExprs[0]
+        let sql = """
+        SELECT s.id, s.directory, s.title, s.time_created,
+               \(activityExpr) AS last_activity,
+               \(signalExpr) AS assistant_signal
+        FROM session s
+        WHERE s.parent_id IS NULL AND s.time_archived IS NULL
+        """
+
+        var stmt: OpaquePointer?
+        guard sqlite3_prepare_v2(db, sql, -1, &stmt, nil) == SQLITE_OK, let stmt else {
+            return .failed(maxMigrationId: maxMigration)
+        }
+        defer { sqlite3_finalize(stmt) }
+
+        func text(_ col: Int32) -> String? {
+            sqlite3_column_text(stmt, col).map { String(cString: $0) }
+        }
+        func emptyAsNil(_ s: String?) -> String? { (s?.isEmpty ?? true) ? nil : s }
+
+        var rows: [OpenCodeSessionRow] = []
+        var rc = sqlite3_step(stmt)
+        while rc == SQLITE_ROW {
+            if let id = text(0) {
+                let signal: AssistantSignal
+                if sqlite3_column_type(stmt, 5) == SQLITE_NULL {
+                    signal = .none
+                } else {
+                    signal = sqlite3_column_int64(stmt, 5) == 0 ? .inFlight : .completed
+                }
+                rows.append(OpenCodeSessionRow(
+                    sessionId: id,
+                    directory: emptyAsNil(text(1)),
+                    title: emptyAsNil(text(2)),
+                    lastActivity: sqlite3_column_double(stmt, 4) / 1000.0,
+                    assistantSignal: signal,
+                    createdAt: sqlite3_column_double(stmt, 3) / 1000.0
+                ))
+            }
+            rc = sqlite3_step(stmt)
+        }
+        guard rc == SQLITE_DONE else {
+            return .failed(maxMigrationId: maxMigration)   // 半读(BUSY/IOERR)不可信
+        }
+        return .ok(rows: rows, maxMigrationId: maxMigration)
+    }
+
+    /// `SELECT MAX(id) FROM migration`;查询失败 → nil(不拦整体读取)。
+    private func maxMigrationId(_ db: OpaquePointer) -> String? {
+        var stmt: OpaquePointer?
+        guard sqlite3_prepare_v2(db, "SELECT MAX(id) FROM migration", -1, &stmt, nil) == SQLITE_OK,
+              let stmt else { return nil }
+        defer { sqlite3_finalize(stmt) }
+        guard sqlite3_step(stmt) == SQLITE_ROW else { return nil }
+        return sqlite3_column_text(stmt, 0).map { String(cString: $0) }
+    }
+
+    /// sqlite_master 表名集合;查询失败(BUSY 等)→ nil。
+    private func tableNames(_ db: OpaquePointer) -> Set<String>? {
+        var stmt: OpaquePointer?
+        guard sqlite3_prepare_v2(db, "SELECT name FROM sqlite_master WHERE type='table'",
+                                 -1, &stmt, nil) == SQLITE_OK, let stmt else { return nil }
+        defer { sqlite3_finalize(stmt) }
+        var names: Set<String> = []
+        var rc = sqlite3_step(stmt)
+        while rc == SQLITE_ROW {
+            if let n = sqlite3_column_text(stmt, 0).map({ String(cString: $0) }) { names.insert(n) }
+            rc = sqlite3_step(stmt)
+        }
+        guard rc == SQLITE_DONE else { return nil }
+        return names
     }
 }
