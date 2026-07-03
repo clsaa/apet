@@ -350,6 +350,54 @@ final class OpenCodeDBReaderTests: XCTestCase {
             listDir: { _ in [] })
         XCTAssertEqual(path, "/launchd/data/opencode/opencode.db")
     }
+    /// 次序钉死(实现评审 Major):env 有值时不得起 launchctl 子进程(次序+成本双钉)。
+    func test_defaultDBPath_envWins_launchctlNeverCalledWhenEnvSet() {
+        var launchctlCalls: [String] = []
+        let path = OpenCodeDBReader.defaultDBPath(
+            env: ["XDG_DATA_HOME": "/env/data", "OPENCODE_DB": "/env/oc.db"],
+            launchctlGetenv: { name in launchctlCalls.append(name); return "/launchd/stale" },
+            listDir: { _ in [] })
+        XCTAssertEqual(path, "/env/oc.db", "env 必须压过 launchctl")
+        XCTAssertTrue(launchctlCalls.isEmpty, "env 有值时不得调 launchctl")
+    }
+
+    /// OPENCODE_DB 走 launchctl 兜底的路径(env 缺、launchctl 有)——此前只测过 XDG。
+    func test_defaultDBPath_opencodeDB_viaLaunchctl() {
+        let path = OpenCodeDBReader.defaultDBPath(
+            env: [:],
+            launchctlGetenv: { name in name == "OPENCODE_DB" ? "/lc/oc.db" : nil },
+            listDir: { _ in [] })
+        XCTAssertEqual(path, "/lc/oc.db")
+    }
+
+    /// env 里是相对路径(视为未设)时应 fallthrough 到 launchctl 的合法绝对值
+    /// (实现评审 Minor:lookup 短路与注释矛盾)。
+    func test_defaultDBPath_relativeEnvFallsThroughToLaunchctl() {
+        let path = OpenCodeDBReader.defaultDBPath(
+            env: ["XDG_DATA_HOME": "rel/path"],
+            launchctlGetenv: { name in name == "XDG_DATA_HOME" ? "/lc/data" : nil },
+            listDir: { _ in [] })
+        XCTAssertEqual(path, "/lc/data/opencode/opencode.db",
+                       "env 相对路径视为未设,launchctl 绝对值不得被跳过")
+    }
+
+    /// `:memory:` 特判(AI 评审 Minor):上游原样用内存库;我们视为未设走默认,
+    /// 免得 join 出不存在路径并触发误导的「XDG 失明」健康文案。
+    func test_defaultDBPath_memorySentinel_ignored() {
+        let home = NSHomeDirectory()
+        let path = OpenCodeDBReader.defaultDBPath(
+            env: ["OPENCODE_DB": ":memory:"],
+            launchctlGetenv: { _ in nil },
+            listDir: { _ in [] })
+        XCTAssertEqual(path, home + "/.local/share/opencode/opencode.db")
+    }
+
+    /// 非等长数字前缀属格式漂移 → 保守不误报(实现评审 Minor:"999" 字典序 > 14 位时间戳)。
+    func test_isNewerThanVerified_shortNumericPrefix_conservativeFalse() {
+        XCTAssertFalse(OpenCodeDBReader.isNewerThanVerified("999_weird"))
+        XCTAssertFalse(OpenCodeDBReader.isNewerThanVerified("20260701_short"))
+    }
+
     func test_defaultDBPath_channelGlob_newestWins_excludesWal() {
         let listDir: (String) -> [(name: String, mtime: Double)] = { _ in
             [("opencode.db", 100), ("opencode-dev.db", 200),

@@ -112,7 +112,9 @@ public struct OpenCodeDBReader {
     public static func isNewerThanVerified(_ maxId: String) -> Bool {
         let lhs = maxId.prefix(while: { $0.isASCII && $0.isNumber })
         let rhs = verifiedMaxMigrationId.prefix(while: { $0.isASCII && $0.isNumber })
-        guard !lhs.isEmpty else { return false }
+        // 等长(14 位时间戳)才可比:字典序=数值序。非等长属格式漂移 → 保守不误报
+        //(实现评审:"999" 字典序会大于 14 位时间戳)。
+        guard !lhs.isEmpty, lhs.count == rhs.count else { return false }
         return lhs > rhs
     }
 
@@ -123,21 +125,29 @@ public struct OpenCodeDBReader {
     /// 3. 目录内 glob `opencode*.db` 取 mtime 最新(channel 后缀;`.db` 后缀天然排除 -wal/-shm)。
     public static func defaultDBPath(
         env: [String: String],
-        launchctlGetenv: (String) -> String? = Self.launchctlGetenv,
+        launchctlGetenv: ((String) -> String?)? = nil,
         listDir: ((String) -> [(name: String, mtime: Double)])? = nil
     ) -> String {
-        func lookup(_ name: String) -> String? {
-            if let v = env[name], !v.isEmpty { return v }
-            return launchctlGetenv(name)
+        let getenv = launchctlGetenv ?? Self.realLaunchctlGetenv
+        // lookup 层就过滤空值,使 env 的无效值 fallthrough 到 launchctl(实现评审:
+        // 相对路径短路会跳过 launchctl 里的合法绝对值)。绝对性校验由调用方按语义做。
+        func lookup(_ name: String, requireAbsolute: Bool) -> String? {
+            func accept(_ v: String?) -> String? {
+                guard let v, !v.isEmpty else { return nil }
+                if requireAbsolute && !v.hasPrefix("/") { return nil }
+                return v
+            }
+            // 惰性顺序:env 命中就绝不起 launchctl 子进程(次序+成本双钉,有 spy 测试)。
+            if let v = accept(env[name]) { return v }
+            return accept(getenv(name))
         }
-        let dataHome: String
-        if let xdg = lookup("XDG_DATA_HOME"), xdg.hasPrefix("/") {
-            dataHome = xdg
-        } else {
-            dataHome = NSHomeDirectory() + "/.local/share"
-        }
+        let dataHome = lookup("XDG_DATA_HOME", requireAbsolute: true)
+            ?? NSHomeDirectory() + "/.local/share"
         let dir = dataHome + "/opencode"
-        if let ov = lookup("OPENCODE_DB"), !ov.isEmpty {
+        // OPENCODE_DB:绝对路径整体覆盖;相对路径 join 数据目录(上游 database.ts:44-47);
+        // `:memory:` 上游原样用内存库——我们视为未设走默认,免得 join 出不存在路径
+        // 并触发误导的「XDG 失明」健康文案(AI 评审)。
+        if let ov = lookup("OPENCODE_DB", requireAbsolute: false), ov != ":memory:" {
             return ov.hasPrefix("/") ? ov : dir + "/" + ov
         }
         let list = listDir ?? Self.realListDir
@@ -149,20 +159,14 @@ public struct OpenCodeDBReader {
     }
 
     /// GUI 进程(launchd 拉起)env 兜底:`launchctl getenv`。只在启动路径解析时调用一次,非轮询热路径。
-    /// public 仅因默认参数引用需要;不建议单独调用。
-    public static func launchctlGetenv(_ name: String) -> String? {
-        let p = Process()
-        p.executableURL = URL(fileURLWithPath: "/bin/launchctl")
-        p.arguments = ["getenv", name]
-        let pipe = Pipe()
-        p.standardOutput = pipe
-        p.standardError = Pipe()
-        guard (try? p.run()) != nil else { return nil }
-        p.waitUntilExit()
-        guard p.terminationStatus == 0 else { return nil }
-        let out = String(data: pipe.fileHandleForReading.readDataToEndOfFile(), encoding: .utf8)?
-            .trimmingCharacters(in: .whitespacesAndNewlines)
-        return (out?.isEmpty ?? true) ? nil : out
+    /// 实现评审:走已加固的 ProcessRunner 缝(超时→SIGTERM→SIGKILL、异步抽干防 pipe 死锁)——
+    /// launchd 卡死时 2 秒超时兜底,不再无限挂起启动主线程;也消灭仓内两套 Process 用法。
+    private static func realLaunchctlGetenv(_ name: String) -> String? {
+        guard let result = try? RealProcessRunner().run(
+            executable: "/bin/launchctl", arguments: ["getenv", name],
+            stdin: nil, cwd: "/", timeout: 2), result.exitCode == 0 else { return nil }
+        let out = result.stdout.trimmingCharacters(in: .whitespacesAndNewlines)
+        return out.isEmpty ? nil : out
     }
 
     private static func realListDir(_ dir: String) -> [(name: String, mtime: Double)] {
