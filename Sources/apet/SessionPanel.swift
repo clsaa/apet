@@ -57,7 +57,7 @@ struct SessionPanel: View {
             Image(systemName: "magnifyingglass")
                 .font(.system(size: 11))
                 .foregroundStyle(.tertiary)
-            TextField("搜索会话 / 目录 / ID", text: $filter)
+            TextField("搜索 标题 / 目录 / ID / agent", text: $filter)
                 .textFieldStyle(.plain)
                 .font(.system(size: 12))
             if !filter.isEmpty {
@@ -205,6 +205,7 @@ private struct SessionRowCell: View {
                             .padding(.horizontal, 5).padding(.vertical, 1)
                             .background(Color.secondary.opacity(0.15))
                             .cornerRadius(4).foregroundStyle(.secondary).lineLimit(1).fixedSize()
+                            .help("状态由文件扫描推得,非实时 hook,可能已过时")   // B5
                     }
                     if row.noJumpHint {
                         Text("无跳转")

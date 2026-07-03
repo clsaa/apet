@@ -8,10 +8,11 @@ enum SessionRowActions {
 
     enum RenameResult { case cancel; case set(String?) }  // set(nil) = 恢复默认名
 
-    static func copyToPasteboard(_ text: String) {
+    static func copyToPasteboard(_ text: String, hud: String? = "已复制") {
         let pb = NSPasteboard.general
         pb.clearContents()
         pb.setString(text, forType: .string)
+        if let hud { CopyHUD.flash(hud) }   // B3:瞬时反馈,不再静默
     }
 
     static func copyId(_ s: Session) { copyToPasteboard(s.key.sessionId) }
@@ -22,7 +23,7 @@ enum SessionRowActions {
                                            directory: s.cwd) {
             copyToPasteboard(cmd)
         } else {
-            copyToPasteboard(s.key.sessionId)  // 未知 agent 兜底复制 ID
+            copyToPasteboard(s.key.sessionId, hud: "已复制会话 ID")  // 未知 agent 兜底
         }
     }
 

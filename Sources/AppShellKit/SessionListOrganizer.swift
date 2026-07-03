@@ -67,6 +67,7 @@ public enum SessionListOrganizer {
         if let t = s.title, t.lowercased().contains(needle) { return true }
         if let c = s.cwd, c.lowercased().contains(needle) { return true }
         if s.key.sessionId.lowercased().contains(needle) { return true }
+        if s.key.agent.lowercased().contains(needle) { return true }   // B4:搜 agent 名
         return false
     }
 
