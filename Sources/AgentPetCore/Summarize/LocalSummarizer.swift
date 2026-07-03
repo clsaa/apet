@@ -14,7 +14,10 @@ public enum LocalSummarizer {
     public static func summarize(turns: [ConversationTurn], maxLen: Int = 60) -> String {
         guard !turns.isEmpty else { return "（无可总结内容）" }
 
-        let lastUser = turns.last { $0.role == "user" && !$0.text.isEmpty }
+        // 优先取「最后一条真实用户指令」——跳过 harness 注入的系统消息(在 jsonl 里也是 user
+        // 角色,但不是用户输入);全被跳过时退化到最后一条非空 user(有内容比空好)。
+        let lastUser = turns.last { $0.role == "user" && !$0.text.isEmpty && !Self.isInjected($0.text) }
+            ?? turns.last { $0.role == "user" && !$0.text.isEmpty }
         let lastAssistant = turns.last { $0.role == "assistant" }
 
         var parts: [String] = []
@@ -27,6 +30,20 @@ public enum LocalSummarizer {
             parts.append("最近：\(desc)")
         }
         return parts.isEmpty ? "（无可总结内容）" : parts.joined(separator: " · ")
+    }
+
+    /// 是否为 harness/工具注入的系统消息(非真实用户指令)。用前缀匹配去掉首部空白后判断——
+    /// 这些标记出现在消息开头是它们的稳定特征(task-notification/system-reminder/命令回显/
+    /// 后台事件/本地命令 caveat)。
+    static func isInjected(_ text: String) -> Bool {
+        let t = text.drop { $0 == " " || $0 == "\n" || $0 == "\r" || $0 == "\t" }
+        let markers = [
+            "<task-notification>", "<system-reminder>",
+            "<local-command-stdout>", "<local-command-stderr>", "<command-name>",
+            "<command-message>", "<command-args>", "<bash-stdout>", "<bash-stderr>",
+            "[SYSTEM NOTIFICATION", "Caveat: The messages below",
+        ]
+        return markers.contains { t.hasPrefix($0) }
     }
 
     /// 不可信文本消毒：滤控制字符（C0/C1）与 bidi 覆盖符（RTL 欺骗）、拉平换行、限长。
