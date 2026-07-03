@@ -125,3 +125,39 @@ public enum SessionListOrganizer {
         }
     }
 }
+
+
+// MARK: - OrganizedFlat（M3-D-B：Tab 取代分区）
+
+public struct OrganizedFlat: Equatable {
+    public let pinned: [SessionRowModel]
+    public let rest: [SessionRowModel]
+    public init(pinned: [SessionRowModel], rest: [SessionRowModel]) {
+        self.pinned = pinned; self.rest = rest
+    }
+}
+
+public extension SessionListOrganizer {
+    /// 平铺出口（tab 取代分区，无 section 标题）。
+    /// U1（交互评审 P0-1）：未读 waiting「等你」pinned **跨 tab 常驻**——tab 过滤只作用于 rest。
+    static func organizeFlat(
+        sessions: [Session], tab: SessionTab, filter: String,
+        now: Double, tzOffset: Double = 0
+    ) -> OrganizedFlat {
+        let needle = filter.trimmingCharacters(in: .whitespaces).lowercased()
+        let searched = sessions.filter { needle.isEmpty || matches($0, needle) }
+        var pinnedS: [Session] = []
+        var others: [Session] = []
+        for s in searched {
+            if isUnreadWaiting(s) { pinnedS.append(s) } else { others.append(s) }
+        }
+        let restFiltered = SessionTabFilter.filter(others, tab: tab)
+        var pinned = pinnedS.map { SessionRowMapper.make($0, now: now, tzOffset: tzOffset) }
+        pinned.sort { $0.favorite && !$1.favorite }
+        let restSorted = restFiltered.enumerated().sorted { a, b in
+            if a.element.favorite != b.element.favorite { return a.element.favorite }
+            return a.offset < b.offset
+        }.map { SessionRowMapper.make($0.element, now: now, tzOffset: tzOffset) }
+        return OrganizedFlat(pinned: pinned, rest: restSorted)
+    }
+}

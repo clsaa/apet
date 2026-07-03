@@ -84,4 +84,26 @@ final class SessionMetaTests: XCTestCase {
         let unfavored = SessionMeta(favorite: false)
         XCTAssertTrue(SessionMeta.merge(favored, unfavored).favorite)
     }
+
+    // M3-D-C:groups 并集去重 merge + apply 镜像。
+    func test_merge_groups_unionDedup() {
+        let a = SessionMeta(groups: ["工作", "A"])
+        let b = SessionMeta(groups: ["A", "重要"])
+        XCTAssertEqual(SessionMeta.merge(a, b).groups.sorted(), ["A", "工作", "重要"])
+    }
+    func test_apply_mirrorsGroups() {
+        let sess = Session(key: SessionKey(agent: "c", root: "/r", sessionId: "1"),
+                           state: .running, lastSeq: 1, lastActiveAt: 0)
+        let out = SessionMetaMerger.apply(into: sess, meta: SessionMeta(groups: ["工作"]))
+        XCTAssertEqual(out.groups, ["工作"])
+    }
+    // codable 往返带 groups + 缺字段兼容。
+    func test_codable_groups_roundtrip() throws {
+        let m = SessionMeta(favorite: true, groups: ["x", "y"])
+        let data = try JSONEncoder().encode(m)
+        XCTAssertEqual(try JSONDecoder().decode(SessionMeta.self, from: data).groups, ["x", "y"])
+        // 旧数据无 groups 字段 → []
+        let old = try JSONDecoder().decode(SessionMeta.self, from: Data(#"{"favorite":true}"#.utf8))
+        XCTAssertEqual(old.groups, [])
+    }
 }

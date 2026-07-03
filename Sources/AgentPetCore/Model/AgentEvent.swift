@@ -19,6 +19,20 @@ public enum EventKind: Equatable {
 
 public enum WaitingReason: String, Codable, Equatable { case stop, attention }
 public enum TerminalKind: String, Codable, Equatable { case iterm2, terminal, warp, ghostty, vscode, other }
+
+public extension TerminalKind {
+    /// 默认 app bundleId(图标 + 激活兜底共用;other 未知→nil)。M3-D-D。
+    var bundleId: String? {
+        switch self {
+        case .iterm2:   return "com.googlecode.iterm2"
+        case .terminal: return "com.apple.Terminal"
+        case .warp:     return "dev.warp.Warp-Stable"
+        case .ghostty:  return "com.mitchellh.ghostty"
+        case .vscode:   return "com.microsoft.VSCode"
+        case .other:    return nil
+        }
+    }
+}
 public enum NotifyClass: String, Codable, Equatable { case alert, passive, none }
 
 public struct TerminalRef: Equatable, Decodable {

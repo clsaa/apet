@@ -258,4 +258,17 @@ final class SessionRowMapperTests: XCTestCase {
         let qw = makeSession(agent: "qoder-work")
         XCTAssertTrue(SessionRowMapper.make(qw).noJumpHint)
     }
+
+    // M3-D-D:terminalBundleId
+    func test_terminalBundleId_fromKind() {
+        let s = makeSession(terminal: TerminalRef(kind: .warp))
+        XCTAssertEqual(SessionRowMapper.make(s).terminalBundleId, "dev.warp.Warp-Stable")
+    }
+    func test_terminalBundleId_prefersExplicitRefBundleId() {
+        let s = makeSession(terminal: TerminalRef(kind: .other, bundleId: "com.qoder.work"))
+        XCTAssertEqual(SessionRowMapper.make(s).terminalBundleId, "com.qoder.work")
+    }
+    func test_terminalBundleId_nilWhenNoTerminal() {
+        XCTAssertNil(SessionRowMapper.make(makeSession()).terminalBundleId)
+    }
 }

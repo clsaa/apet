@@ -10,19 +10,22 @@ public struct SessionMeta: Codable, Equatable {
     public var firstSeenAt: Double?
     public var cachedSummary: String?
     public var summaryAnchor: Int?
+    public var groups: [String]
 
     public init(favorite: Bool = false, customName: String? = nil, firstSeenAt: Double? = nil,
-                cachedSummary: String? = nil, summaryAnchor: Int? = nil) {
+                cachedSummary: String? = nil, summaryAnchor: Int? = nil,
+                groups: [String] = []) {
         self.favorite = favorite
         self.customName = customName
         self.firstSeenAt = firstSeenAt
         self.cachedSummary = cachedSummary
         self.summaryAnchor = summaryAnchor
+        self.groups = groups
     }
 
     // 向后兼容：缺字段用默认。
     private enum CodingKeys: String, CodingKey {
-        case favorite, customName, firstSeenAt, cachedSummary, summaryAnchor
+        case favorite, customName, firstSeenAt, cachedSummary, summaryAnchor, groups
     }
     public init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
@@ -31,6 +34,7 @@ public struct SessionMeta: Codable, Equatable {
         firstSeenAt = try c.decodeIfPresent(Double.self, forKey: .firstSeenAt)
         cachedSummary = try c.decodeIfPresent(String.self, forKey: .cachedSummary)
         summaryAnchor = try c.decodeIfPresent(Int.self, forKey: .summaryAnchor)
+        groups = try c.decodeIfPresent([String].self, forKey: .groups) ?? []
     }
 
     /// 合并两条 meta：customName/cachedSummary/summaryAnchor last-non-nil-wins；
@@ -41,7 +45,8 @@ public struct SessionMeta: Codable, Equatable {
             customName: new.customName ?? old.customName,
             firstSeenAt: minOptional(old.firstSeenAt, new.firstSeenAt),
             cachedSummary: new.cachedSummary ?? old.cachedSummary,
-            summaryAnchor: new.summaryAnchor ?? old.summaryAnchor
+            summaryAnchor: new.summaryAnchor ?? old.summaryAnchor,
+            groups: Array(Set(old.groups).union(new.groups)).sorted()
         )
     }
 
@@ -71,6 +76,7 @@ public enum SessionMetaMerger {
         var s = session
         s.favorite = meta.favorite
         s.customName = meta.customName
+        s.groups = meta.groups
         if let firstSeen = meta.firstSeenAt {
             if let existing = s.createdAt {
                 s.createdAt = Swift.min(existing, firstSeen)

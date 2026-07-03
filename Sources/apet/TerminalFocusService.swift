@@ -58,15 +58,7 @@ public final class TerminalFocusService {
     /// 精确跳转失败时用于「至少激活 App」的 bundleId：优先 ref 自带，否则按 kind 取默认。
     private static func fallbackBundleId(for ref: TerminalRef?) -> String? {
         guard let ref else { return nil }
-        if let b = ref.bundleId { return b }
-        switch ref.kind {
-        case .iterm2:   return "com.googlecode.iterm2"
-        case .terminal: return "com.apple.Terminal"
-        case .warp:     return "dev.warp.Warp-Stable"
-        case .ghostty:  return "com.mitchellh.ghostty"
-        case .vscode:   return "com.microsoft.VSCode"
-        case .other:    return nil
-        }
+        return ref.bundleId ?? ref.kind.bundleId   // M3-D-D:收敛至 TerminalKind.bundleId
     }
 
     // MARK: - Private: activate-only

@@ -143,4 +143,25 @@ final class SessionListOrganizerTests: XCTestCase {
         XCTAssertEqual(r.groups[0].rows.map { $0.sessionId }, ["d2", "d6"])
         XCTAssertEqual(r.groups[1].rows.map { $0.sessionId }, ["d7", "d8"], "7 天整属「更早」")
     }
+
+    // M3-D-B:organizeFlat 平铺 + U1 跨tab常驻
+    func test_organizeFlat_tabFilters_and_pinsUnreadWaiting() {
+        let run = session(id: "a", state: .running)
+        let waitUnread = session(id: "b", state: .waiting(.stop))
+        let out = SessionListOrganizer.organizeFlat(sessions: [run, waitUnread], tab: .all, filter: "", now: 2000)
+        XCTAssertEqual(out.pinned.map(\.sessionId), ["b"])
+        XCTAssertEqual(out.rest.map(\.sessionId), ["a"])
+    }
+    func test_organizeFlat_runningTab_excludesOthers() {
+        let out = SessionListOrganizer.organizeFlat(
+            sessions: [session(id: "a", state: .running), session(id: "b", state: .stale)],
+            tab: .running, filter: "", now: 2000)
+        XCTAssertEqual((out.pinned + out.rest).map(\.sessionId), ["a"])
+    }
+    /// U1:未读 waiting 跨 tab 常驻——选「收藏」tab 且它非收藏,仍在 pinned。
+    func test_organizeFlat_unreadWaiting_pinnedAcrossTabs() {
+        let waitUnread = session(id: "b", state: .waiting(.stop))
+        let out = SessionListOrganizer.organizeFlat(sessions: [waitUnread], tab: .favorites, filter: "", now: 2000)
+        XCTAssertEqual(out.pinned.map(\.sessionId), ["b"], "等你会话不被 favorites tab 过滤掉")
+    }
 }

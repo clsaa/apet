@@ -96,13 +96,21 @@ public struct AppConfig: Codable, Equatable {
     public var notifyBannerEnabled: Bool
     /// F1：通知声音开关（关→静默横幅）。默认 true。
     public var notifySoundEnabled: Bool
+    /// M3-D-B：面板当前选中 tab(SessionTab.encoded)。默认 "all"。
+    public var selectedTab: String
+    /// M3-D-C：自定义分组注册表(有序名单,决定 tab 顺序,允许空组)。
+    public var sessionGroups: [String]
+    /// M3-D-F：面板窗口尺寸(可缩放窗口持久化)。默认 360×480。
+    public var panelWidth: Double
+    public var panelHeight: Double
 
     // CodingKeys：含全部字段，供自定义 decoder 和 synthesized encoder 共同使用。
     private enum CodingKeys: String, CodingKey {
         case dataRoots, displayMode, notifyMode, staleAfterSec, endedAfterSec,
              waitingEndedAfterSec, selectedPet, readGrayAfterSec, panelHotKey,
              dndEnabled, dndStartMin, dndEndMin, excludedRoots, menuBarStyle, stateColors,
-             notifyBannerEnabled, notifySoundEnabled
+             notifyBannerEnabled, notifySoundEnabled,
+             selectedTab, sessionGroups, panelWidth, panelHeight
     }
 
     /// 自定义解码：旧版 config.json 缺少可选字段时用默认值，不丢失其他已有设置。
@@ -131,6 +139,10 @@ public struct AppConfig: Codable, Equatable {
         stateColors          = try c.decodeIfPresent(StateColorConfig.self, forKey: .stateColors) ?? .defaults
         notifyBannerEnabled  = try c.decodeIfPresent(Bool.self, forKey: .notifyBannerEnabled) ?? true
         notifySoundEnabled   = try c.decodeIfPresent(Bool.self, forKey: .notifySoundEnabled)  ?? true
+        selectedTab          = try c.decodeIfPresent(String.self,   forKey: .selectedTab)   ?? "all"
+        sessionGroups        = try c.decodeIfPresent([String].self, forKey: .sessionGroups) ?? []
+        panelWidth           = try c.decodeIfPresent(Double.self,   forKey: .panelWidth)    ?? 360
+        panelHeight          = try c.decodeIfPresent(Double.self,   forKey: .panelHeight)   ?? 480
     }
 
     public init(
@@ -150,7 +162,11 @@ public struct AppConfig: Codable, Equatable {
         menuBarStyle: String = "counts",
         stateColors: StateColorConfig = .defaults,
         notifyBannerEnabled: Bool = true,
-        notifySoundEnabled: Bool = true
+        notifySoundEnabled: Bool = true,
+        selectedTab: String = "all",
+        sessionGroups: [String] = [],
+        panelWidth: Double = 360,
+        panelHeight: Double = 480
     ) {
         self.dataRoots = dataRoots
         self.displayMode = displayMode
@@ -169,6 +185,10 @@ public struct AppConfig: Codable, Equatable {
         self.stateColors = stateColors
         self.notifyBannerEnabled = notifyBannerEnabled
         self.notifySoundEnabled = notifySoundEnabled
+        self.selectedTab = selectedTab
+        self.sessionGroups = sessionGroups
+        self.panelWidth = panelWidth
+        self.panelHeight = panelHeight
     }
 
     /// Factory that produces the out-of-the-box defaults.

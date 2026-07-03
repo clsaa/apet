@@ -48,6 +48,8 @@ public struct SessionRowModel: Equatable, Identifiable {
     /// 无跳转提示（M3-C+ 评审 B3）：DB 轮询源且无终端信息——点击只能走「复制恢复命令」
     /// 弹窗，预期在点击前对齐。
     public let noJumpHint: Bool
+    /// 终端 app bundleId（M3-D-D：行首真 app 图标；terminal 未知→nil，不显图标）。
+    public let terminalBundleId: String?
 
     public init(
         id: String,
@@ -62,7 +64,8 @@ public struct SessionRowModel: Equatable, Identifiable {
         sessionId: String = "",
         agent: String = "",
         relativeText: String = "",
-        noJumpHint: Bool = false
+        noJumpHint: Bool = false,
+        terminalBundleId: String? = nil
     ) {
         self.id = id
         self.title = title
@@ -77,6 +80,7 @@ public struct SessionRowModel: Equatable, Identifiable {
         self.agent = agent
         self.relativeText = relativeText
         self.noJumpHint = noJumpHint
+        self.terminalBundleId = terminalBundleId
     }
 }
 
@@ -141,6 +145,8 @@ public enum SessionRowMapper {
         // opencode 等 DB 源无 terminal 且无 hook 升级路径 → 行内「无跳转」(M3-C+ 评审 B3)。
         let noJumpHint = session.terminal == nil
             && AgentManifest.dbBackedAgents.contains(key.agent)
+        // M3-D-D:终端 bundleId(ref 自带优先,否则 kind 映射;未知→nil)。
+        let terminalBundleId = session.terminal?.bundleId ?? session.terminal?.kind.bundleId
 
         let relativeText = now.map { RelativeTime.short(from: session.lastActiveAt, now: $0, tzOffset: tzOffset) } ?? ""
 
@@ -157,7 +163,8 @@ public enum SessionRowMapper {
             sessionId: key.sessionId,
             agent: key.agent,
             relativeText: relativeText,
-            noJumpHint: noJumpHint
+            noJumpHint: noJumpHint,
+            terminalBundleId: terminalBundleId
         )
     }
 }

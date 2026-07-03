@@ -24,11 +24,14 @@ public struct Session: Equatable {
     public var customName: String?
     /// 创建时间（F10，Unix 秒）。IO 缝注入首次见到的时间；与 SessionMeta.firstSeenAt 取 min。
     public var createdAt: Double?
+    /// 所属自定义分组名（M3-D-C）。运行时镜像,真值在 SessionMeta.groups。
+    public var groups: [String]
 
     public init(key: SessionKey, state: SessionState, cwd: String? = nil, title: String? = nil,
                 terminal: TerminalRef? = nil, lastSeq: Int, lastActiveAt: Double,
                 source: SessionSource = .hook, acknowledged: Bool = false,
-                favorite: Bool = false, customName: String? = nil, createdAt: Double? = nil) {
+                favorite: Bool = false, customName: String? = nil, createdAt: Double? = nil,
+                groups: [String] = []) {
         self.key = key; self.state = state; self.cwd = cwd; self.title = title
         self.terminal = terminal; self.lastSeq = lastSeq; self.lastActiveAt = lastActiveAt
         self.source = source
@@ -36,6 +39,7 @@ public struct Session: Equatable {
         self.favorite = favorite
         self.customName = customName
         self.createdAt = createdAt
+        self.groups = groups
     }
 
     /// 多 profile 区分标签：从 root 派生。`~/.claude-profiles/work` → "work"；普通 `~/.claude` → nil。
