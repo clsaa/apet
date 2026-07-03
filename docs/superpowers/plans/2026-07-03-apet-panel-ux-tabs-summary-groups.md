@@ -448,6 +448,263 @@ git commit -m "docs(m3d): README/CLAUDE.md 同步面板 UX 升级(tab/分组/内
 
 ---
 
+# 里程碑 D:终端图标(真 app 图标)
+
+### Task D1: TerminalKind.bundleId 纯映射(收敛双份)
+
+**Files:**
+- Modify: `Sources/AgentPetCore/Model/AgentEvent.swift`(给 `TerminalKind` 加 `bundleId`)
+- Modify: `Sources/apet/TerminalFocusService.swift`(`fallbackBundleId` 复用)
+- Test: `Tests/AgentPetCoreTests/`(找 TerminalCapability/AgentEvent 测试文件追加;无则新建 `TerminalKindTests.swift`)
+
+**Interfaces:**
+- Produces: `TerminalKind.bundleId: String?`
+
+- [ ] **Step 1: 写失败测试**
+```swift
+import XCTest
+@testable import AgentPetCore
+
+final class TerminalKindTests: XCTestCase {
+    func test_bundleId_perKind() {
+        XCTAssertEqual(TerminalKind.iterm2.bundleId, "com.googlecode.iterm2")
+        XCTAssertEqual(TerminalKind.terminal.bundleId, "com.apple.Terminal")
+        XCTAssertEqual(TerminalKind.warp.bundleId, "dev.warp.Warp-Stable")
+        XCTAssertEqual(TerminalKind.ghostty.bundleId, "com.mitchellh.ghostty")
+        XCTAssertEqual(TerminalKind.vscode.bundleId, "com.microsoft.VSCode")
+        XCTAssertNil(TerminalKind.other.bundleId)
+    }
+}
+```
+
+- [ ] **Step 2: 跑测试确认失败** → `has no member 'bundleId'`
+
+- [ ] **Step 3: 实现**(`AgentEvent.swift`,`TerminalKind` 加扩展)
+```swift
+public extension TerminalKind {
+    /// 默认 app bundleId(图标 + 激活兜底共用;other 未知→nil)。
+    var bundleId: String? {
+        switch self {
+        case .iterm2:   return "com.googlecode.iterm2"
+        case .terminal: return "com.apple.Terminal"
+        case .warp:     return "dev.warp.Warp-Stable"
+        case .ghostty:  return "com.mitchellh.ghostty"
+        case .vscode:   return "com.microsoft.VSCode"
+        case .other:    return nil
+        }
+    }
+}
+```
+`TerminalFocusService.fallbackBundleId` 内 `switch ref.kind` 那段替换为 `return ref.bundleId ?? ref.kind.bundleId`。
+
+- [ ] **Step 4: 跑测试** → PASS;全量绿。
+
+- [ ] **Step 5: 提交**
+```bash
+git add Sources/AgentPetCore/Model/AgentEvent.swift Sources/apet/TerminalFocusService.swift Tests/AgentPetCoreTests/
+git commit -m "feat(m3d-d): TerminalKind.bundleId 纯映射,fallbackBundleId 复用(收敛双份)"
+```
+
+### Task D2: SessionRowModel.terminalBundleId + mapper
+
+**Files:**
+- Modify: `Sources/AppShellKit/SessionRowModel.swift`
+- Test: `Tests/AppShellKitTests/SessionRowMapperTests.swift`(追加)
+
+**Interfaces:**
+- Produces: `SessionRowModel.terminalBundleId: String?`(`terminal?.bundleId ?? terminal?.kind.bundleId`;terminal nil→nil)
+
+- [ ] **Step 1: 写失败测试**
+```swift
+    func test_terminalBundleId_fromKind() {
+        let s = makeSession(terminal: TerminalRef(kind: .warp))
+        XCTAssertEqual(SessionRowMapper.make(s).terminalBundleId, "dev.warp.Warp-Stable")
+    }
+    func test_terminalBundleId_prefersExplicitRefBundleId() {
+        let s = makeSession(terminal: TerminalRef(kind: .other, bundleId: "com.qoder.work"))
+        XCTAssertEqual(SessionRowMapper.make(s).terminalBundleId, "com.qoder.work")
+    }
+    func test_terminalBundleId_nilWhenNoTerminal() {
+        XCTAssertNil(SessionRowMapper.make(makeSession()).terminalBundleId)
+    }
+```
+
+- [ ] **Step 2: 跑测试确认失败**
+
+- [ ] **Step 3: 实现**:`SessionRowModel` 加 `public let terminalBundleId: String?`;init 末位加 `terminalBundleId: String? = nil`;`make` 内 `let terminalBundleId = session.terminal?.bundleId ?? session.terminal?.kind.bundleId`,return 带上。
+
+- [ ] **Step 4: 跑测试** → PASS
+
+- [ ] **Step 5: 提交**
+```bash
+git add Sources/AppShellKit/SessionRowModel.swift Tests/AppShellKitTests/SessionRowMapperTests.swift
+git commit -m "feat(m3d-d): SessionRowModel.terminalBundleId(kind→bundleId,未知nil)"
+```
+
+### Task D3: AppIconCache + 行首终端图标(GUI)
+
+**Files:**
+- Create: `Sources/apet/AppIconCache.swift`
+- Modify: `Sources/apet/SessionPanel.swift`(状态圆点右、标题左插图标)
+
+- [ ] **Step 1: AppIconCache**
+```swift
+import AppKit
+
+/// 按 bundleId 取 app 图标,进程内缓存(图标不变)。取不到→nil(调用方兜底 SF Symbol)。
+enum AppIconCache {
+    private static var cache: [String: NSImage] = [:]
+    static func icon(bundleId: String) -> NSImage? {
+        if let c = cache[bundleId] { return c }
+        guard let url = NSWorkspace.shared.urlForApplication(withBundleIdentifier: bundleId) else { return nil }
+        let img = NSWorkspace.shared.icon(forFile: url.path)
+        cache[bundleId] = img
+        return img
+    }
+}
+```
+
+- [ ] **Step 2: 行首图标**(`SessionRowCell`,状态圆点之后、VStack 之前)
+```swift
+                if let bid = row.terminalBundleId {
+                    if let icon = AppIconCache.icon(bundleId: bid) {
+                        Image(nsImage: icon).resizable().frame(width: 14, height: 14)
+                    } else {
+                        Image(systemName: "terminal").font(.system(size: 11)).foregroundStyle(.secondary)
+                    }
+                }
+```
+(`terminalBundleId == nil` 不占位。)
+
+- [ ] **Step 3: 编译 + 冒烟**:Claude/hook 会话行首现 iTerm2/Warp 真图标;纯 jsonl 无 hook 会话不显图标;QoderWork 现 Qoder 图标。
+
+- [ ] **Step 4: 提交**
+```bash
+git add Sources/apet/AppIconCache.swift Sources/apet/SessionPanel.swift
+git commit -m "feat(m3d-d): 行首终端真 app 图标(NSWorkspace 缓存,取不到退 terminal 符号)"
+```
+
+---
+
+# 里程碑 E:视觉打磨(UI review P0)
+
+### Task E1: PathAbbreviator 纯函数 + 副标题折叠
+
+**Files:**
+- Create: `Sources/AgentPetCore/Session/PathAbbreviator.swift`
+- Modify: `Sources/AppShellKit/SessionRowModel.swift`(subtitle 用它)
+- Test: `Tests/AgentPetCoreTests/PathAbbreviatorTests.swift`(新)
+
+**Interfaces:**
+- Produces: `PathAbbreviator.abbreviate(_ path: String, home: String, maxLen: Int = 32) -> String`
+
+- [ ] **Step 1: 写失败测试**
+```swift
+import XCTest
+@testable import AgentPetCore
+
+final class PathAbbreviatorTests: XCTestCase {
+    func test_homePrefix_toTilde() {
+        XCTAssertEqual(PathAbbreviator.abbreviate("/Users/n/workspace/apet", home: "/Users/n"), "~/workspace/apet")
+    }
+    func test_nonHome_unchanged_ifShort() {
+        XCTAssertEqual(PathAbbreviator.abbreviate("/opt/x", home: "/Users/n"), "/opt/x")
+    }
+    func test_tooLong_collapsesToParentLeaf() {
+        let long = "/Users/n/a/b/c/d/e/f/g/really-long-project-name-here"
+        let out = PathAbbreviator.abbreviate(long, home: "/Users/n", maxLen: 24)
+        XCTAssertTrue(out.hasPrefix("…/"), out)
+        XCTAssertTrue(out.hasSuffix("really-long-project-name-here"), out)
+    }
+    func test_empty_returnsEmpty() {
+        XCTAssertEqual(PathAbbreviator.abbreviate("", home: "/Users/n"), "")
+    }
+}
+```
+
+- [ ] **Step 2: 跑测试确认失败**
+
+- [ ] **Step 3: 实现**
+```swift
+import Foundation
+
+/// 面板副标题路径折叠:home→`~`;仍超 maxLen → `…/<父>/<叶>`(纯函数)。
+public enum PathAbbreviator {
+    public static func abbreviate(_ path: String, home: String, maxLen: Int = 32) -> String {
+        guard !path.isEmpty else { return "" }
+        var p = path
+        if !home.isEmpty, p == home || p.hasPrefix(home + "/") {
+            p = "~" + p.dropFirst(home.count)
+        }
+        if p.count <= maxLen { return p }
+        let parts = p.split(separator: "/", omittingEmptySubsequences: false)
+        guard parts.count >= 2 else { return p }
+        let leaf = parts[parts.count - 1], parent = parts[parts.count - 2]
+        return "…/\(parent)/\(leaf)"
+    }
+}
+```
+
+- [ ] **Step 4: 跑测试** → PASS
+
+- [ ] **Step 5: 接线 + 提交**:`SessionRowModel.make` 的 `subtitle = session.cwd ?? ""` 改为 `PathAbbreviator.abbreviate(session.cwd ?? "", home: NSHomeDirectory())`(NSHomeDirectory 在 AppShellKit 可用;若 core 层则由 apet 注入 home——**放 mapper(AppShellKit)用 NSHomeDirectory 即可**)。
+```bash
+git add Sources/AgentPetCore/Session/PathAbbreviator.swift Sources/AppShellKit/SessionRowModel.swift Tests/AgentPetCoreTests/PathAbbreviatorTests.swift
+git commit -m "feat(m3d-e): PathAbbreviator 路径折叠(home→~/超长→…/父/叶),副标题去重复前缀"
+```
+
+### Task E2: 状态指示器加形状(色盲无障碍)
+
+**Files:**
+- Modify: `Sources/apet/SessionPanel.swift`(圆点 → 每状态 SF Symbol)
+
+- [ ] **Step 1: 实现**(`SessionRowCell` 的 `Circle().fill(dotColor)` 替换)
+```swift
+                Image(systemName: dotSymbol)
+                    .font(.system(size: 11))
+                    .foregroundStyle(dotColor)
+                    .frame(width: 12)
+```
+加计算属性(state→symbol,复用现有 dot→color):
+```swift
+    private var dotSymbol: String {
+        switch row.dot {
+        case .running:     return "circle.fill"
+        case .attention:   return "exclamationmark.circle.fill"
+        case .doneWaiting: return "stop.circle.fill"
+        case .read:        return "checkmark.circle.fill"
+        case .stale:       return "minus.circle"
+        }
+    }
+```
+(`dotColor` 保留;isInferred 的降透明保留。)
+
+- [ ] **Step 2: 编译 + 冒烟**:五种状态形状可区分(灰度截图下也能分)。
+- [ ] **Step 3: 提交**
+```bash
+git add Sources/apet/SessionPanel.swift
+git commit -m "feat(m3d-e): 状态指示器形状+色(色盲无障碍,UI review P0)"
+```
+
+### Task E3: 元数据统一 + 整行 hover 背景 + 字号收敛
+
+**Files:**
+- Modify: `Sources/apet/SessionPanel.swift`
+
+- [ ] **Step 1: 元数据统一**:「仅激活」「推断」「无跳转」三者统一为 size 10 `.foregroundStyle(.tertiary)` 灰字(去掉「推断」的 chip 背景);**只有 agent 徽标保留紫色 chip**。
+
+- [ ] **Step 2: 整行 hover 背景**:`SessionRowCell` 根视图(已有 `hovering` 状态自组件 A)加 `.background(hovering ? Color.primary.opacity(0.06) : .clear)`。
+
+- [ ] **Step 3: 字号核对**:标题 13 / 副标题 11 / 徽标·时间·次要标签 10,三档灰度(primary/secondary/tertiary)。
+
+- [ ] **Step 4: 编译 + 冒烟 + 提交**
+```bash
+git add Sources/apet/SessionPanel.swift
+git commit -m "feat(m3d-e): 元数据视觉统一(次要状态灰字/仅agent彩chip)+ 整行hover背景 + 字号三级"
+```
+
+---
+
 ## 完成后(不在本计划内自动执行)
 
 1. **七视角实现评审**(用户流程要求:每核心阶段评审+修复)。
