@@ -30,6 +30,8 @@ struct SessionPanel: View {
     /// 状态圆点配色（F3）。默认系统色。
     var palette: DotPalette = .system
     /// M3-D-B:当前选中 tab(权威值来自 config,onSelectTab 回写)。
+    /// 是否显示 tab 栏(桌宠 popover 未接 tab/分组回调,传 false 隐藏,避免死控件)。
+    var showsTabBar: Bool = true
     var selectedTab: SessionTab = .all
     var onSelectTab: (SessionTab) -> Void = { _ in }
     /// M3-D-C:自定义分组名单(tab 栏动态追加分组 tab)。
@@ -57,8 +59,10 @@ struct SessionPanel: View {
             if let hint = hotkeyHint { hotkeyHeader(hint) }
             searchField
             Divider()
-            tabBar
-            Divider()
+            if showsTabBar {
+                tabBar
+                Divider()
+            }
             if sessions.isEmpty {
                 emptyState
             } else {

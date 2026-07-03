@@ -45,6 +45,13 @@ final class PetWindowController: NSObject {
     var onToggleFavorite: ((SessionKey) -> Void)?
     /// F7：重命名（nil=恢复默认名），由 AppCoordinator 注入。
     var onRenameSession: ((SessionKey, String?) -> Void)?
+    // M3-D-B/C:tab + 分组(AppCoordinator 注入,与菜单栏共用同一套闭包)。
+    var selectedTabProvider: (() -> SessionTab)?
+    var sessionGroupsProvider: (() -> [String])?
+    var onSelectTab: ((SessionTab) -> Void)?
+    var onToggleGroupMembership: ((SessionKey, String) -> Void)?
+    var onCreateGroupFor: ((SessionKey?) -> Void)?
+    var onDeleteGroup: ((String) -> Void)?
     /// F3：状态圆点配色，由 AppCoordinator 从 config 注入。
     var dotPalette: DotPalette = .system
 
@@ -382,6 +389,13 @@ final class PetWindowController: NSObject {
             onOpenPreferences: { [weak self] in self?.onOpenPreferences?() },
             onAcknowledgeAll: { [weak self] in self?.onAcknowledgeAll?() }
         )
+        // M3-D-B/C:桌宠面板也接 tab/分组(默认显示模式,不能留死控件)。
+        panelVC.selectedTabProvider = { [weak self] in self?.selectedTabProvider?() ?? .all }
+        panelVC.sessionGroupsProvider = { [weak self] in self?.sessionGroupsProvider?() ?? [] }
+        panelVC.onSelectTab = { [weak self] tab in self?.onSelectTab?(tab) }
+        panelVC.onToggleGroup = { [weak self] key, g in self?.onToggleGroupMembership?(key, g) }
+        panelVC.onCreateGroup = { [weak self] keyOrNil in self?.onCreateGroupFor?(keyOrNil) }
+        panelVC.onDeleteGroup = { [weak self] g in self?.onDeleteGroup?(g) }
         let p = NSPopover()
         p.contentViewController = panelVC
         p.behavior = .transient
@@ -516,8 +530,14 @@ private struct PetPanelRootView: View {
     let onLocalSummary: (String) -> Void
     let onOpenPreferences: () -> Void
     let onAcknowledgeAll: () -> Void
+    var selectedTab: SessionTab = .all
+    var onSelectTab: (SessionTab) -> Void = { _ in }
+    var groups: [String] = []
+    var onToggleGroup: (String, String) -> Void = { _, _ in }
+    var onCreateGroup: (String?) -> Void = { _ in }
+    var onDeleteGroup: (String) -> Void = { _ in }
 
-    /// 是否存在未读 waiting 会话（红/橙点）。仅此时显示「全部已读」，
+    /// 是否存在未读 waiting 会话（红/橙点）。
     /// 避免全绿/全已读时按钮可见却点了无反应（产品评审 MAJOR-1）。
     private var hasUnread: Bool {
         sessions.contains { s in
@@ -532,15 +552,19 @@ private struct PetPanelRootView: View {
                          onToggleFavorite: onToggleFavorite, onRename: onRename,
                          onCopyId: onCopyId, onCopyResume: onCopyResume,
                          onLocalSummary: onLocalSummary,
-                         hotkeyHint: hotkeyHint, palette: palette)
+                         hotkeyHint: hotkeyHint, palette: palette,
+                         showsTabBar: true,
+                         selectedTab: selectedTab, onSelectTab: onSelectTab,
+                         groups: groups, onToggleGroup: onToggleGroup,
+                         onCreateGroup: onCreateGroup, onDeleteGroup: onDeleteGroup)
             Divider()
-            // 紧凑操作行：已读(仅未读时)/首选项/退出。退出保留（状态栏被刘海藏住时唯一出口，A1）。
+            // 紧凑操作行：已读常驻置灰(U3)/首选项/退出。
             HStack(spacing: 0) {
-                if hasUnread {
-                    PanelFooterButton(icon: "checkmark.circle", label: "已读", action: onAcknowledgeAll)
-                }
-                PanelFooterButton(icon: "gearshape", label: "首选项", action: onOpenPreferences)
-                PanelFooterButton(icon: "power", label: "退出") { NSApplication.shared.terminate(nil) }
+                PanelFooterButton(icon: "checkmark.circle", label: "已读", action: onAcknowledgeAll,
+                                  enabled: hasUnread, help: "把所有「等你」会话标为已读")
+                PanelFooterButton(icon: "gearshape", label: "首选项", action: onOpenPreferences, help: "打开首选项")
+                PanelFooterButton(icon: "power", label: "退出",
+                                  action: { NSApplication.shared.terminate(nil) }, help: "退出 AgentPet")
             }
             .padding(.horizontal, 6)
             .padding(.vertical, 4)
@@ -565,6 +589,13 @@ private final class SessionPanelHostController: NSViewController {
     private let onOpenPreferences: () -> Void
     private let onAcknowledgeAll: () -> Void
     private var hostingController: NSHostingController<PetPanelRootView>?
+    // M3-D-B/C:tab + 分组(由 PetWindowController 注入,读 config/写回)。
+    var selectedTabProvider: (() -> SessionTab)?
+    var sessionGroupsProvider: (() -> [String])?
+    var onSelectTab: ((SessionTab) -> Void)?
+    var onToggleGroup: ((SessionKey, String) -> Void)?
+    var onCreateGroup: ((SessionKey?) -> Void)?
+    var onDeleteGroup: ((String) -> Void)?
 
     init(
         sessions: [Session],
@@ -595,6 +626,10 @@ private final class SessionPanelHostController: NSViewController {
 
     required init?(coder: NSCoder) { fatalError("init(coder:) not supported") }
 
+    private func petSessionForId(_ id: String) -> Session? {
+        sessions.first { "\($0.key.agent)|\($0.key.root)|\($0.key.sessionId)" == id }
+    }
+
     private func makeRoot() -> PetPanelRootView {
         PetPanelRootView(sessions: sessions, now: Date().timeIntervalSince1970,
                          palette: palette,
@@ -602,7 +637,23 @@ private final class SessionPanelHostController: NSViewController {
                          onToggleFavorite: onToggleFavorite, onRename: onRename,
                          onCopyId: onCopyId, onCopyResume: onCopyResume,
                          onLocalSummary: onLocalSummary,
-                         onOpenPreferences: onOpenPreferences, onAcknowledgeAll: onAcknowledgeAll)
+                         onOpenPreferences: onOpenPreferences, onAcknowledgeAll: onAcknowledgeAll,
+                         selectedTab: selectedTabProvider?() ?? .all,
+                         onSelectTab: { [weak self] tab in
+                             self?.onSelectTab?(tab)
+                             if let self { self.hostingController?.rootView = self.makeRoot() }
+                         },
+                         groups: sessionGroupsProvider?() ?? [],
+                         onToggleGroup: { [weak self] id, g in
+                             guard let self, let sess = self.petSessionForId(id) else { return }
+                             self.onToggleGroup?(sess.key, g)
+                         },
+                         onCreateGroup: { [weak self] idOrNil in
+                             guard let self else { return }
+                             if let id = idOrNil, let sess = self.petSessionForId(id) { self.onCreateGroup?(sess.key) }
+                             else { self.onCreateGroup?(nil) }
+                         },
+                         onDeleteGroup: { [weak self] g in self?.onDeleteGroup?(g) })
     }
 
     override func loadView() {
