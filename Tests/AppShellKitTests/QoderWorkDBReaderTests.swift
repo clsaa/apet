@@ -127,4 +127,103 @@ final class QoderWorkDBReaderTests: XCTestCase {
         guard case .observe(let st3, _, _, _) = emitted[2] else { return XCTFail() }
         XCTAssertEqual(st3, .stale)
     }
+
+    // ── 评审 B4(OpenCode 接入计划):DBPollWatcher 泛化前的行为回归网 ──
+
+    /// 复活语义:running → 消失(stale)→ 复活,必须重新 emit running(3 条精确序列)。
+    /// 依赖 lastEmitted.removeValue 这一行为——泛化时最易丢。
+    func test_watcher_reappearAfterGhost_reEmitsRunning() {
+        var rows: [QoderWorkChatRow] = [
+            QoderWorkChatRow(chatId: "c1", name: "任务", projectPath: "/w",
+                             sessionId: "8dd7ca5f-e655-47b7-8a5f-ad28336c1d34", updatedAt: 1000)
+        ]
+        var emitted: [ScanResult] = []
+        let watcher = QoderWorkWatcher(
+            read: { rows }, root: "/root", now: { 1010 },
+            emit: { emitted.append($0) })
+        watcher.scanOnce()                                   // running
+        rows = []
+        watcher.scanOnce()                                   // ghost → stale
+        rows = [QoderWorkChatRow(chatId: "c1", name: "任务", projectPath: "/w",
+                                 sessionId: "8dd7ca5f-e655-47b7-8a5f-ad28336c1d34", updatedAt: 1005)]
+        watcher.scanOnce()                                   // 复活 → 必须重新 emit
+        let key = SessionKey(agent: "qoder-work", root: "/root",
+                             sessionId: "8dd7ca5f-e655-47b7-8a5f-ad28336c1d34")
+        XCTAssertEqual(emitted, [
+            .observe(state: .running, key: key, cwd: "/w", title: "任务"),
+            .observe(state: .stale, key: key, cwd: nil, title: nil),
+            .observe(state: .running, key: key, cwd: "/w", title: "任务"),
+        ], "消失后复活必须重新 emit(lastEmitted 须被 stale 清除)")
+    }
+
+    /// 读失败轮(nil)夹在中间:失败轮绝不发幽灵 stale;行真正消失的 stale 恰好 1 条、发生在恢复轮。
+    func test_watcher_readFailureRound_thenEmptyRows_staleExactlyOnceOnRecovery() {
+        var phase = 0
+        var emitted: [ScanResult] = []
+        let watcher = QoderWorkWatcher(
+            read: {
+                switch phase {
+                case 0: return [QoderWorkChatRow(chatId: "c1", name: nil, projectPath: nil,
+                                                 sessionId: nil, updatedAt: 1000)]
+                case 1: return nil          // 锁抖动半读
+                default: return []          // 恢复,行确实没了
+                }
+            },
+            root: "/r", now: { 1010 }, emit: { emitted.append($0) })
+        watcher.scanOnce(); phase = 1
+        watcher.scanOnce(); phase = 2       // nil 轮:整轮跳过,不 emit
+        watcher.scanOnce()
+        let staleCount = emitted.filter {
+            if case .observe(state: .stale, _, _, _) = $0 { return true }; return false
+        }.count
+        XCTAssertEqual(emitted.count, 2, "running + stale,失败轮零 emit")
+        XCTAssertEqual(staleCount, 1, "stale 恰好 1 条且在恢复轮")
+    }
+
+    /// 双 key 交错:一个转态 + 一个消失,同轮 emit 集合精确。
+    func test_watcher_twoKeys_transitionAndGhost_sameRound() {
+        let idA = "aaaaaaaa-0000-0000-0000-000000000001"
+        let idB = "bbbbbbbb-0000-0000-0000-000000000002"
+        var rows: [QoderWorkChatRow] = [
+            QoderWorkChatRow(chatId: "a", name: "A", projectPath: "/a", sessionId: idA, updatedAt: 1000),
+            QoderWorkChatRow(chatId: "b", name: "B", projectPath: "/b", sessionId: idB, updatedAt: 1000),
+        ]
+        var emitted: [ScanResult] = []
+        let watcher = QoderWorkWatcher(
+            read: { rows }, root: "/r", now: { 1010 },
+            emit: { emitted.append($0) })
+        watcher.scanOnce()
+        XCTAssertEqual(emitted.count, 2, "首轮两条 running")
+        emitted.removeAll()
+        // A 转 waitingStop(age 进入 120..1800),B 消失。
+        rows = [QoderWorkChatRow(chatId: "a", name: "A", projectPath: "/a", sessionId: idA, updatedAt: 700)]
+        watcher.scanOnce()
+        let keyA = SessionKey(agent: "qoder-work", root: "/r", sessionId: idA)
+        let keyB = SessionKey(agent: "qoder-work", root: "/r", sessionId: idB)
+        XCTAssertTrue(emitted.contains(.observe(state: .waitingStop, key: keyA, cwd: "/a", title: "A")))
+        XCTAssertTrue(emitted.contains(.observe(state: .stale, key: keyB, cwd: nil, title: nil)))
+        XCTAssertEqual(emitted.count, 2)
+    }
+
+    /// start 幂等(源码注释宣称"测试评审 M6"但测试缺席——补上)+ stop 后不再 emit。
+    func test_watcher_startIdempotent_stopSilences() {
+        var emitted = 0
+        let watcher = QoderWorkWatcher(
+            read: { [QoderWorkChatRow(chatId: "c", name: nil, projectPath: nil,
+                                      sessionId: nil, updatedAt: 1000)] },
+            root: "/r", now: { 1001 }, emit: { _ in emitted += 1 })
+        watcher.start(every: 0.05)
+        watcher.start(every: 0.05)   // 幂等:不得产生双 timer
+        let exp = expectation(description: "first tick")
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.12) { exp.fulfill() }
+        wait(for: [exp], timeout: 2)
+        watcher.stop()
+        let after = emitted
+        let exp2 = expectation(description: "silence after stop")
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.12) { exp2.fulfill() }
+        wait(for: [exp2], timeout: 2)
+        // 同 key 同态差分不重复 emit——用 stop 后静默 + 不崩钉行为(计数抓不到双 timer,注释自认)。
+        XCTAssertEqual(emitted, after, "stop 后不得再 emit")
+        XCTAssertGreaterThanOrEqual(emitted, 1)
+    }
 }
