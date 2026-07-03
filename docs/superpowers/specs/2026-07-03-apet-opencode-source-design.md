@@ -44,22 +44,22 @@ apet 面板/菜单栏计数/桌宠能看到本机 OpenCode 的会话:标题、�
 - **`OpenCodeSessionRow`**(纯数据):`sessionId, directory, title, updatedAt(秒), createdAt(秒)`。读取层负责毫秒→秒换算,Row 内统一 Unix 秒。
 - **`OpenCodeScanner`**(纯函数):`scan(rows:root:now:runningWindow:idleWindow:) -> [ScanResult]`
   - `age = now - updatedAt`;`age < runningWindow(120)` → `.running`;`< idleWindow(1800)` → `.waitingStop`;更老 → 不进面板。
-  - `SessionKey(agent: "opencode", root: <展开后的 DB 绝对路径>, sessionId: row.sessionId)`(同 QoderWork 先例:root=数据文件路径,保证多 XDG 环境不撞车);`cwd = directory`,`title = title`。
+  - `SessionKey(agent: "opencode", root: <DB 所在目录>, sessionId: row.sessionId)`(同 QoderWork 先例:root=`deletingLastPathComponent(dbPath)`,多 XDG 环境不撞车);`cwd = directory`,`title = title`(空串映射 nil,遵守字段级合并约束 5)。
 - **`OpenCodeDBReader`**(IO 缝,只读 SQLite):
   - `defaultDBPath`:尊重 `XDG_DATA_HOME` 环境变量,默认 `~/.local/share/opencode/opencode.db`。
   - 失败 ≠ 空(同 QoderWork 评审语义):文件不存在 → `[]`;打不开/prepare 失败/step 非 DONE 收尾 → `nil`(整轮跳过)。
   - `sqlite3_open_v2(READONLY)` + `busy_timeout(200ms)`。
   - SQL:`SELECT id, directory, title, time_updated, time_created FROM session WHERE parent_id IS NULL AND time_archived IS NULL`。
-- **`OpenCodeWatcher`**:直接复用 `QoderWorkWatcher` 的轮询/差分/幽灵对账逻辑。**实现取向:把 `QoderWorkWatcher` 泛化改名为通用 `DBPollWatcher`(read/scan 注入)或直接以闭包复用**——不复制粘贴第二份轮询器;若泛化侵入过大,允许薄别名。
+- **轮询器**:`QoderWorkWatcher` 的轮询/差分/幽灵对账逻辑泛化为通用 **`DBPollWatcher`**(`scan: (now) -> [ScanResult]?` 闭包注入);`QoderWorkWatcher` 保持公开签名、内部委托 `DBPollWatcher`(既有测试全绿作回归网);OpenCode 直接用 `DBPollWatcher`,不复制第二份轮询器。
 
 ### 3.2 AgentPetCore:契约扩展(唯一动核心的点)
 
-`AgentManifest` 增加 **`sessionIdPattern`**(id 白名单策略),`renderResumeArgv` 用它替代硬编码 UUID:
+id 白名单策略抽成共享纯类型 **`SessionIdRule`**(AgentPetCore),UI 实际走的 `ResumeCommand` 与契约 `AgentManifest.renderResumeArgv` **两处都**用它替代硬编码 UUID:
 
-- 表达:枚举 `SessionIdRule { case uuid; case prefixedBase62(prefix: String, length: Int) }`(不用正则字符串,避免 ReDoS/转义面;M4 JSON Schema 化时再映射)。
-- 默认 `.uuid` —— 既有 manifest(claude/qoderCli)行为不变,已有测试必须全绿。
-- opencode:`.prefixedBase62(prefix: "ses_", length: 26)`,严格 ASCII `[0-9A-Za-z]`。
-- 校验失败 → `renderResumeArgv` 返回 nil(既有语义)。占位符「独立元素」规则不变。
+- 表达:枚举 `SessionIdRule { case uuid; case prefixedBase62(prefix: String, length: Int) }` + `validate(_:) -> Bool`(不用正则字符串,避免 ReDoS/转义面;M4 JSON Schema 化时再映射)。既有两份 `isValidUUID`(ResumeCommand/AgentManifest)收敛为对 `.uuid` 的委托,消除重复。
+- `ResumeCommand.argv` 改为**先按 agent 选规则再校验**;新增 `case "opencode"` → `["opencode", "--session", id]`,规则 `.prefixedBase62("ses_", 26)`(严格 ASCII `[0-9A-Za-z]`)。
+- `AgentManifest` 增加 `sessionIdRule` 字段,**默认 `.uuid`** —— 既有 manifest(claude/qoderCli)行为不变,已有测试必须全绿。
+- 校验失败 → 返回 nil(既有语义)。占位符「独立元素」规则不变。
 
 新增内置 manifest:
 
