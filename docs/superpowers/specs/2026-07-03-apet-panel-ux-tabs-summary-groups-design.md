@@ -1,4 +1,4 @@
-# apet 会话面板 UX 升级设计——悬停收藏 / Tab 分流 / 自定义分组
+# apet 会话面板 UX 升级设计——悬停收藏 / Tab 分流 / 自定义分组 / 终端图标 / 视觉打磨
 
 日期:2026-07-03 · 状态:待评审 · 里程碑:M3-D(面板体验)
 
@@ -90,6 +90,32 @@ public enum SessionTab: Equatable {
 
 **测试**:`GroupMembership.add/remove`(幂等、多属、去重);`isValidGroupName`(空/重复/超长/控制字符/正常);`SessionTabFilter.filter(.group)`(命中/不含/空组);config 编解码 `selectedTab` 的 `group:name` 往返。
 
+## 6.5 组件 D:终端图标(真 app 图标)
+
+**目标**:每行显示会话所在终端软件的**真实 app 图标**(iTerm2/Warp/Ghostty/VSCode/Terminal 的 logo),一眼区分;终端未知(纯 jsonl 无 hook,`terminal == nil`)不显图标(decision 2026-07-04)。
+
+**事实**:`TerminalKind { iterm2, terminal, warp, ghostty, vscode, other }`(`AgentEvent.swift:21`);kind→bundleId 映射已存在于 `TerminalFocusService.fallbackBundleId`(private)。DB 源(qoder-work/qoder-ide)在 `applyScanResult` 注入 `TerminalRef(.other, bundleId:)`。
+
+**设计**:
+- 抽公共纯映射 `TerminalKind.bundleId: String?`(入 AgentPetCore,单测):iterm2→`com.googlecode.iterm2`、terminal→`com.apple.Terminal`、warp→`dev.warp.Warp-Stable`、ghostty→`com.mitchellh.ghostty`、vscode→`com.microsoft.VSCode`、other→nil。`TerminalFocusService.fallbackBundleId` 改为复用它(消除双份)。
+- `SessionRowModel` 加 `terminalBundleId: String?`:`session.terminal?.bundleId ?? session.terminal?.kind.bundleId`;`terminal == nil` → nil。
+- **图标获取**(GUI,AppKit):`AppIconCache`(apet 层)按 bundleId → `NSWorkspace.shared.urlForApplication(withBundleIdentifier:)` → `.icon(forFile:)`,`[String: NSImage]` 缓存(app 图标不变,进程内缓存即可)。取不到(未安装)→ SF Symbol `terminal` 灰色兜底。
+- **位置**:行首状态圆点**右侧**、标题**左侧**,14pt;`terminalBundleId == nil` 不占位(不显)。
+
+**测试**:`TerminalKind.bundleId` 全 case;`SessionRowModel.terminalBundleId`(有 kind/有 ref.bundleId/nil 三态)。图标 fetch 为 GUI 不单测。
+
+## 6.6 组件 E:视觉打磨(UI review P0)
+
+2026-07-04 专业 UI review 的 P0 项,并入本设计:
+
+- **E1 路径折叠**(纯函数 `PathAbbreviator.abbreviate(_ path:home:) -> String`,单测):home 前缀 → `~`;仍超 ~32 字符 → `…/<父>/<叶>`。副标题改用它(消除满屏重复 `/Users/nathan/workspace/`)。
+- **E2 状态指示器加形状**(无障碍,色盲 8% 男性):圆点从**纯色**改为**形状+色**——每状态一个 SF Symbol(running=`circle.fill`、attention=`exclamationmark.circle.fill`、doneWaiting=`stop.circle.fill`、read=`checkmark.circle.fill`、stale=`minus.circle`),保留状态色。菜单栏彩色计数同题记入遗留(本轮只改面板)。
+- **E3 元数据视觉统一**:次要状态标签(仅激活 / 推断 / 无跳转)**统一为灰色小字**(size 10 tertiary,无 chip 背景);**只有 agent 来源保留彩色 chip**(它才是需区分维度)。
+- **E4 整行 hover 背景**:行悬停淡色背景(与组件 A 的悬停☆共用 `hovering` 状态),给点击目标反馈。
+- **E5 字号收敛到 3 级**:标题 13 / 副标题 11 / 徽标+时间 10,灰度对应三档(primary/secondary/tertiary)。
+
+**测试**:`PathAbbreviator.abbreviate`(home 折叠 / 超长 `…/父/叶` / 短路径原样 / 非 home 路径);其余为 GUI 调整不单测。
+
 ## 7. 数据流
 
 ```
@@ -105,8 +131,10 @@ SessionStore 变更 → changeHandler
 - **M3-D-A**:悬停收藏按钮(§3)。最小,先落地验证行布局。
 - **M3-D-B**:Tab 分流(§5)。取代分区。
 - **M3-D-C**:自定义分组(§6)。依赖 B 的 tab 栏。
+- **M3-D-D**:终端图标(§6.5)。独立。
+- **M3-D-E**:视觉打磨(§6.6,UI review P0)。独立;E4 hover 背景与 A 合流最省。
 
-每块独立可测、可 ship;C 前需 B 的 tab 栏在位。
+每块独立可测、可 ship;C 前需 B 的 tab 栏在位。建议顺序 A→E→D→B→C(A/E/D 是行内视觉,先把行做对再上 tab/分组)。
 
 ## 9. 非目标 / 遗留
 
@@ -115,3 +143,4 @@ SessionStore 变更 → changeHandler
 - OpenCode/QoderWork 的 DB 摘要(从 message 表)——独立里程碑。
 - 拖拽加入分组(本轮右键足够;拖拽 YAGNI)。
 - 分组嵌套 / 分组图标颜色(YAGNI)。
+- 菜单栏彩色计数的色盲无障碍(E2 只改面板圆点;菜单栏计数同题留遗留)。
