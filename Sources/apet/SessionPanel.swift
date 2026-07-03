@@ -112,7 +112,7 @@ struct SessionPanel: View {
     }
 
     private func rowCell(_ row: SessionRowModel) -> some View {
-        SessionRowCell(row: row, palette: palette)
+        SessionRowCell(row: row, palette: palette, onFavorite: { onToggleFavorite(row.id) })
             .contentShape(Rectangle())
             .onTapGesture { onTap(row.id) }
             .contextMenu {
@@ -158,35 +158,42 @@ struct SessionPanel: View {
 private struct SessionRowCell: View {
     let row: SessionRowModel
     let palette: DotPalette
+    var onFavorite: () -> Void = {}
+    @State private var hovering = false
 
     var body: some View {
-        HStack(alignment: .center, spacing: 8) {
-            Circle().fill(dotColor).frame(width: 9, height: 9)
+        HStack(alignment: .center, spacing: 7) {
+            // E2:状态指示器形状+色(色盲无障碍);isInferred 降透明保留。
+            Image(systemName: dotSymbol)
+                .font(.system(size: 11))
+                .foregroundStyle(dotColor)
+                .frame(width: 12)
+
+            // D3:终端真 app 图标(未知→不显)。
+            if let bid = row.terminalBundleId {
+                if let icon = AppIconCache.icon(bundleId: bid) {
+                    Image(nsImage: icon).resizable().frame(width: 14, height: 14)
+                } else {
+                    Image(systemName: "terminal").font(.system(size: 11)).foregroundStyle(.secondary)
+                }
+            }
 
             VStack(alignment: .leading, spacing: 2) {
                 HStack(spacing: 5) {
-                    if row.favorite {
-                        Image(systemName: "star.fill")
-                            .font(.system(size: 9))
-                            .foregroundStyle(.yellow)
-                    }
-                    // 标题走默认优先级 + 尾截断:让固有宽度的小徽标/标签(下方 fixedSize)先占位,
-                    // 标题吃剩余宽度并省略。M3-C+ 修复:此前 layoutPriority(1) 令长标题贪婪吃光宽度,
-                    // 把徽标饿到趋零、无 lineLimit 的标签逐字竖排成乱码。
                     Text(row.title)
                         .font(.system(size: 13, weight: .semibold))
                         .lineLimit(1)
                         .truncationMode(.tail)
 
+                    // E9:profileTag 随 E3 灰化(只 agent 保留彩 chip)。
                     if let tag = row.profileTag {
                         Text(tag)
                             .font(.system(size: 10, weight: .medium))
                             .padding(.horizontal, 5).padding(.vertical, 1)
-                            .background(Color.accentColor.opacity(0.13))
-                            .cornerRadius(4).lineLimit(1).fixedSize()
+                            .background(Color.secondary.opacity(0.15))
+                            .cornerRadius(4).foregroundStyle(.secondary).lineLimit(1).fixedSize()
                     }
-                    // M3-C：非 Claude 会话显 agent 徽标（多 Agent 辨识度，产品/用户评审双确认）+
-                    // 「状态粗略」语义随徽标传达（设计 §7.2）。
+                    // 唯一彩色 chip:agent 来源(需区分维度)。
                     if row.agent != "claude" && row.agent != "claude-code" && !row.agent.isEmpty {
                         Text(row.agent)
                             .font(.system(size: 10, weight: .medium))
@@ -197,31 +204,16 @@ private struct SessionRowCell: View {
                                   ? "来自 opencode:仅面板可见,无通知(插件增强规划中);状态按内容信号+活动时间推断;长时间无活动会灰显(会话仍在,活动后恢复),数小时后自动清理"
                                   : "来自 \(row.agent)（状态按活动时间粗略推断）")
                     }
-                    // M3-C+ 评审:noJumpHint 行抑制「推断」徽标(语义重叠,agent 徽标 tooltip
-                    // 已承载"状态是推断的";320px 行宽下三徽标叠加会把标题挤空)。
-                    if row.isInferred && !row.noJumpHint {
-                        Text("推断")
-                            .font(.system(size: 10, weight: .medium))
-                            .padding(.horizontal, 5).padding(.vertical, 1)
-                            .background(Color.secondary.opacity(0.15))
-                            .cornerRadius(4).foregroundStyle(.secondary).lineLimit(1).fixedSize()
-                            .help("状态由文件扫描推得,非实时 hook,可能已过时")   // B5
-                    }
-                    if row.noJumpHint {
-                        Text("无跳转")
-                            .font(.system(size: 10))   // 与相邻徽标字号统一(实现评审)
+                    // E3/E7:可靠性标记统一为灰字(无 chip);点击前预期告知保留(错误预防)。
+                    if let hint = reliabilityHint {
+                        Text(hint.text)
+                            .font(.system(size: 10))
                             .foregroundStyle(.tertiary)
                             .lineLimit(1).fixedSize()
-                            .help("该会话在外部终端中运行,apet 无法定位窗口;点击查看恢复方式")
-                    }
-                    if row.activateOnly {
-                        Text(row.needsManualTabHint ? "仅激活·手动切标签" : "仅激活")
-                            .font(.system(size: 10)).foregroundStyle(.tertiary)
-                            .lineLimit(1).fixedSize()
+                            .help(hint.help)
                     }
                     Spacer(minLength: 4)
                     if !row.relativeText.isEmpty {
-                        // 固定宽度右对齐列:跨行对齐时间 + 硬防换行(M3-C+ 修复)。
                         Text(row.relativeText)
                             .font(.system(size: 10))
                             .foregroundStyle(.tertiary)
@@ -237,13 +229,51 @@ private struct SessionRowCell: View {
                         .lineLimit(1)
                 }
             }
+
+            // A/E8:收藏☆固定 18pt 尾列(空间常驻→无位移抖动);悬停或已收藏才显。
+            Image(systemName: row.favorite ? "star.fill" : "star")
+                .font(.system(size: 11))
+                .foregroundStyle(row.favorite ? .yellow : .secondary)
+                .opacity(row.favorite || hovering ? 1 : 0)
+                .frame(width: 18)
+                .contentShape(Rectangle())
+                .onTapGesture { onFavorite() }
+                .help(row.favorite ? "取消收藏" : "收藏")
         }
         .padding(.horizontal, 12)
         .padding(.vertical, 7)
+        .background(hovering ? Color.primary.opacity(0.06) : Color.clear)   // E4:整行 hover 背景
+        .onHover { hovering = $0 }
+    }
+
+    // E2:每状态一个 SF Symbol(形状+色可区分)。
+    private var dotSymbol: String {
+        switch row.dot {
+        case .running:     return "circle.fill"
+        case .attention:   return "exclamationmark.circle.fill"
+        case .doneWaiting: return "stop.circle.fill"
+        case .read:        return "checkmark.circle.fill"
+        case .stale:       return "minus.circle"
+        }
     }
 
     private var dotColor: Color {
         let base = palette.color(for: row.dot)
         return row.isInferred ? base.opacity(0.45) : base
+    }
+
+    // E7:三个可靠性词收敛为单一标记(优先级:无跳转 > 仅切到App > 推断)。
+    private var reliabilityHint: (text: String, help: String)? {
+        if row.noJumpHint {
+            return ("无跳转", "该会话在外部终端中运行,apet 无法定位窗口;点击查看恢复方式")
+        }
+        if row.activateOnly {
+            return (row.needsManualTabHint ? "仅切到 App·手动切标签" : "仅切到 App",
+                    "该终端不支持精确跳 tab,点击只把 App 切到最前")
+        }
+        if row.isInferred {
+            return ("推断", "状态由文件扫描推得,非实时 hook,可能已过时")
+        }
+        return nil
     }
 }

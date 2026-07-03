@@ -108,7 +108,8 @@ public enum SessionRowMapper {
         }
 
         // Subtitle: full cwd (empty string if not available)
-        let subtitle = session.cwd ?? ""
+        // E1:路径折叠(home→~,超长→…/父/叶),消除满屏重复前缀。
+        let subtitle = PathAbbreviator.abbreviate(session.cwd ?? "", home: NSHomeDirectory())
 
         // Dot colour from session state.
         // 已读（acknowledged）的 waiting 会话优先渲染为黄色 .read（红→黄），先于 doneWaiting/attention。
