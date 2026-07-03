@@ -164,4 +164,36 @@ final class SessionListOrganizerTests: XCTestCase {
         let out = SessionListOrganizer.organizeFlat(sessions: [waitUnread], tab: .favorites, filter: "", now: 2000)
         XCTAssertEqual(out.pinned.map(\.sessionId), ["b"], "等你会话不被 favorites tab 过滤掉")
     }
+
+    func test_organizeFlat_readTab_onlyAcknowledgedWaiting() {
+        let read = session(id: "r", state: .waiting(.stop), acknowledged: true)
+        let unread = session(id: "u", state: .waiting(.stop), acknowledged: false)
+        let run = session(id: "g", state: .running)
+        let out = SessionListOrganizer.organizeFlat(sessions: [read, unread, run], tab: .read, filter: "", now: 2000)
+        XCTAssertEqual(out.pinned.map(\.sessionId), ["u"], "未读 waiting 跨 tab 常驻")
+        XCTAssertEqual(out.rest.map(\.sessionId), ["r"], "read tab rest 只含已读 waiting")
+    }
+    func test_organizeFlat_favorite_sortsFirst_stable() {
+        var fav = session(id: "fav", state: .running); fav.favorite = true
+        let n1 = session(id: "n1", state: .running); let n2 = session(id: "n2", state: .running)
+        let out = SessionListOrganizer.organizeFlat(sessions: [n1, fav, n2], tab: .all, filter: "", now: 2000)
+        XCTAssertEqual(out.rest.map(\.sessionId), ["fav", "n1", "n2"], "收藏优先,非收藏保输入序")
+    }
+    func test_organizeFlat_pinned_stable_favoriteFirst() {
+        var favA = session(id: "favA", state: .waiting(.stop)); favA.favorite = true
+        let n1 = session(id: "n1", state: .waiting(.stop)); let n2 = session(id: "n2", state: .waiting(.stop))
+        var favB = session(id: "favB", state: .waiting(.stop)); favB.favorite = true
+        let out = SessionListOrganizer.organizeFlat(sessions: [n1, favA, n2, favB], tab: .all, filter: "", now: 2000)
+        XCTAssertEqual(out.pinned.map(\.sessionId), ["favA", "favB", "n1", "n2"], "pinned 稳定:收藏优先+输入序")
+    }
+    func test_organizeFlat_row_carriesGroupsAndBundleId() {
+        var s = Session(key: SessionKey(agent: "claude-code", root: "/r", sessionId: "x"),
+                        state: .running, cwd: nil, title: nil, terminal: TerminalRef(kind: .warp),
+                        lastSeq: 1, lastActiveAt: 1000, acknowledged: false)
+        s.groups = ["工作"]
+        let out = SessionListOrganizer.organizeFlat(sessions: [s], tab: .all, filter: "", now: 2000)
+        let row = out.rest.first!
+        XCTAssertEqual(row.groups, ["工作"], "分组注入链贯通 organizeFlat 出口")
+        XCTAssertEqual(row.terminalBundleId, "dev.warp.Warp-Stable")
+    }
 }

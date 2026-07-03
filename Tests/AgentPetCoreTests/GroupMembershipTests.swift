@@ -18,4 +18,10 @@ final class GroupMembershipTests: XCTestCase {
         XCTAssertFalse(GroupMembership.isValidName("坏\u{202E}名"))
         XCTAssertFalse(GroupMembership.isValidName("控\u{0007}制"))
     }
+
+    func test_isValidName_graphemeCount_notScalar() {
+        XCTAssertTrue(GroupMembership.isValidName(String(repeating: "😀", count: 30)), "30 emoji=30 字素")
+        XCTAssertFalse(GroupMembership.isValidName(String(repeating: "😀", count: 31)))
+        XCTAssertTrue(GroupMembership.isValidName("👨‍👩‍👧 家庭"), "ZWJ 合成 emoji 计 1 字素")
+    }
 }

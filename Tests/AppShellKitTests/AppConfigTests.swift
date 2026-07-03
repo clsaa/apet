@@ -392,4 +392,38 @@ final class AppConfigTests: XCTestCase {
         XCTAssertEqual(loaded.dndEndMin,     420,     "dndEndMin 应 round-trip")
         XCTAssertEqual(loaded.excludedRoots, ["/a/b"], "excludedRoots 应 round-trip")
     }
+
+    // M3-D 面板 UX 四字段:默认 + 向后兼容 + 往返
+    func test_defaults_panelUXFields() {
+        let d = AppConfig.defaults
+        XCTAssertEqual(d.selectedTab, "all")
+        XCTAssertEqual(d.sessionGroups, [])
+        XCTAssertEqual(d.panelWidth, 360)
+        XCTAssertEqual(d.panelHeight, 480)
+    }
+    func test_decode_oldJson_withoutPanelUXFields_usesDefaults() throws {
+        let oldJson = """
+        {"dataRoots": [{"agent":"claude-code","path":"/tmp/root"}],
+         "displayMode":"pet","endedAfterSec":7200,"notifyMode":"attentionOnly",
+         "selectedPet":"shiba","staleAfterSec":300,"waitingEndedAfterSec":3600}
+        """
+        let c = try JSONDecoder().decode(AppConfig.self, from: Data(oldJson.utf8))
+        XCTAssertEqual(c.selectedTab, "all")
+        XCTAssertEqual(c.sessionGroups, [])
+        XCTAssertEqual(c.panelWidth, 360)
+        XCTAssertEqual(c.panelHeight, 480)
+    }
+    func test_roundTrip_panelUXFields() throws {
+        var custom = AppConfig.defaults
+        custom.selectedTab = "group:工作:含冒号"
+        custom.sessionGroups = ["工作", "重要", ""]
+        custom.panelWidth = 512.5
+        custom.panelHeight = 640
+        let data = try JSONEncoder().encode(custom)
+        let loaded = try JSONDecoder().decode(AppConfig.self, from: data)
+        XCTAssertEqual(loaded.selectedTab, "group:工作:含冒号")
+        XCTAssertEqual(loaded.sessionGroups, ["工作", "重要", ""])
+        XCTAssertEqual(loaded.panelWidth, 512.5)
+        XCTAssertEqual(loaded.panelHeight, 640)
+    }
 }

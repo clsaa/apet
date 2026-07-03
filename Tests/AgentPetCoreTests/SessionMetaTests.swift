@@ -86,10 +86,12 @@ final class SessionMetaTests: XCTestCase {
     }
 
     // M3-D-C:groups 并集去重 merge + apply 镜像。
-    func test_merge_groups_unionDedup() {
+    func test_merge_groups_outputIsSorted_deterministic() {
+        // 关键:断言里不得再 .sorted(),否则掩盖 merge 是否真排序(测试评审假绿)。
         let a = SessionMeta(groups: ["工作", "A"])
-        let b = SessionMeta(groups: ["A", "重要"])
-        XCTAssertEqual(SessionMeta.merge(a, b).groups.sorted(), ["A", "工作", "重要"])
+        let b = SessionMeta(groups: ["重要", "A"])
+        XCTAssertEqual(SessionMeta.merge(a, b).groups, ["A", "工作", "重要"])
+        XCTAssertEqual(SessionMeta.merge(b, a).groups, SessionMeta.merge(a, b).groups, "反向输入同集合→同输出(决定性)")
     }
     func test_apply_mirrorsGroups() {
         let sess = Session(key: SessionKey(agent: "c", root: "/r", sessionId: "1"),

@@ -20,4 +20,14 @@ final class PathAbbreviatorTests: XCTestCase {
     func test_homeExactly_toTilde() {
         XCTAssertEqual(PathAbbreviator.abbreviate("/Users/n", home: "/Users/n"), "~")
     }
+
+    func test_homeIsPrefixButNotDirBoundary_notAbbreviated() {
+        XCTAssertEqual(PathAbbreviator.abbreviate("/Users/nab", home: "/Users/n"), "/Users/nab")
+    }
+    func test_homeExactPrefixWord_notAbbreviated() {
+        XCTAssertEqual(PathAbbreviator.abbreviate("/Users/nathan", home: "/Users/nat"), "/Users/nathan")
+    }
+    func test_windowsStyle_noForwardSlash_asIsIfShort() {
+        XCTAssertEqual(PathAbbreviator.abbreviate(#"C:\Users\n\proj"#, home: "/Users/n"), #"C:\Users\n\proj"#)
+    }
 }

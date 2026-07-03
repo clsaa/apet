@@ -152,8 +152,12 @@ public extension SessionListOrganizer {
             if isUnreadWaiting(s) { pinnedS.append(s) } else { others.append(s) }
         }
         let restFiltered = SessionTabFilter.filter(others, tab: tab)
-        var pinned = pinnedS.map { SessionRowMapper.make($0, now: now, tzOffset: tzOffset) }
-        pinned.sort { $0.favorite && !$1.favorite }
+        // pinned 稳定排序:收藏优先 + offset 兜底(与 rest 一致;Array.sort 非稳定,同 favorite
+        // 值的多个等你行每次刷新可能换序致抖动——测试评审/架构评审)。
+        let pinned = pinnedS.enumerated().sorted { a, b in
+            if a.element.favorite != b.element.favorite { return a.element.favorite }
+            return a.offset < b.offset
+        }.map { SessionRowMapper.make($0.element, now: now, tzOffset: tzOffset) }
         let restSorted = restFiltered.enumerated().sorted { a, b in
             if a.element.favorite != b.element.favorite { return a.element.favorite }
             return a.offset < b.offset
