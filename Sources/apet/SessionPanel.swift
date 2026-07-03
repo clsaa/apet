@@ -176,6 +176,17 @@ struct SessionPanel: View {
             .cornerRadius(6)
         }
         .buttonStyle(.plain).fixedSize()
+        .help(tabHelp(tab))
+    }
+
+    private func tabHelp(_ tab: SessionTab) -> String {
+        switch tab {
+        case .read: return "你看过,但会话可能仍在等你(E11 消歧)"
+        case .all: return "全部会话"
+        case .favorites: return "已收藏"
+        case .running: return "进行中"
+        case .group(let n): return "分组:\(n)"
+        }
     }
 
     private func sectionHeader(_ title: String, emphasized: Bool) -> some View {

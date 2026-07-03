@@ -172,4 +172,7 @@ SessionStore 变更 → changeHandler
 - OpenCode/QoderWork 的 DB 摘要(从 message 表)——独立里程碑。
 - 拖拽加入分组(本轮右键足够;拖拽 YAGNI)。
 - 分组嵌套 / 分组图标颜色(YAGNI)。
+- **E10 悬停 ⋯ 溢出入口**:本轮**未做**(8 视角评审后如实回写)——行内操作仍靠右键 contextMenu,悬停仅 ☆。后续可补:悬停 ☆ 旁露 `⋯` = 右键菜单同款。
+- **可缩放窗口 hidesOnDeactivate 取舍**:当前失焦自隐(近 popover transient)。用户评审希望「常驻并存」——留待用户定夺(加 pin 开关 vs 保持自隐)。
+- **桌宠侧面板**:tab/分组已接通,但仍是固定 NSPopover(不可缩放);可缩放留菜单栏侧。
 - 菜单栏彩色计数的色盲无障碍(E2 只改面板圆点;菜单栏计数同题留遗留)。
