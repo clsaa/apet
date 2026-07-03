@@ -234,6 +234,13 @@ git commit -m "feat(m3d-b): SessionTab 枚举 + SessionTabFilter 纯过滤 + 编
             tab: .running, filter: "", now: 2000)
         XCTAssertEqual((out.pinned + out.rest).map(\.sessionId), ["a"])
     }
+    /// U1:未读 waiting 跨 tab 常驻——即便选「收藏」tab 且它非收藏,仍在 pinned。
+    func test_organizeFlat_unreadWaiting_pinnedAcrossTabs() {
+        let waitUnread = sess("b", state: .waiting(.stop))   // 非收藏、未读 waiting
+        let out = SessionListOrganizer.organizeFlat(
+            sessions: [waitUnread], tab: .favorites, filter: "", now: 2000)
+        XCTAssertEqual(out.pinned.map(\.sessionId), ["b"], "等你会话不被 favorites tab 过滤掉")
+    }
 ```
 (`sess` helper 参照该测试文件既有构造式;无则新增。)
 
@@ -257,17 +264,19 @@ extension SessionListOrganizer {
         sessions: [Session], tab: SessionTab, filter: String,
         now: Double, tzOffset: Double = 0
     ) -> OrganizedFlat {
-        let tabbed = SessionTabFilter.filter(sessions, tab: tab)
         let needle = filter.trimmingCharacters(in: .whitespaces).lowercased()
-        let matched = tabbed.filter { needle.isEmpty || matches($0, needle) }
-        var pinned: [SessionRowModel] = []
-        var rest: [Session] = []
-        for s in matched {
-            if isUnreadWaiting(s) { pinned.append(SessionRowMapper.make(s, now: now, tzOffset: tzOffset)) }
-            else { rest.append(s) }
+        let searched = sessions.filter { needle.isEmpty || matches($0, needle) }
+        // U1(交互评审 P0-1):未读 waiting「等你」pinned **跨 tab 常驻**——tab 过滤只作用于 rest。
+        // 否则停在「收藏/分组」tab 会藏掉刚变等你的会话(菜单栏显🟠却点不到)。
+        var pinnedS: [Session] = []
+        var others: [Session] = []
+        for s in searched {
+            if isUnreadWaiting(s) { pinnedS.append(s) } else { others.append(s) }
         }
+        let restFiltered = SessionTabFilter.filter(others, tab: tab)   // tab 只过滤非置顶
+        var pinned = pinnedS.map { SessionRowMapper.make($0, now: now, tzOffset: tzOffset) }
         pinned.sort { $0.favorite && !$1.favorite }
-        let restSorted = rest.enumerated().sorted { a, b in
+        let restSorted = restFiltered.enumerated().sorted { a, b in
             if a.element.favorite != b.element.favorite { return a.element.favorite }
             return a.offset < b.offset
         }.map { SessionRowMapper.make($0.element, now: now, tzOffset: tzOffset) }
@@ -702,6 +711,32 @@ git commit -m "feat(m3d-e): 状态指示器形状+色(色盲无障碍,UI review 
 git add Sources/apet/SessionPanel.swift
 git commit -m "feat(m3d-e): 元数据视觉统一(次要状态灰字/仅agent彩chip)+ 整行hover背景 + 字号三级"
 ```
+
+---
+
+# 里程碑 F:可缩放面板窗口
+
+### Task F1: AppConfig 加 panelWidth/panelHeight
+
+**Files:**
+- Modify: `Sources/AppShellKit/AppConfig.swift`
+- Test: `Tests/AppShellKitTests/AppConfigTests.swift`(若有)
+
+- [ ] **Step 1**:`AppConfig` 加 `panelWidth: Double`/`panelHeight: Double`;memberwise init 默认 `360`/`480`;CodingKeys + `decodeIfPresent(...) ?? 360/480`。测试:缺字段默认、往返。
+- [ ] **Step 2**:全量绿。
+- [ ] **Step 3**:提交 `feat(m3d-f): AppConfig 面板尺寸持久化字段`
+
+### Task F2: 菜单栏面板换可缩放 NSWindow
+
+**Files:**
+- Modify: `Sources/apet/MenuBarController.swift`(NSPopover → 可缩放 NSWindow)
+- Modify: `Sources/apet/SessionPanel.swift`(去写死 width,改 min/ideal/max)
+
+- [ ] **Step 1**:`SessionPanel` 根 `.frame(width: 320)` → `.frame(minWidth: 300, idealWidth: 360, maxWidth: .infinity, minHeight: 240, maxHeight: .infinity)`;行内元素靠既有 fixedSize/layoutPriority 撑(本轮竖排教训,勿回退)。
+- [ ] **Step 2**:菜单栏点击从 `popover.show` 改为 toggle 一个 `.titled/.resizable/.utilityWindow` 或复用 `ApeFloatingWindow` 加 `.resizable` 的窗口;初始 frame 用 `config.panelWidth/Height`;定位在菜单栏图标下方。
+- [ ] **Step 3**:`NSWindowDelegate.windowDidResize` → 写 `config.panelWidth/Height` + 持久化(去抖);失焦行为:`.nonactivatingPanel`,点别处可关(或保留,记决策)。
+- [ ] **Step 4**:编译 + 冒烟(拖拽改大小、重启保留尺寸、行随宽自适应不竖排)。桌宠 popover 暂留(记遗留)。
+- [ ] **Step 5**:提交 `feat(m3d-f): 菜单栏面板换可缩放浮动窗口,尺寸持久化(放弃popover手感,用户选A)`
 
 ---
 
