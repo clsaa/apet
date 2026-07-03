@@ -51,11 +51,10 @@
 
 - **`OpenCodeSessionRow`**(纯数据):`sessionId, directory(空串→nil), title(空串→nil), lastActivity(秒), lastAssistantCompleted(秒?), createdAt(秒)`。Reader 层毫秒→秒换算,Row 内统一 Unix 秒。
 - **`OpenCodeScanner`**(纯函数):`scan(rows:root:now:runningWindow:idleWindow:staleHorizon:) -> [ScanResult]`,状态派生**内容信号优先、活动窗口兜底**(约束 11):
-  1. `lastAssistantCompleted != nil && lastAssistantCompleted >= lastActivity - ε`(ε=1 秒,容纳毫秒截断误差)→ **waitingStop**(本轮真实完成,不等 120 秒窗口;完成后用户再提问会 touch `time_updated` 推高 lastActivity,自然回到 running 分支)。
-  2. 否则 `now - lastActivity < runningWindow(120)` → **running**。
-  3. 否则 `< idleWindow(1800)` → **waitingStop**。
-  4. 否则 `< staleHorizon(86400,注入)` → **stale**(灰显,**不移除**——评审:常开 TUI 挂机 30 分钟就蒸发违背用户直觉;QoderWork 的「消失」语义不适用于桌面上实打实开着的终端)。
-  5. 更老 → 不进面板。
+  1. `age = now - lastActivity`;`age >= staleHorizon(86400,注入)` → 不进面板;`age >= idleWindow(1800)` → **stale**(灰显,**不移除**——评审:常开 TUI 挂机 30 分钟就蒸发违背用户直觉;QoderWork 的「消失」语义不适用于桌面上实打实开着的终端)。**年龄降档先于内容信号**,否则一周前完成的会话会以 waitingStop 永悬面板。
+  2. 活跃窗口内(`age < idleWindow`):`lastAssistantCompleted != nil && lastAssistantCompleted >= lastActivity - ε`(ε=1 秒,容纳毫秒截断误差)→ **waitingStop**(本轮真实完成,不等 120 秒窗口;完成后用户再提问会 touch `time_updated` 推高 lastActivity,自然回到 running 分支)。
+  3. 否则 `age < runningWindow(120)` → **running**。
+  4. 否则 → **waitingStop**(窗口兜底)。
   - `SessionKey(agent: "opencode", root: <DB 所在目录>, sessionId:)`;窗口边界语义与 QoderWork 对齐(`<` 进档)。
 - **`OpenCodeDBReader`**(IO 缝):
   - **路径解析**(评审:GUI 进程不继承 shell env,XDG 承诺必须可测):`static func defaultDBPath(env: [String: String]) -> String`——优先 `OPENCODE_DB`(绝对路径);其次 `XDG_DATA_HOME`(空串/相对路径视为未设);默认 `~/.local/share`。目录内 glob `opencode*.db`(排除 `-wal/-shm`)取 mtime 最新,覆盖 channel 后缀。
