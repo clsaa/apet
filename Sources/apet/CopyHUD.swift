@@ -2,11 +2,12 @@ import AppKit
 
 /// 瞬时「已复制」反馈(交互评审 B3/P1-3:复制类动作此前完全静默,用户不知是否成功)。
 /// 屏幕中心一个自动消失的小 HUD,~0.9s 后淡出。@MainActor。
+@MainActor
 enum CopyHUD {
     private static var window: NSWindow?
 
     /// 任意线程可调:内部切主线程建 HUD。
-    static func flash(_ text: String = "已复制") {
+    nonisolated static func flash(_ text: String = "已复制") {
         DispatchQueue.main.async { renderFlash(text) }
     }
 

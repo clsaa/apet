@@ -49,9 +49,12 @@ struct SessionPanel: View {
                                           tzOffset: Double(TimeZone.current.secondsFromGMT()))
     }
 
-    /// U2:tab 计数(内置 tab 用全量 sessions 算,与是否选中无关)。
+    /// U2:tab 计数。搜索激活时按过滤后集合算,与可见行一致(评审 Minor)。
     private func count(_ tab: SessionTab) -> Int {
-        SessionTabFilter.filter(sessions, tab: tab).count
+        let needle = filter.trimmingCharacters(in: .whitespaces).lowercased()
+        let base = needle.isEmpty ? sessions
+            : sessions.filter { SessionListOrganizer.matchesPublic($0, needle) }
+        return SessionTabFilter.filter(base, tab: tab).count
     }
 
     var body: some View {
@@ -102,7 +105,7 @@ struct SessionPanel: View {
             LazyVStack(spacing: 0, pinnedViews: []) {
                 // U1:等你 pinned 跨 tab 常驻 + 保留「⏳N个等你」头(U2)。
                 if !o.pinned.isEmpty {
-                    sectionHeader("⏳ \(o.pinned.count) 个等你", emphasized: true)
+                    sectionHeader("⏳ \(o.pinned.count) 个等你 · 始终置顶", emphasized: true)
                     ForEach(o.pinned) { row in rowCell(row) }
                 }
                 ForEach(o.rest) { row in rowCell(row) }
@@ -201,7 +204,8 @@ struct SessionPanel: View {
                         Button {
                             onToggleGroup(row.id, g)
                         } label: {
-                            Label(g, systemImage: row.groups.contains(g) ? "checkmark" : "")
+                            // 勾选态:已在组显 ✓,未在组用 circle 占位保左缘对齐(空 systemImage 会告警且不齐)。
+                            Label(g, systemImage: row.groups.contains(g) ? "checkmark.circle.fill" : "circle")
                         }
                     }
                     if !groups.isEmpty { Divider() }

@@ -61,6 +61,9 @@ public enum SessionListOrganizer {
 
     // MARK: - Private
 
+    /// 供面板 tab 计数复用的搜索匹配(与 organize 同规则)。
+    public static func matchesPublic(_ s: Session, _ needle: String) -> Bool { matches(s, needle) }
+
     private static func matches(_ s: Session, _ needle: String) -> Bool {
         // customName 展示时优先于 title，搜索也必须能命中（F7 × 搜索，产品评审 M5）
         if let n = s.customName, n.lowercased().contains(needle) { return true }
