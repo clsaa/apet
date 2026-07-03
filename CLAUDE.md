@@ -91,6 +91,6 @@ swift test --filter SessionStoreOrderingTests   # 跑单个测试类
   - **M3-C 多 Agent** ✅（AgentManifest 契约 + **QoderWork 实测接入**：SQLite agents.db 只读轮询/粗略态/点击激活 App + **Qoder CLI 实测接入**：~/.qoder jsonl 与 Claude 同构/resume=`qodercli --resume`）。
   - **M3-D AI 总结** ✅（本地摘要已接面板右键；模型摘要核心+安全缝已备、UI 待接）。F5 宠物命名持久化 ✅（pet-names.json，01=用户本人语义）。
   - **六视角对抗评审** ✅（架构/产品/AI/用户/测试/开源 2026-07-03，Blocker/Major 已修复：applyMetas 绕过、ProcessRunner cwd/PATH/argv0、SQLite busy 半读、时区日界、幽灵01、围栏逃逸等，见 `.superpowers/sdd/`）。
-  - **M3-C+ OpenCode 接入**（2026-07-03）：opencode.db 只读轮询/内容信号优先（in-flight/completed）/无条件注册/诚实无跳转降级+复制恢复命令/OpenCodeHealth 用户可见，见 `docs/superpowers/specs/2026-07-03-apet-opencode-source-design.md`（七视角评审×2 轮）。真机实测门待过。
+  - **M3-C+ OpenCode 接入**（2026-07-03）：opencode.db 只读轮询/内容信号优先（in-flight/completed）/无条件注册/诚实无跳转降级+复制恢复命令/OpenCodeHealth 用户可见，见 `docs/superpowers/specs/2026-07-03-apet-opencode-source-design.md`（七视角评审×3 轮 + 真机实测门七项过门,含 v1 message 表漂移发现与修复,见 `.superpowers/sdd/task-opencode-live-gate-report.md`）。
   - 真实遗留：Qoder IDE 追加接入（**搁置**：产品线合并未定）、OpenCode 插件增强（P1：`~/.config/opencode/{plugin,plugins}/*.{ts,js}` 订阅 session.idle → 精确通知+tty 跳转）、模型摘要 UI、F10 createdAt 注入、**OpenCode 上游维护义务**（watch sst/opencode releases 与 `packages/core/src/database/` 变更；版本漂移按 `OpenCodeDBReader.verifiedMaxMigrationId` doc 注释的四步流程更新——上游 ~8 迁移/月，无流程必然烂掉）。
 - **M4 生态**（公开契约 + 第三方样例）。详见 README 与 spec。
