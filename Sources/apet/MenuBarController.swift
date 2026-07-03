@@ -59,13 +59,14 @@ private struct PanelRootView: View {
 
             // 紧凑操作行：图标按钮，一行搞定，不再挤占列表空间。
             HStack(spacing: 0) {
-                if hasUnread {
-                    PanelFooterButton(icon: "checkmark.circle", label: "已读", action: onAcknowledgeAll)
-                }
+                // E6/U3:已读常驻,无未读时置灰(此前「有未读才显」点完塌成3按钮抖动)。
+                PanelFooterButton(icon: "checkmark.circle", label: "已读", action: onAcknowledgeAll,
+                                  enabled: hasUnread, help: "把所有「等你」会话标为已读")
                 PanelFooterButton(icon: petVisible ? "eye.slash" : "eye",
-                                  label: petVisible ? "隐藏" : "显示", action: onTogglePet)
-                PanelFooterButton(icon: "gearshape", label: "首选项", action: onOpenPreferences)
-                PanelFooterButton(icon: "power", label: "退出", action: onQuit)
+                                  label: petVisible ? "隐藏" : "显示", action: onTogglePet,
+                                  help: petVisible ? "隐藏桌面宠物" : "显示桌面宠物")
+                PanelFooterButton(icon: "gearshape", label: "首选项", action: onOpenPreferences, help: "打开首选项")
+                PanelFooterButton(icon: "power", label: "退出", action: onQuit, help: "退出 AgentPet")
             }
             .padding(.horizontal, 6)
             .padding(.vertical, 4)
@@ -79,6 +80,8 @@ struct PanelFooterButton: View {
     let icon: String
     let label: String
     let action: () -> Void
+    var enabled: Bool = true
+    var help: String = ""
     var body: some View {
         Button(action: action) {
             VStack(spacing: 2) {
@@ -91,6 +94,9 @@ struct PanelFooterButton: View {
         }
         .buttonStyle(.plain)
         .foregroundStyle(.secondary)
+        .disabled(!enabled)                    // E6:无未读时置灰而非消失(消除页脚抖动)
+        .opacity(enabled ? 1 : 0.35)
+        .help(help)
     }
 }
 
