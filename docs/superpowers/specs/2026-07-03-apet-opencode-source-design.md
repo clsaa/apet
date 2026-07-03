@@ -29,18 +29,18 @@
 
 | 事实 | 值 | 依据 |
 |---|---|---|
-| DB 路径 | `$XDG_DATA_HOME/opencode/`(默认 `~/.local/share/opencode/`)下,文件名**默认** `opencode.db`;`OPENCODE_DB` 环境变量可整体覆盖;非 latest/beta/prod 渠道为 `opencode-<channel>.db` | `core/src/database/database.ts:43-55`、`core/src/global.ts:11` |
+| DB 路径 | `$XDG_DATA_HOME/opencode/`(默认 `~/.local/share/opencode/`)下,文件名**默认** `opencode.db`;`OPENCODE_DB` 可覆盖(**相对路径 join 到数据目录**,绝对路径整体替换——计划评审:勿按"忽略相对"实现);非 latest/beta/prod 渠道为 `opencode-<channel>.db`。⚠️ GUI 进程(launchd 拉起)**读不到 shell rc 的环境变量**——需 `launchctl getenv` 补探 + ConfigHealth「找到 OpenCode 痕迹但无 DB」提示(评审 Blocker:设 XDG 的机器否则静默失明) | `database.ts:43-55`、`global.ts:11` |
 | 引擎 | SQLite,WAL;同用户只读打开安全(写方自带 busy_timeout 5000) | `database.ts:27`、`sqlite.node.ts:159` |
 | session 表关键列 | `id, project_id, parent_id, directory, title, time_created, time_updated, time_archived` | `core/src/session/sql.ts` |
 | **⚠️ time_updated 语义** | **只在用户提交 prompt 时 touch**;流式/工具执行/完成均不刷新(评审 B1,全设计最关键事实) | `opencode/src/session/prompt.ts:1058`、`core/src/session/projector.ts:96-110` |
-| 实时活动信号 | `part` 表流式期间持续 upsert(`time_created=事件时间`);`session_message` 有 `(session_id, time_created)` 索引 | `projector.ts:312-330`、`session/sql.ts` |
-| 完成信号 | 最后一条 `type='assistant'` 的 `session_message.data` JSON 内 `$.time.completed` | `schema/src/session-message.ts:77,135` |
+| 实时活动信号 | `part`/`session_message` 新**行插入**时间可用;⚠️ **upsert 更新不刷时间**——part 的 `onConflictDoUpdate` 只 set `data`(time_created 冻结),长工具/长文本期间无新行 → 活动时间链停摆(计划评审 M1) | `projector.ts:319-324` |
+| 进行/完成信号 | 最后一条 `type='assistant'` 的 `session_message.data` JSON 内 `$.time.completed`:**IS NULL = in-flight(进行中),非 NULL = 本轮完成**——上游 `getCurrentAssistant` 同款判据;epoch 毫秒数字编码 | `session-message.ts:185-188`、`projector.ts:134-151` |
 | 时间方言 | epoch **毫秒**(time_created/time_updated/time_archived/part.time_created 全部) | `schema.sql.ts:4-9` |
 | sessionId | `ses_` + **26 位**(前缀外;全长 30):前 12 位为**取反时间戳小写 hex**(降序用),后 14 位 base62。上游 schema 校验只查 `startsWith("ses")`,SDK 可自带异形 id 入库 → 我们的白名单比上游严,异形 id 仅失去恢复命令、不影响面板展示 | `schema/src/identifier.ts:14-30`、`session-id.ts:5`、`core/src/session.ts:209` |
 | 恢复命令 | `opencode [project] --session <id>`:**目录是位置参数**;TUI 按 cwd 解析 project 并 chdir,跨目录裸跑会以错误项目上下文打开(评审:resume 必须带目录) | `opencode/src/cli/cmd/tui.ts:66-79,198-208` |
 | title | NOT NULL,新会话为占位串 `New session - <ISO>`。**决策:原样展示**(模式匹配上游文案脆弱);空串→nil | `core/src/session.ts:228` |
 | directory | legacy 会话**可为空串** → 空串→nil(约束 5) | `core/src/database/path.ts:43-44` |
-| 版本探测 | `migration` 表(`id TEXT PRIMARY KEY` 时间戳前缀,天然可排序) | `core/src/database/migration.ts` |
+| 版本探测 | `migration` 表(`id TEXT PRIMARY KEY`);⚠️ **id 是全名** `<14位时间戳>_<名字>`(如 `20260622202450_simplify_session_input`),非裸时间戳——比较须取前 14 位数字前缀(计划评审 Blocker:裸时间戳比较在已验证版本上恒误报) | `migration.ts:30-35`、迁移文件 `:5` |
 | 演进速度 | **5 个月 38 个迁移**(2026-01~06,~8/月),含 `reset_v2_session_state` 整表清空式迁移 → 防御不可省 | `migration/` 目录 |
 
 风险与缓解:上游 schema 演进 → ① 读失败按半读语义整轮跳过;② `SELECT MAX(id) FROM migration` 与代码内「已验证迁移 id」比较,高于已验证且读失败 → ConfigHealth 给出**用户可见**的「OpenCode 版本过新,暂不支持」(区别于「未安装」的静默空);③ 辅助表(part/session_message)缺失/被清空 → 探测降级为 session-only(活动=time_updated,语义变「距上次提问」,状态标注更粗);④ 上游升级后 spec 事实表须按新版本重核(见 §6 实测门)。
@@ -50,11 +50,12 @@
 ### 3.1 AppShellKit:`OpenCodeSource.swift`(新文件)
 
 - **`OpenCodeSessionRow`**(纯数据):`sessionId, directory(空串→nil), title(空串→nil), lastActivity(秒), lastAssistantCompleted(秒?), createdAt(秒)`。Reader 层毫秒→秒换算,Row 内统一 Unix 秒。
-- **`OpenCodeScanner`**(纯函数):`scan(rows:root:now:runningWindow:idleWindow:staleHorizon:) -> [ScanResult]`,状态派生**内容信号优先、活动窗口兜底**(约束 11):
-  1. `age = now - lastActivity`;`age >= staleHorizon(86400,注入)` → 不进面板;`age >= idleWindow(1800)` → **stale**(灰显,**不移除**——评审:常开 TUI 挂机 30 分钟就蒸发违背用户直觉;QoderWork 的「消失」语义不适用于桌面上实打实开着的终端)。**年龄降档先于内容信号**,否则一周前完成的会话会以 waitingStop 永悬面板。
-  2. 活跃窗口内(`age < idleWindow`):`lastAssistantCompleted != nil && lastAssistantCompleted >= lastActivity - ε`(ε=1 秒,容纳毫秒截断误差)→ **waitingStop**(本轮真实完成,不等 120 秒窗口;完成后用户再提问会 touch `time_updated` 推高 lastActivity,自然回到 running 分支)。
-  3. 否则 `age < runningWindow(120)` → **running**。
-  4. 否则 → **waitingStop**(窗口兜底)。
+- **`OpenCodeScanner`**(纯函数):`scan(rows:root:now:runningWindow:idleWindow:staleHorizon:) -> [ScanResult]`,状态派生**内容信号优先、活动窗口兜底**(约束 11;计划评审 v3:in-flight 结构性判据取代 ε 时间比较):
+  1. `age = now - lastActivity`;`age >= staleHorizon(86400,注入)` → 不进面板;`age >= idleWindow(1800)` → **stale**(灰显,**不移除**——常开 TUI 挂机 30 分钟蒸发违背用户直觉)。**年龄降档先于内容信号**(防完成会话永悬;也是 in-flight 的兜底——进程被 kill 后 completed 永为 NULL,靠年龄降档出场)。
+  2. 活跃窗口内按**最后一条 assistant 消息的信号**(与上游 `getCurrentAssistant` 同构,`ORDER BY seq DESC LIMIT 1`):
+     - `inFlight`(`$.time.completed` IS NULL)→ **running**。⚠️ 这是长操作的唯一可靠信号:`part` 的 upsert **只更新 data、time_created 冻结**(projector.ts:319-324),长工具/长文本期间整条活动时间链停摆,任何窗口判据都会误降——in-flight 布尔不受影响。
+     - `completed`(非 NULL,任意类型——ISO 串也算完成)→ **waitingStop**(本轮真实完成,不等窗口)。
+     - `none`(无 assistant 消息)→ `age < runningWindow(120)` → **running**,否则 **waitingStop**(窗口兜底;用户刚提问的场景由 `time_updated` prompt-touch 保活)。
   - `SessionKey(agent: "opencode", root: <DB 所在目录>, sessionId:)`;窗口边界语义与 QoderWork 对齐(`<` 进档)。
 - **`OpenCodeDBReader`**(IO 缝):
   - **路径解析**(评审:GUI 进程不继承 shell env,XDG 承诺必须可测):`static func defaultDBPath(env: [String: String]) -> String`——优先 `OPENCODE_DB`(绝对路径);其次 `XDG_DATA_HOME`(空串/相对路径视为未设);默认 `~/.local/share`。目录内 glob `opencode*.db`(排除 `-wal/-shm`)取 mtime 最新,覆盖 channel 后缀。
@@ -76,7 +77,7 @@
     ```
 
     窗口过滤在 Swift 层做(**不能按 `time_updated` 下推**——正是 B1 的错误列);列皆有索引,数千行量级 5s 轮询可接受,实测慢再优化。`json_extract` 失败/NULL → 完成信号缺席,窗口兜底。
-  - 版本探测:`SELECT MAX(id) FROM migration`,连同 rows 返回;高于代码内已验证 id 且本轮读失败 → 上报「版本过新」信号(供 ConfigHealth)。
+  - 版本探测:`SELECT MAX(id) FROM migration` **先于主查询执行**(migration 表结构最稳;评审:排后面则 schema 破坏性升级时主查询先失败,版本信号永远带不出来——恰是唯一需要它的场景)。读取结果三态:`ok(rows:, maxMigrationId:)` / `failed(maxMigrationId: String?)` / 不存在与空库归 ok(rows: [])。「版本过新」= **本轮 failed ∧ maxMigrationId 前 14 位数字 > 已验证前缀**,进 ConfigHealth 用户可见(PreferencesWindow 健康区),状态变化时上报一次(去抖),日志仅辅助。
 - **轮询器 `DBPollWatcher`**(泛化自 QoderWorkWatcher):`scan: (now) -> [ScanResult]?` 闭包注入;**契约随迁移保持:timer `queue: .main`、start 幂等(stop-first)、读 nil 整轮跳过、差分 emit、幽灵对账**。`QoderWorkWatcher` 保持公开签名、内部委托。**动刀前先补回归网**(评审 B4,见 §5)。
 
 ### 3.2 契约扩展(SessionIdRule 入 AgentPetCore;AgentManifest 留 AppShellKit)
@@ -152,7 +153,7 @@
 
 **一致性/回归**:`test_resumeCommand_manifest_consistency` 加 opencode 行 + 交叉拒绝(opencode×UUID → nil,claude×`ses_` → nil);`{dir}` 渲染:有/无 directory、含空格目录的 display 引用。
 
-**live 门控测试(评审:真机门可重跑留痕)**:`APET_OPENCODE_LIVE=1` 才跑(否则 `XCTSkip`)——读真机 `defaultDBPath`,断言 `read() != nil`、每行 id 过 SessionIdRule、每行时间 ∈ [2020, now+1d] 秒量级(抓漏换算+方言漂移)。
+**live 门控测试(评审:真机门可重跑留痕)**:`APET_OPENCODE_LIVE=1` 才跑(否则 `XCTSkip`)——读真机 `defaultDBPath`,断言读取成功、每行时间 ∈ [2020, now+1d] 秒量级(抓漏换算+方言漂移)、maxMigrationId 为全名格式(含 `_` 后缀)且前 14 位 ≤ 已验证前缀;id 不过 SessionIdRule 的**只打印不断言**(§6-6 承认旧迁移异形 id 合法存在,硬断言会误炸真机门)。
 
 ## 6. 真机实测门(合并前;评审补全)
 
