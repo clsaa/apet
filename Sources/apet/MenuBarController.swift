@@ -381,9 +381,10 @@ final class MenuBarController: NSObject {
             "\($0.key.agent)|\($0.key.root)|\($0.key.sessionId)" == id
         }) else { return }
 
-        // 用户点开会话 → 标记已读（红→黄）。仅对 waiting 态生效（acknowledge 内部守卫）。
-        onAcknowledge?(session.key)
-
+        // B1 修复(交互评审 P0-2):**不再**在跳转前无条件标已读——若终端已关(跳转失败),
+        // 会话会被静默标已读、掉出「等你」,一个还等你的会话就这么丢了。改为仅在 focus
+        // 成功(focused/activatedOnly)时标已读;失败(targetGone/unsupported)保留未读。
+        let sessionKey = session.key
         let terminal = session.terminal
         // Part C / Fix 2: jsonl-inferred sessions are identified by their process-internal
         // source tag (硬约束 #9：用 session.source == .jsonl 判定来源，不用 terminal == nil 当代理).
@@ -398,31 +399,38 @@ final class MenuBarController: NSObject {
         popover?.performClose(nil)
 
         // Off-main — osascript blocks (Fix I-1 / B2 pattern).
-        Task.detached {
+        Task.detached { [weak self] in
             let result = fs.focus(terminal)
-            // Inform the user when the terminal window can't be reached.
-            // .targetGone  — osascript ran but the session tab no longer exists.
-            // .unsupported — no terminal info at all (e.g. jsonl-inferred session).
-            if result == .targetGone || result == .unsupported {
-                await MainActor.run { [weak self] in
-                    guard let self, !self.isShowingTapAlert else { return } // 防连击叠加阻塞弹窗（Task9 评审 Important）
-                    self.isShowingTapAlert = true
-                    defer { self.isShowingTapAlert = false }
-                    if isOpenCode {
-                        SessionRowActions.showOpenCodeNoJumpAlert(session)
-                        return
-                    }
-                    let alert = NSAlert()
-                    alert.messageText = "无法跳转到会话"
-                    // .targetGone=窗口已关；.unsupported=无终端信息（如 jsonl 推断会话）。文案兼顾两者。
-                    var infoText = "无法跳转到会话终端（可能已关闭，或终端信息不可用）。"
-                    // Part C: just-in-time hook hint — only for jsonl-inferred sessions,
-                    // throttled to once per session and capped globally by HookHintThrottle.
-                    if isJsonlSession && isClaude && self.hookHintThrottle.shouldHint(sessionKey: id) {
-                        infoText += "\n\n💡 安装 Hook 可精确跳到这个 tab（会改 settings.json，自动备份/一键卸载）→ 在「首选项」中开启。"
-                    }
-                    alert.informativeText = infoText
-                    alert.alertStyle = .informational
+            // .focused/.activatedOnly = 用户确实到达了(至少 App 被激活)→ 标已读;
+            // .targetGone/.unsupported = 没到达 → 保留未读(B1)。
+            if result == .focused || result == .activatedOnly {
+                await MainActor.run { [weak self] in self?.onAcknowledge?(sessionKey) }
+                return
+            }
+            await MainActor.run { [weak self] in
+                guard let self, !self.isShowingTapAlert else { return } // 防连击叠加阻塞弹窗（Task9 评审 Important）
+                self.isShowingTapAlert = true
+                defer { self.isShowingTapAlert = false }
+                if isOpenCode {
+                    SessionRowActions.showOpenCodeNoJumpAlert(session)
+                    return
+                }
+                let alert = NSAlert()
+                alert.messageText = "无法跳转到会话"
+                var infoText = "无法跳转到会话终端（可能已关闭，或终端信息不可用）。"
+                if isJsonlSession && isClaude && self.hookHintThrottle.shouldHint(sessionKey: id) {
+                    infoText += "\n\n💡 安装 Hook 可精确跳到这个 tab（会改 settings.json，自动备份/一键卸载）→ 在「首选项」中开启。"
+                }
+                alert.informativeText = infoText
+                alert.alertStyle = .informational
+                // B2 修复(交互评审 P1-4):有已核实恢复命令时给「复制恢复命令」按钮,
+                // 与 OpenCode 失败弹窗对齐——同样终端没了,别让 Claude 用户撞死墙。
+                let hasResume = SessionRowActions.hasResumeCommand(agent: session.key.agent, sessionId: session.key.sessionId)
+                if hasResume {
+                    alert.addButton(withTitle: "复制恢复命令")
+                    alert.addButton(withTitle: "好的")
+                    if alert.runModal() == .alertFirstButtonReturn { SessionRowActions.copyResume(session) }
+                } else {
                     alert.addButton(withTitle: "好的")
                     alert.runModal()
                 }

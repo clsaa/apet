@@ -211,31 +211,36 @@ final class PetWindowController: NSObject {
         guard let session = currentSessions.first(where: {
             "\($0.key.agent)|\($0.key.root)|\($0.key.sessionId)" == id
         }) else { return }
-        // 用户点开会话 → 标记已读（红→黄）。仅对 waiting 态生效（acknowledge 内部守卫）。
-        onAcknowledge?(session.key)
+        // B1 修复(交互评审 P0-2):仅 focus 成功才标已读,失败保留未读(勿丢等你会话)。
+        let sessionKey = session.key
         let terminal = session.terminal
         let fs = focusService
-        // osascript blocks; run off main thread (same pattern as MenuBarController / Fix B2).
-        // 评审修复（产品 m7）：跳转失败给反馈——与菜单栏面板行为对等，不再静默吞结果。
-        // M3-C+:opencode 走共享专属弹窗(诚实降级 + 复制恢复命令;评审:两处弹窗不同构,勿各写一份)。
         let isOpenCode = (session.key.agent == "opencode")
-        Task.detached {
+        Task.detached { [weak self] in
             let result = fs.focus(terminal)
-            if result == .targetGone || result == .unsupported {
-                await MainActor.run { [weak self] in
-                    // 防连击(实现评审 Major:opencode 无 osascript 延迟,连击必现弹窗堆叠)。
-                    guard let self, !self.isShowingTapAlert else { return }
-                    self.isShowingTapAlert = true
-                    defer { self.isShowingTapAlert = false }
-                    if isOpenCode {
-                        SessionRowActions.showOpenCodeNoJumpAlert(session)
-                        return
-                    }
-                    NSApp.activate(ignoringOtherApps: true)
-                    let alert = NSAlert()
-                    alert.messageText = "无法跳转到会话"
-                    alert.informativeText = "无法跳转到会话终端（可能已关闭，或终端信息不可用）。"
-                    alert.alertStyle = .informational
+            if result == .focused || result == .activatedOnly {
+                await MainActor.run { [weak self] in self?.onAcknowledge?(sessionKey) }
+                return
+            }
+            await MainActor.run { [weak self] in
+                guard let self, !self.isShowingTapAlert else { return }
+                self.isShowingTapAlert = true
+                defer { self.isShowingTapAlert = false }
+                if isOpenCode {
+                    SessionRowActions.showOpenCodeNoJumpAlert(session)
+                    return
+                }
+                NSApp.activate(ignoringOtherApps: true)
+                let alert = NSAlert()
+                alert.messageText = "无法跳转到会话"
+                alert.informativeText = "无法跳转到会话终端（可能已关闭，或终端信息不可用）。"
+                alert.alertStyle = .informational
+                // B2:有恢复命令给复制按钮(与 MenuBar/OpenCode 对齐)。
+                if SessionRowActions.hasResumeCommand(agent: session.key.agent, sessionId: session.key.sessionId) {
+                    alert.addButton(withTitle: "复制恢复命令")
+                    alert.addButton(withTitle: "好的")
+                    if alert.runModal() == .alertFirstButtonReturn { SessionRowActions.copyResume(session) }
+                } else {
                     alert.addButton(withTitle: "好的")
                     alert.runModal()
                 }
