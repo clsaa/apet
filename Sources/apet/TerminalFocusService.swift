@@ -9,8 +9,11 @@ import AppShellKit
 public enum FocusResult: Equatable {
     /// osascript 成功找到并激活了目标 session。
     case focused
-    /// App 已被激活（activate-only 路径，无 session 精确跳转）。
+    /// App 已被激活（**计划内** activate-only 路径:Warp/Ghostty 等本就不支持精确跳 tab）。
     case activatedOnly
+    /// 精确跳转**未命中**后的兜底激活(tab 已关等):App 切到前台了,但用户并没到达那个会话。
+    /// 交互评审 Blocker:此态**不应标已读**——会话可能仍在等你。
+    case missedButActivated
     /// osascript 执行成功但 session 未命中（exit != 0，脚本 `error ... number -1`）。
     case targetGone
     /// 无法执行跳转（ref 为 nil 或 .other 且无 bundleId）。
@@ -49,7 +52,7 @@ public final class TerminalFocusService {
             // 不给用户「无法跳转」死路。iTerm2 / Terminal.app 皆有已知 bundleId。
             if result == .targetGone, let bundleId = Self.fallbackBundleId(for: ref) {
                 activateBundle(bundleId)
-                return .activatedOnly
+                return .missedButActivated   // 兜底激活 ≠ 到达会话(不标已读)
             }
             return result
         }

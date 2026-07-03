@@ -468,7 +468,7 @@ final class MenuBarController: NSObject {
             let result = fs.focus(terminal)
             // .focused/.activatedOnly = 用户确实到达了(至少 App 被激活)→ 标已读;
             // .targetGone/.unsupported = 没到达 → 保留未读(B1)。
-            if result == .focused || result == .activatedOnly {
+            if result == .focused || result == .activatedOnly {   // 到达(含计划内仅激活)→标已读
                 await MainActor.run { [weak self] in self?.onAcknowledge?(sessionKey) }
                 return
             }

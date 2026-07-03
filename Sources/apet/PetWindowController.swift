@@ -218,7 +218,7 @@ final class PetWindowController: NSObject {
         let isOpenCode = (session.key.agent == "opencode")
         Task.detached { [weak self] in
             let result = fs.focus(terminal)
-            if result == .focused || result == .activatedOnly {
+            if result == .focused || result == .activatedOnly {   // 到达(含计划内仅激活)→标已读
                 await MainActor.run { [weak self] in self?.onAcknowledge?(sessionKey) }
                 return
             }
