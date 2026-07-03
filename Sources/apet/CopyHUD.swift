@@ -42,9 +42,11 @@ enum CopyHUD {
         win.contentView = content
         win.hasShadow = true
 
-        if let screen = NSScreen.main {
-            let f = screen.frame
-            win.setFrameOrigin(NSPoint(x: f.midX - w / 2, y: f.midY - h / 2))
+        // 定位在鼠标所在屏的顶部居中偏下(靠近菜单栏/面板操作点,而非主屏正中——交互评审)。
+        let mouse = NSEvent.mouseLocation
+        let screen = NSScreen.screens.first { NSMouseInRect(mouse, $0.frame, false) } ?? NSScreen.main
+        if let vf = screen?.visibleFrame {
+            win.setFrameOrigin(NSPoint(x: vf.midX - w / 2, y: vf.maxY - h - 48))
         }
         win.alphaValue = 0
         win.orderFrontRegardless()

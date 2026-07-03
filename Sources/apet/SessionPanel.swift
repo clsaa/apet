@@ -237,7 +237,7 @@ struct SessionPanel: View {
     private var emptyState: some View {
         Text("没有活跃会话")
             .foregroundStyle(.secondary)
-            .frame(width: 320)
+            .frame(maxWidth: .infinity)
             .padding(.vertical, 20)
     }
 }

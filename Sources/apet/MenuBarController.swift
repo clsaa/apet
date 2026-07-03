@@ -81,7 +81,7 @@ private struct PanelRootView: View {
             .padding(.horizontal, 6)
             .padding(.vertical, 4)
         }
-        .frame(width: 320)
+        .frame(minWidth: 300, maxWidth: .infinity, minHeight: 240, maxHeight: .infinity)  // 可缩放窗口:内容随窗口宽
     }
 }
 
@@ -350,28 +350,38 @@ final class MenuBarController: NSObject {
     private func showPopover() {
         guard let button = statusItem.button else { return }
 
-        // Toggle: 已显示则关闭。
+        // Toggle: 已显示则隐藏(复用窗口,不重建——防泄漏)。
         if let w = panelWindow, w.isVisible {
-            w.close()
+            w.orderOut(nil)
             return
         }
 
-        let hc = NSHostingController(rootView: makePanelRootView())
-        panelHosting = hc
-
-        let size = panelSizeProvider?() ?? CGSize(width: 360, height: 480)
-        let win = PanelResizeWindow(
-            contentRect: NSRect(origin: .zero, size: size),
-            styleMask: [.titled, .closable, .resizable, .fullSizeContentView, .utilityWindow],
-            backing: .buffered, defer: false)
-        win.titlebarAppearsTransparent = true
-        win.titleVisibility = .hidden
-        win.isMovableByWindowBackground = true
-        win.level = .statusBar
-        win.hidesOnDeactivate = true      // 点别处失焦即隐(近似 popover transient)
-        win.isReleasedWhenClosed = false
-        win.contentViewController = hc
-        win.onResize = { [weak self] newSize in self?.onPanelResize?(newSize) }
+        // 复用已有窗口(失焦 orderOut 后重开):只刷新内容、重锚定,不新建。
+        let size = clampPanelSize(panelSizeProvider?() ?? CGSize(width: 360, height: 480))
+        let win: PanelResizeWindow
+        if let existing = panelWindow {
+            win = existing
+            panelHosting?.rootView = makePanelRootView()   // 刷新内容
+            win.setContentSize(size)
+        } else {
+            let hc = NSHostingController(rootView: makePanelRootView())
+            panelHosting = hc
+            // 无标题栏浮窗:去掉 .titled 避免残留交通灯;.floating 而非 .statusBar,
+            // 否则会盖住面板自身弹出的 NSAlert(重命名/建组/摘要,交互评审 Major)。
+            let w = PanelResizeWindow(
+                contentRect: NSRect(origin: .zero, size: size),
+                styleMask: [.borderless, .resizable, .fullSizeContentView],
+                backing: .buffered, defer: false)
+            w.isMovableByWindowBackground = true
+            w.level = .floating
+            w.hidesOnDeactivate = true
+            w.isReleasedWhenClosed = false
+            w.contentMinSize = NSSize(width: 300, height: 240)
+            w.contentViewController = hc
+            w.onResize = { [weak self] newSize in self?.onPanelResize?(newSize) }
+            win = w
+            panelWindow = w
+        }
 
         // 定位在菜单栏图标下方,右对齐图标。
         if let screen = button.window?.screen ?? NSScreen.main,
@@ -383,7 +393,11 @@ final class MenuBarController: NSObject {
         }
         win.makeKeyAndOrderFront(nil)
         NSApp.activate(ignoringOtherApps: true)
-        panelWindow = win
+    }
+
+    /// 夹逼面板尺寸下限(防被拖成残尺寸后持久化,交互评审 Minor)。
+    private func clampPanelSize(_ s: CGSize) -> CGSize {
+        CGSize(width: max(300, s.width), height: max(240, s.height))
     }
 
     // MARK: - Actions
