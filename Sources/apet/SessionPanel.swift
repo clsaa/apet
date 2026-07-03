@@ -29,18 +29,35 @@ struct SessionPanel: View {
     var hotkeyHint: String? = nil
     /// 状态圆点配色（F3）。默认系统色。
     var palette: DotPalette = .system
+    /// M3-D-B:当前选中 tab(权威值来自 config,onSelectTab 回写)。
+    var selectedTab: SessionTab = .all
+    var onSelectTab: (SessionTab) -> Void = { _ in }
+    /// M3-D-C:自定义分组名单(tab 栏动态追加分组 tab)。
+    var groups: [String] = []
+    /// M3-D-C:会话加入/移出分组(sessionId, groupName)。
+    var onToggleGroup: (String, String) -> Void = { _, _ in }
+    /// M3-D-C:新建分组(控制器弹输入)/删除分组。
+    var onCreateGroup: (String?) -> Void = { _ in }
+    var onDeleteGroup: (String) -> Void = { _ in }
 
     @State private var filter: String = ""
 
-    private var organized: OrganizedList {
-        SessionListOrganizer.organize(sessions: sessions, dimension: .status, filter: filter, now: now,
-                                      tzOffset: Double(TimeZone.current.secondsFromGMT()))
+    private var organizedFlat: OrganizedFlat {
+        SessionListOrganizer.organizeFlat(sessions: sessions, tab: selectedTab, filter: filter, now: now,
+                                          tzOffset: Double(TimeZone.current.secondsFromGMT()))
+    }
+
+    /// U2:tab 计数(内置 tab 用全量 sessions 算,与是否选中无关)。
+    private func count(_ tab: SessionTab) -> Int {
+        SessionTabFilter.filter(sessions, tab: tab).count
     }
 
     var body: some View {
         VStack(spacing: 0) {
             if let hint = hotkeyHint { hotkeyHeader(hint) }
             searchField
+            Divider()
+            tabBar
             Divider()
             if sessions.isEmpty {
                 emptyState
@@ -76,26 +93,83 @@ struct SessionPanel: View {
     // MARK: - Content
 
     private var content: some View {
-        let o = organized
+        let o = organizedFlat
         return ScrollView {
             LazyVStack(spacing: 0, pinnedViews: []) {
+                // U1:等你 pinned 跨 tab 常驻 + 保留「⏳N个等你」头(U2)。
                 if !o.pinned.isEmpty {
                     sectionHeader("⏳ \(o.pinned.count) 个等你", emphasized: true)
                     ForEach(o.pinned) { row in rowCell(row) }
                 }
-                ForEach(o.groups, id: \.title) { group in
-                    sectionHeader(group.title, emphasized: false)
-                    ForEach(group.rows) { row in rowCell(row) }
-                }
-                if o.pinned.isEmpty && o.groups.isEmpty {
-                    Text("没有匹配的会话")
-                        .foregroundStyle(.secondary)
-                        .padding(.vertical, 16)
+                ForEach(o.rest) { row in rowCell(row) }
+                if o.pinned.isEmpty && o.rest.isEmpty {
+                    emptyTabHint
                 }
             }
         }
         .frame(width: 320)
         .frame(maxHeight: 420)
+    }
+
+    // 空 tab 引导(U4/P1-7):自定义空组给可操作引导,而非干巴巴「暂无」。
+    private var emptyTabHint: some View {
+        Group {
+            if case .group = selectedTab {
+                Text("该分组暂无会话\n右键任意会话 →「加入分组」把它归到这里")
+                    .multilineTextAlignment(.center)
+                    .font(.system(size: 11))
+                    .foregroundStyle(.secondary)
+                    .padding(.vertical, 20)
+            } else if !filter.isEmpty {
+                Text("没有匹配的会话").foregroundStyle(.secondary).padding(.vertical, 16)
+            } else {
+                Text("该分类暂无会话").foregroundStyle(.secondary).padding(.vertical, 16)
+            }
+        }
+    }
+
+    // MARK: - Tab bar(M3-D-B,取代分区)
+
+    private var tabBar: some View {
+        ScrollView(.horizontal, showsIndicators: false) {
+            HStack(spacing: 4) {
+                tabChip(.all, "全部")
+                tabChip(.favorites, "收藏")
+                tabChip(.running, "进行中")
+                tabChip(.read, "已读")
+                ForEach(groups, id: \.self) { g in
+                    tabChip(.group(g), "#\(g)")
+                        .contextMenu { Button("删除分组「\(g)」", role: .destructive) { onDeleteGroup(g) } }
+                }
+                Button { onCreateGroup(nil) } label: {
+                    Image(systemName: "plus").font(.system(size: 11))
+                }
+                .buttonStyle(.plain).foregroundStyle(.secondary).help("新建分组")
+                .padding(.horizontal, 4)
+            }
+            .padding(.horizontal, 8)
+            .padding(.vertical, 4)
+        }
+    }
+
+    @ViewBuilder
+    private func tabChip(_ tab: SessionTab, _ label: String) -> some View {
+        let selected = (tab == selectedTab)
+        let c = count(tab)
+        Button { onSelectTab(tab) } label: {
+            HStack(spacing: 3) {
+                Text(label).font(.system(size: 11, weight: selected ? .semibold : .regular))
+                if c > 0 {
+                    Text("\(c)").font(.system(size: 9))
+                        .foregroundStyle(selected ? .white : .secondary)
+                }
+            }
+            .padding(.horizontal, 8).padding(.vertical, 3)
+            .background(selected ? Color.accentColor : Color.secondary.opacity(0.12))
+            .foregroundStyle(selected ? .white : .primary)
+            .cornerRadius(6)
+        }
+        .buttonStyle(.plain).fixedSize()
     }
 
     private func sectionHeader(_ title: String, emphasized: Bool) -> some View {
@@ -118,6 +192,18 @@ struct SessionPanel: View {
             .contextMenu {
                 Button(row.favorite ? "取消收藏" : "收藏") { onToggleFavorite(row.id) }
                 Button("重命名…") { onRename(row.id) }
+                // M3-D-C:加入分组子菜单(勾选=在组;末尾新建分组)。
+                Menu("加入分组") {
+                    ForEach(groups, id: \.self) { g in
+                        Button {
+                            onToggleGroup(row.id, g)
+                        } label: {
+                            Label(g, systemImage: row.groups.contains(g) ? "checkmark" : "")
+                        }
+                    }
+                    if !groups.isEmpty { Divider() }
+                    Button("新建分组…") { onCreateGroup(row.id) }
+                }
                 // 本地摘要:DB 型 agent 无 jsonl 转录,必弹「找不到记录文件」死弹窗 → 隐藏
                 //(M3-C+ 评审;Divider 随项内移,免得留双分隔线)。
                 if !AgentManifest.dbBackedAgents.contains(row.agent) {

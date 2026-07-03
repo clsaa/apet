@@ -26,6 +26,13 @@ private struct PanelRootView: View {
     let onOpenPreferences: () -> Void
     let onQuit: () -> Void
     let onAcknowledgeAll: () -> Void
+    // M3-D-B/C:tab + 分组
+    var selectedTab: SessionTab = .all
+    var onSelectTab: (SessionTab) -> Void = { _ in }
+    var groups: [String] = []
+    var onToggleGroup: (String, String) -> Void = { _, _ in }
+    var onCreateGroup: (String?) -> Void = { _ in }
+    var onDeleteGroup: (String) -> Void = { _ in }
 
     /// 是否存在未读 waiting 会话——仅此时显示「全部已读」（产品评审 MAJOR-1）。
     private var hasUnread: Bool {
@@ -41,7 +48,10 @@ private struct PanelRootView: View {
                          onToggleFavorite: onToggleFavorite, onRename: onRename,
                          onCopyId: onCopyId, onCopyResume: onCopyResume,
                          onLocalSummary: onLocalSummary,
-                         hotkeyHint: hotkeyHint, palette: palette)
+                         hotkeyHint: hotkeyHint, palette: palette,
+                         selectedTab: selectedTab, onSelectTab: onSelectTab,
+                         groups: groups, onToggleGroup: onToggleGroup,
+                         onCreateGroup: onCreateGroup, onDeleteGroup: onDeleteGroup)
             Divider()
 
             // 未装 hook 时的 slim 开启入口；已装则完全隐藏（省空间，去掉冗余「已启用」状态行）。
@@ -139,6 +149,13 @@ final class MenuBarController: NSObject {
     var hotkeyHint: String?
     /// 状态栏样式（F2）：`"counts"`（🟢🔴🟡⚪+数字）| `"pawprint"`（单图标+主色+总数）。
     var menuBarStyle: String = "counts"
+    // M3-D-B/C:tab + 分组(AppCoordinator 注入)。
+    var selectedTabProvider: (() -> SessionTab)?
+    var sessionGroupsProvider: (() -> [String])?
+    var onSelectTab: ((SessionTab) -> Void)?
+    var onToggleGroupMembership: ((SessionKey, String) -> Void)?
+    var onCreateGroupFor: ((SessionKey?) -> Void)?    // nil = 建空组(tab栏+)
+    var onDeleteGroup: ((String) -> Void)?
 
     // MARK: - State
 
@@ -268,7 +285,27 @@ final class MenuBarController: NSObject {
                 self?.onOpenPreferences?()
             },
             onQuit: { NSApplication.shared.terminate(nil) },
-            onAcknowledgeAll: { [weak self] in self?.onAcknowledgeAll?() }
+            onAcknowledgeAll: { [weak self] in self?.onAcknowledgeAll?() },
+            selectedTab: selectedTabProvider?() ?? .all,
+            onSelectTab: { [weak self] tab in
+                self?.onSelectTab?(tab)
+                self?.panelHosting?.rootView = self?.makePanelRootView() ?? PanelRootView(
+                    sessions: [], now: 0, palette: .system, petVisible: false, hookInstalled: false, hotkeyHint: nil,
+                    onTap: { _ in }, onToggleFavorite: { _ in }, onRename: { _ in },
+                    onCopyId: { _ in }, onCopyResume: { _ in }, onLocalSummary: { _ in },
+                    onTogglePet: {}, onOpenPreferences: {}, onQuit: {}, onAcknowledgeAll: {})
+            },
+            groups: sessionGroupsProvider?() ?? [],
+            onToggleGroup: { [weak self] id, group in
+                guard let self, let s = self.sessionForId(id) else { return }
+                self.onToggleGroupMembership?(s.key, group)
+            },
+            onCreateGroup: { [weak self] idOrNil in
+                guard let self else { return }
+                if let id = idOrNil, let sess = self.sessionForId(id) { self.onCreateGroupFor?(sess.key) }
+                else { self.onCreateGroupFor?(nil) }
+            },
+            onDeleteGroup: { [weak self] g in self?.onDeleteGroup?(g) }
         )
     }
 

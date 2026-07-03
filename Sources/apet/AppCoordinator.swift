@@ -366,6 +366,42 @@ final class AppCoordinator {
             mb.onRenameSession = rename
             pw.onRenameSession = rename
 
+            // M3-D-B/C:tab + 分组接线。
+            mb.selectedTabProvider = { [weak self] in SessionTab(encoded: self?.config.selectedTab ?? "all") }
+            mb.sessionGroupsProvider = { [weak self] in self?.config.sessionGroups ?? [] }
+            mb.onSelectTab = { [weak self] tab in
+                guard let self else { return }
+                self.config.selectedTab = tab.encoded
+                try? self.configStore.save(self.config)
+            }
+            mb.onToggleGroupMembership = { [weak self] key, group in
+                self?.updateMeta(key) { $0.groups = GroupMembership.toggle(group, in: $0.groups) }
+            }
+            mb.onCreateGroupFor = { [weak self] keyOrNil in
+                guard let self else { return }
+                guard let name = self.promptGroupName(), GroupMembership.isValidName(name) else { return }
+                if !self.config.sessionGroups.contains(name) { self.config.sessionGroups.append(name) }
+                try? self.configStore.save(self.config)
+                if let key = keyOrNil {
+                    self.updateMeta(key) { m in if !m.groups.contains(name) { m.groups.append(name) } }
+                } else {
+                    self.refreshSessionUI()
+                }
+            }
+            mb.onDeleteGroup = { [weak self] g in
+                guard let self else { return }
+                self.config.sessionGroups.removeAll { $0 == g }
+                if self.config.selectedTab == SessionTab.group(g).encoded { self.config.selectedTab = "all" }
+                try? self.configStore.save(self.config)
+                // 清各 meta 的该组名。
+                for (mk, meta) in self.sessionMetas where meta.groups.contains(g) {
+                    var m = meta; m.groups.removeAll { $0 == g }
+                    self.sessionMetas[mk] = (m == SessionMeta()) ? nil : m
+                }
+                try? self.sessionMetaStore?.save(self.sessionMetas)
+                self.refreshSessionUI()
+            }
+
             // 面板顶部快捷键提示
             let hint = config.panelHotKey.displayString + " 打开/关闭"
             mb.hotkeyHint = hint
@@ -578,6 +614,21 @@ final class AppCoordinator {
     }
 
     /// 显式用户操作触发的 meta 变更：改内存 + 落盘 + 立即刷新 UI。空 meta 一并 GC。
+    /// 弹输入框取分组名(建组用)。取消/空 → nil。
+    private func promptGroupName() -> String? {
+        let alert = NSAlert()
+        alert.messageText = "新建分组"
+        alert.informativeText = "输入分组名(≤30 字符)。"
+        let tf = NSTextField(frame: NSRect(x: 0, y: 0, width: 220, height: 24))
+        alert.accessoryView = tf
+        alert.addButton(withTitle: "创建")
+        alert.addButton(withTitle: "取消")
+        NSApp.activate(ignoringOtherApps: true)
+        guard alert.runModal() == .alertFirstButtonReturn else { return nil }
+        let name = tf.stringValue.trimmingCharacters(in: .whitespacesAndNewlines)
+        return name.isEmpty ? nil : name
+    }
+
     private func updateMeta(_ key: SessionKey, _ mutate: (inout SessionMeta) -> Void) {
         let mk = SessionMetaMerger.metaKey(key)
         var meta = sessionMetas[mk] ?? SessionMeta()

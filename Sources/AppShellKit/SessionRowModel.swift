@@ -50,6 +50,8 @@ public struct SessionRowModel: Equatable, Identifiable {
     public let noJumpHint: Bool
     /// 终端 app bundleId（M3-D-D：行首真 app 图标；terminal 未知→nil，不显图标）。
     public let terminalBundleId: String?
+    /// 所属自定义分组（M3-D-C：右键「加入分组」勾选态）。
+    public let groups: [String]
 
     public init(
         id: String,
@@ -65,7 +67,8 @@ public struct SessionRowModel: Equatable, Identifiable {
         agent: String = "",
         relativeText: String = "",
         noJumpHint: Bool = false,
-        terminalBundleId: String? = nil
+        terminalBundleId: String? = nil,
+        groups: [String] = []
     ) {
         self.id = id
         self.title = title
@@ -81,6 +84,7 @@ public struct SessionRowModel: Equatable, Identifiable {
         self.relativeText = relativeText
         self.noJumpHint = noJumpHint
         self.terminalBundleId = terminalBundleId
+        self.groups = groups
     }
 }
 
@@ -165,7 +169,8 @@ public enum SessionRowMapper {
             agent: key.agent,
             relativeText: relativeText,
             noJumpHint: noJumpHint,
-            terminalBundleId: terminalBundleId
+            terminalBundleId: terminalBundleId,
+            groups: session.groups
         )
     }
 }
