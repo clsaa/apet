@@ -65,7 +65,9 @@ public enum SessionTab: Equatable {
 - **新纯函数** `SessionTabFilter.filter(sessions:tab:metas:) -> [Session]`(单测):按 tab 谓词过滤。`.all` 不过滤。
 - `SessionListOrganizer` 增**平铺出口** `organizeFlat(sessions:tab:metas:filter:now:tzOffset:) -> OrganizedFlat`,`OrganizedFlat { pinned: [SessionRowModel]; rest: [SessionRowModel] }`(无 `groups`/无 section 标题):内部先 `SessionTabFilter.filter` → 搜索过滤 → 未读 waiting 置顶(`pinned`)+ 其余按收藏优先稳定排序(`rest`),复用现有 `isUnreadWaiting`/收藏排序私有逻辑。现有 `organize`(带 `groups`)保留不动,面板改调 `organizeFlat`。
 - **UI**:搜索框下方横向 tab 栏(Segmented 风格,自定义分组多时可横向滚动)。选中态 `config.selectedTab` 持久化(String 编码;`group(name)` 编码为 `group:name`)。
-- 空 tab → 「该分组暂无会话」。
+- **U1(交互评审 P0-1,核心任务不可牺牲)**:「⏳等你」(未读 waiting)pinned **无论选中哪个 tab 都常驻置顶**——`organizeFlat` 的 tab 过滤**只作用于 rest,不过滤 pinned**;否则停在「收藏/分组」tab 重开面板会藏掉刚变等你的会话(菜单栏显🟠却点不到)。
+- **U2(交互评审 P1-5)**:tab 标签**带计数角标**(「进行中 3」「收藏 5」「⏳2」),接住平铺后消失的分区计数信息;pinned 区保留「⏳ N 个等你」小头。
+- 空 tab → **可操作引导文案**(U4/P1-7):自定义空组显「右键任意会话 →『加入分组』把它归到这里」,而非干巴巴「暂无会话」。
 - 搜索与 tab 正交:tab 过滤后再套搜索(或反之,等价)。
 - 页脚现有「已读」快捷键行为与「已读」tab 语义对齐(点已读页脚 = 切已读 tab 或保留标记已读?**决策:页脚「已读」保持原义(标记全部已读),不动**)。
 
@@ -113,8 +115,30 @@ public enum SessionTab: Equatable {
 - **E3 元数据视觉统一**:次要状态标签(仅激活 / 推断 / 无跳转)**统一为灰色小字**(size 10 tertiary,无 chip 背景);**只有 agent 来源保留彩色 chip**(它才是需区分维度)。
 - **E4 整行 hover 背景**:行悬停淡色背景(与组件 A 的悬停☆共用 `hovering` 状态),给点击目标反馈。
 - **E5 字号收敛到 3 级**:标题 13 / 副标题 11 / 徽标+时间 10,灰度对应三档(primary/secondary/tertiary)。
+- **E6(U3/P1-6)页脚「已读」常驻置灰**:不再「有未读才显」(点完塌成 3 个按钮抖动),改为**常驻**,无未读时**禁用置灰**;所有页脚图标加 tooltip(已读/隐藏/首选项/退出)。
+- **E7(U5/P2-8)可靠性标记收敛**:「推断/仅激活/无跳转」三个语义重叠词不再并列——收敛为**单一弱化标记**(点击前预期告知保留:这是难得的错误预防,别删),细节进 tooltip。
+- **E8(U6/P2-14)悬停☆用 overlay 淡入**:不参与布局(`.overlay` 叠加,非 HStack 成员),保证 hover 出现/消失时时间列**零位移**(否则每次划过抖动)。
+- **E9(U7/P2-12)profileTag 灰化**:只有 agent 来源保留彩色 chip;profileTag 随 E3 灰化(否则两个彩 chip 同行最花)。
+- **E10(U8/P2-13)悬停溢出入口**:悬停时 ☆ 旁露一个 `⋯` 按钮 = 右键菜单同款,让**一个可发现的悬停入口**同时通往收藏与全部行内操作(统一交互平面)。
+- **E11 词汇决策**(D2/D3,自主拍板):`仅激活` → **「仅切到 App」**(「激活」是 jargon);`已读` 保留但**加 tooltip**「你看过,但会话可能仍在等你」(改名风险大、surface 广,先用 tooltip 消歧义)。
 
 **测试**:`PathAbbreviator.abbreviate`(home 折叠 / 超长 `…/父/叶` / 短路径原样 / 非 home 路径);其余为 GUI 调整不单测。
+
+## 6.7 组件 F:可缩放面板窗口(D1=A)
+
+**目标**:面板可拖拽改大小,尺寸持久化(用户 2026-07-04 选 A:真拖拽,放弃 popover 手感)。
+
+**现状**:面板 SwiftUI 写死 `.frame(width: 320)`/`maxHeight: 420`;用 `NSPopover`(菜单栏 + 桌宠都是),NSPopover **不支持拖拽 resize**。
+
+**设计**:
+- 菜单栏面板从 `NSPopover` 换为**可缩放浮动 NSWindow**(`.titled`/`.resizable`/`.fullSizeContentView` 或复用现有 `ApeFloatingWindow` 加 `.resizable`);行为:点菜单栏图标 toggle 显隐,失焦不强制关(或保留「点别处关」可配)。
+- SwiftUI 内容去掉写死 `width`,改 `minWidth: 300`/`idealWidth: 360`/`maxWidth: .infinity` + `minHeight`;行随宽自适应(标题占更多、时间列固定)。
+- 尺寸持久化:`AppConfig.panelWidth: Double`/`panelHeight: Double`(默认 360/480);窗口 resize 回调写 config(去抖)。
+- 桌宠侧 popover 可暂保留(桌宠本就是浮窗),或同步换;本组件**先做菜单栏面板**,桌宠 popover 记遗留。
+
+**约束**:窗口 level/behavior 不抢焦点(`.nonactivatingPanel` 惯例);去掉写死宽度后所有行内元素靠既有 `fixedSize`/`layoutPriority` 撑住(本轮竖排教训)。
+
+**测试**:`AppConfig.panelWidth/Height` 默认 + 往返编解码(单测);窗口/resize 为 GUI 不单测。
 
 ## 7. 数据流
 
@@ -132,9 +156,14 @@ SessionStore 变更 → changeHandler
 - **M3-D-B**:Tab 分流(§5)。取代分区。
 - **M3-D-C**:自定义分组(§6)。依赖 B 的 tab 栏。
 - **M3-D-D**:终端图标(§6.5)。独立。
-- **M3-D-E**:视觉打磨(§6.6,UI review P0)。独立;E4 hover 背景与 A 合流最省。
+- **M3-D-E**:视觉打磨(§6.6,UI review P0 + 交互评审 U3/U5/U6/U7/U8 + 词汇)。独立;E4/E8 hover 与 A 合流最省。
+- **M3-D-F**:可缩放面板窗口(§6.7)。独立;改动面板呈现方式,建议最后做(前面组件先在现窗口验证)。
 
 每块独立可测、可 ship;C 前需 B 的 tab 栏在位。建议顺序 A→E→D→B→C(A/E/D 是行内视觉,先把行做对再上 tab/分组)。
+
+## 8.5 已修现存 bug(本轮先行,非组件)
+
+交互评审揪出的现存 bug 已在组件前修复(feature/panel-ux):B1 跳转失败不再误标已读(丢等你会话)、B2 Claude/iTerm2 失败弹窗给复制恢复命令、B3 复制瞬时 HUD 反馈、B4 搜索匹配 agent 名、B5 推断 chip tooltip。
 
 ## 9. 非目标 / 遗留
 
