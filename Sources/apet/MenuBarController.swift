@@ -156,13 +156,16 @@ final class MenuBarController: NSObject {
     var onToggleGroupMembership: ((SessionKey, String) -> Void)?
     var onCreateGroupFor: ((SessionKey?) -> Void)?    // nil = 建空组(tab栏+)
     var onDeleteGroup: ((String) -> Void)?
+    // M3-D-F:面板窗口尺寸持久化。
+    var panelSizeProvider: (() -> CGSize)?
+    var onPanelResize: ((CGSize) -> Void)?
 
     // MARK: - State
 
     /// Latest session list from the store; used to resolve row tap IDs.
     private var currentSessions: [Session] = []
-    /// Live popover (nil until first click).
-    private var popover: NSPopover?
+    /// M3-D-F:可缩放面板窗口(取代 popover;用户选 A 拖拽改大小)。
+    private var panelWindow: PanelResizeWindow?
     /// Hosting controller retained for rootView live-updates.
     private var panelHosting: NSHostingController<PanelRootView>?
     /// Guard: only one "无法跳转" alert at a time (prevents rapid-click alert stacking).
@@ -281,7 +284,7 @@ final class MenuBarController: NSObject {
                 )
             },
             onOpenPreferences: { [weak self] in
-                self?.popover?.performClose(nil)
+                self?.panelWindow?.close()
                 self?.onOpenPreferences?()
             },
             onQuit: { NSApplication.shared.terminate(nil) },
@@ -347,21 +350,40 @@ final class MenuBarController: NSObject {
     private func showPopover() {
         guard let button = statusItem.button else { return }
 
-        // Toggle: close if already visible.
-        if let p = popover, p.isShown {
-            p.performClose(nil)
+        // Toggle: 已显示则关闭。
+        if let w = panelWindow, w.isVisible {
+            w.close()
             return
         }
 
-        let rootView = makePanelRootView()
-        let hc = NSHostingController(rootView: rootView)
+        let hc = NSHostingController(rootView: makePanelRootView())
         panelHosting = hc
 
-        let p = NSPopover()
-        p.contentViewController = hc
-        p.behavior = .transient
-        p.show(relativeTo: button.bounds, of: button, preferredEdge: .maxY)
-        popover = p
+        let size = panelSizeProvider?() ?? CGSize(width: 360, height: 480)
+        let win = PanelResizeWindow(
+            contentRect: NSRect(origin: .zero, size: size),
+            styleMask: [.titled, .closable, .resizable, .fullSizeContentView, .utilityWindow],
+            backing: .buffered, defer: false)
+        win.titlebarAppearsTransparent = true
+        win.titleVisibility = .hidden
+        win.isMovableByWindowBackground = true
+        win.level = .statusBar
+        win.hidesOnDeactivate = true      // 点别处失焦即隐(近似 popover transient)
+        win.isReleasedWhenClosed = false
+        win.contentViewController = hc
+        win.onResize = { [weak self] newSize in self?.onPanelResize?(newSize) }
+
+        // 定位在菜单栏图标下方,右对齐图标。
+        if let screen = button.window?.screen ?? NSScreen.main,
+           let btnFrame = button.window?.convertToScreen(button.convert(button.bounds, to: nil)) {
+            var x = btnFrame.maxX - size.width
+            x = max(screen.visibleFrame.minX + 8, x)
+            let y = btnFrame.minY - size.height - 4
+            win.setFrameOrigin(NSPoint(x: x, y: y))
+        }
+        win.makeKeyAndOrderFront(nil)
+        NSApp.activate(ignoringOtherApps: true)
+        panelWindow = win
     }
 
     // MARK: - Actions
@@ -438,8 +460,8 @@ final class MenuBarController: NSObject {
         let isClaude = ["claude", "claude-code"].contains(session.key.agent)
         let isOpenCode = (session.key.agent == "opencode")
         let fs = focusService
-        // Dismiss the popover before the off-main focus attempt.
-        popover?.performClose(nil)
+        // Dismiss the panel before the off-main focus attempt.
+        panelWindow?.close()
 
         // Off-main — osascript blocks (Fix I-1 / B2 pattern).
         Task.detached { [weak self] in

@@ -107,8 +107,7 @@ struct SessionPanel: View {
                 }
             }
         }
-        .frame(width: 320)
-        .frame(maxHeight: 420)
+        .frame(minWidth: 300, maxWidth: .infinity, maxHeight: .infinity)
     }
 
     // 空 tab 引导(U4/P1-7):自定义空组给可操作引导,而非干巴巴「暂无」。

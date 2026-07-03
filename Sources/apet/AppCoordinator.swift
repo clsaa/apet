@@ -388,6 +388,16 @@ final class AppCoordinator {
                     self.refreshSessionUI()
                 }
             }
+            // M3-D-F:面板尺寸持久化。
+            mb.panelSizeProvider = { [weak self] in
+                CGSize(width: self?.config.panelWidth ?? 360, height: self?.config.panelHeight ?? 480)
+            }
+            mb.onPanelResize = { [weak self] size in
+                guard let self else { return }
+                self.config.panelWidth = Double(size.width)
+                self.config.panelHeight = Double(size.height)
+                try? self.configStore.save(self.config)
+            }
             mb.onDeleteGroup = { [weak self] g in
                 guard let self else { return }
                 self.config.sessionGroups.removeAll { $0 == g }
