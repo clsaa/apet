@@ -118,8 +118,12 @@ struct SessionPanel: View {
             .contextMenu {
                 Button(row.favorite ? "取消收藏" : "收藏") { onToggleFavorite(row.id) }
                 Button("重命名…") { onRename(row.id) }
-                Divider()
-                Button("本地摘要") { onLocalSummary(row.id) }
+                // 本地摘要:DB 型 agent 无 jsonl 转录,必弹「找不到记录文件」死弹窗 → 隐藏
+                //(M3-C+ 评审;Divider 随项内移,免得留双分隔线)。
+                if !AgentManifest.dbBackedAgents.contains(row.agent) {
+                    Divider()
+                    Button("本地摘要") { onLocalSummary(row.id) }
+                }
                 Divider()
                 Button("复制 sessionID") { onCopyId(row.id) }
                 // 仅对有已核实恢复命令的 agent 显示（产品评审 M3：不静默复制假命令）。
@@ -169,6 +173,7 @@ private struct SessionRowCell: View {
                     Text(row.title)
                         .font(.system(size: 13, weight: .semibold))
                         .lineLimit(1)
+                        .layoutPriority(1)   // M3-C+ 评审:防徽标簇把标题挤空
 
                     if let tag = row.profileTag {
                         Text(tag)
@@ -185,14 +190,24 @@ private struct SessionRowCell: View {
                             .padding(.horizontal, 5).padding(.vertical, 1)
                             .background(Color.purple.opacity(0.15))
                             .cornerRadius(4).lineLimit(1)
-                            .help("来自 \(row.agent)（状态按活动时间粗略推断）")
+                            .help(row.agent == "opencode"
+                                  ? "来自 opencode:仅面板可见,无通知(插件增强规划中);状态按内容信号+活动时间推断;30 分钟无活动灰显(会话仍在,活动后恢复),24 小时后移出"
+                                  : "来自 \(row.agent)（状态按活动时间粗略推断）")
                     }
-                    if row.isInferred {
+                    // M3-C+ 评审:noJumpHint 行抑制「推断」徽标(语义重叠,agent 徽标 tooltip
+                    // 已承载"状态是推断的";320px 行宽下三徽标叠加会把标题挤空)。
+                    if row.isInferred && !row.noJumpHint {
                         Text("推断")
                             .font(.system(size: 10, weight: .medium))
                             .padding(.horizontal, 5).padding(.vertical, 1)
                             .background(Color.secondary.opacity(0.15))
                             .cornerRadius(4).foregroundStyle(.secondary).lineLimit(1)
+                    }
+                    if row.noJumpHint {
+                        Text("无跳转")
+                            .font(.system(size: 9))
+                            .foregroundStyle(.secondary)
+                            .help("OpenCode 在终端中运行,apet 无法定位窗口;点击查看恢复方式")
                     }
                     if row.activateOnly {
                         Text(row.needsManualTabHint ? "仅激活·手动切标签" : "仅激活")

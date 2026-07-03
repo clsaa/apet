@@ -389,6 +389,10 @@ final class MenuBarController: NSObject {
         // source tag (硬约束 #9：用 session.source == .jsonl 判定来源，不用 terminal == nil 当代理).
         // Capture before going off-main so we can check it in the alert block.
         let isJsonlSession = (session.source == .jsonl)
+        // M3-C+：hook 提示限定 Claude 系（评审：对 opencode 推销 ~/.claude/settings.json
+        // 完全错误且耗节流配额）；opencode 走专属弹窗（诚实降级 + 复制恢复命令）。
+        let isClaude = ["claude", "claude-code"].contains(session.key.agent)
+        let isOpenCode = (session.key.agent == "opencode")
         let fs = focusService
         // Dismiss the popover before the off-main focus attempt.
         popover?.performClose(nil)
@@ -403,20 +407,24 @@ final class MenuBarController: NSObject {
                 await MainActor.run { [weak self] in
                     guard let self, !self.isShowingTapAlert else { return } // 防连击叠加阻塞弹窗（Task9 评审 Important）
                     self.isShowingTapAlert = true
+                    defer { self.isShowingTapAlert = false }
+                    if isOpenCode {
+                        SessionRowActions.showOpenCodeNoJumpAlert(session)
+                        return
+                    }
                     let alert = NSAlert()
                     alert.messageText = "无法跳转到会话"
                     // .targetGone=窗口已关；.unsupported=无终端信息（如 jsonl 推断会话）。文案兼顾两者。
                     var infoText = "无法跳转到会话终端（可能已关闭，或终端信息不可用）。"
                     // Part C: just-in-time hook hint — only for jsonl-inferred sessions,
                     // throttled to once per session and capped globally by HookHintThrottle.
-                    if isJsonlSession && self.hookHintThrottle.shouldHint(sessionKey: id) {
+                    if isJsonlSession && isClaude && self.hookHintThrottle.shouldHint(sessionKey: id) {
                         infoText += "\n\n💡 安装 Hook 可精确跳到这个 tab（会改 settings.json，自动备份/一键卸载）→ 在「首选项」中开启。"
                     }
                     alert.informativeText = infoText
                     alert.alertStyle = .informational
                     alert.addButton(withTitle: "好的")
                     alert.runModal()
-                    self.isShowingTapAlert = false
                 }
             }
         }
