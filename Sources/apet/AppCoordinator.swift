@@ -169,7 +169,11 @@ final class AppCoordinator {
                 root: rootPath,
                 now: { Date().timeIntervalSince1970 },
                 parse: { JSONLParse.parse(path: $0, root: rootPath) },
-                emit: { [weak self] result in self?.applyScanResult(result) }
+                emit: { [weak self] result in self?.applyScanResult(result) },
+                // 归一键对齐 hook 路径(emit-event.sh 用 "claude-code"):此前 watcher 默认
+                // "claude" 与 hook 的 "claude-code" 不同键 → 同一会话经两源各显一行(重复),
+                // 且 M1.5「hook+jsonl 同一 store 融合」因键不同而失效。用 root.agent 统一。
+                agent: root.agent
             )
             jsonlWatchers.append(w)
         }

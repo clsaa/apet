@@ -31,6 +31,17 @@ final class DataRootDiscoveryTests: XCTestCase {
         XCTAssertEqual(r.newlyDiscovered.map(\.path).sorted(), ["/h/.claude", "/h/.claude-profiles/work"])
     }
 
+    /// 归一键防重复回归:jsonl 兜底路径的 Claude 会话 agent 名必须与 hook
+    /// (Resources/apet-emit-event.sh 里 `"agent": "claude-code"`)一致——否则同一会话
+    /// 经两源各显一行、且 hook+jsonl 融合失效(M3-C+ 修复;AppCoordinator 传 root.agent)。
+    func test_discoveredClaudeRoot_agentMatchesHook() {
+        let fo = MockFileOps()
+        fo.existing.insert("/h/.claude")
+        let r = DataRootDiscovery.discover(home: "/h", existing: [], excluded: [], fileOps: fo)
+        XCTAssertEqual(r.roots.first(where: { $0.path == "/h/.claude" })?.agent, "claude-code",
+                       "jsonl 与 hook 必须同 agent 名,否则会话重复")
+    }
+
     func test_dedups_existing() {
         let fo = MockFileOps()
         fo.existing.insert("/h/.claude")
