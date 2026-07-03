@@ -1,4 +1,4 @@
-# apet 会话面板 UX 升级设计——内联摘要 / 悬停收藏 / Tab 分流 / 自定义分组
+# apet 会话面板 UX 升级设计——悬停收藏 / Tab 分流 / 自定义分组
 
 日期:2026-07-03 · 状态:待评审 · 里程碑:M3-D(面板体验)
 
@@ -6,16 +6,16 @@
 
 用户在真机使用中提出四项面板改进(2026-07-03),brainstorm 决策:
 
-1. **内联本地摘要**——会话目录下方常驻显示本地启发式摘要(非右键弹窗);**本地摘要**档(零网络零成本),不用模型档。
+1. ~~内联本地摘要~~ **已砍**(2026-07-03 实测决策):面板标题**本就用 Claude Code 的 `ai-title`**(`JSONLParse.swift:162`,`customTitle > aiTitle > lastPrompt`),已是「这会话在干嘛」的好摘要;启发式再造一个只会更差(实测三例两垃圾)。内联启发式摘要移入非目标;真·丰富摘要留给「模型摘要按需」(遗留)。
 2. **悬停收藏按钮**——行上悬停才淡出现 ☆,已收藏常驻 ⭐,点击 toggle(替代只能右键收藏)。
 3. **Tab 取代分区**——顶部标签页:全部 / 收藏 / 进行中 / 已读 + 每个自定义分组一个 tab;选中 tab 只显该类,列表平铺不再有分区标题。
 4. **自定义分组**——用户建命名分组,右键把会话加入/移出,**可多属**(标签语义),持久化。
 
-四块按交付独立性从轻到重排序,**可分里程碑独立上线**:A 悬停收藏 → B 内联摘要 → C Tab 分流 → D 自定义分组(D 依赖 C 的 tab 栏)。
+三块按交付独立性从轻到重排序,**可分里程碑独立上线**:A 悬停收藏 → B Tab 分流 → C 自定义分组(C 依赖 B 的 tab 栏)。
 
 ## 1. 现状事实(已核对)
 
-- `SessionMeta`(`Sources/AgentPetCore/Store/SessionMeta.swift`)已有 `favorite / customName / firstSeenAt / cachedSummary / summaryAnchor` 字段——后两者是**预留、全仓未用**,组件 B 直接接上。
+- `SessionMeta`(`Sources/AgentPetCore/Store/SessionMeta.swift`)已有 `favorite / customName / firstSeenAt / cachedSummary / summaryAnchor` 字段——后两者(cachedSummary/summaryAnchor)预留、全仓未用,本设计**不再启用**(见 §4:内联摘要已砍),留待模型摘要按需。
 - `SessionMetaStore`(AppShellKit)`load()/save()` 持久化 `[String: SessionMeta]`(key=`agent|root|sessionId`)。
 - `SessionListOrganizer.organize(sessions:dimension:filter:now:tzOffset:) -> OrganizedList(pinned, groups)`:搜索过滤 + 未读 waiting 置顶 + 收藏优先 + 按 `GroupDimension`(status/date/agent)分组。
 - `SessionRowMapper.make` 纯映射 `Session → SessionRowModel`;`SessionRowModel` 已有 `favorite / agent / noJumpHint / ...`。
@@ -40,26 +40,15 @@
 
 **测试**:GUI,不单测;`SessionRowModel.favorite` 既有测试覆盖。
 
-## 4. 组件 B:内联本地摘要
+## 4. 组件 B(已砍):内联本地摘要 → 移入非目标
 
-**目标**:目录下方常驻一行本地摘要(`指令:X · 最近:Y`);无转录会话不显此行。
+实测决策(2026-07-03):面板标题已由 `JSONLParse.title = customTitle ?? aiTitle ?? lastPrompt` 提供
+Claude Code 的 AI 标题(如「创建 AI Coding Agent 的 GitHub 项目模板」),已是会话意图的好摘要。
+再叠一行启发式摘要(「指令:X · 最近:Y」)冗余且质量差(实测:tool_use 窗口无真实指令时回退到
+注入消息、skill 前缀被当指令)。故**不做内联自动摘要**;`SessionMeta.cachedSummary/summaryAnchor`
+预留字段留待「模型摘要按需」(遗留 §9)。既有右键「本地摘要」保留不动(本轮已加注入过滤)。
 
-**架构**(复用 SessionMeta 预留字段 + 后台缓存):
-- `SessionRowModel` 加 `summary: String?`(nil = 不显该行)。
-- `SessionMeta.cachedSummary`(文案)+ `summaryAnchor`(计算时的 `lastSeq`)接上:摘要**按 seq 失效**——`meta.summaryAnchor == session.lastSeq` 则缓存有效,直接用 `cachedSummary`;否则需重算。
-- **新 `SummaryRefresher`**(AppShellKit,IO 缝可注入):
-  - 输入:当前 sessions + metas + `locate/read` 闭包。
-  - 纯决策函数 `SummaryPlanner.needsRefresh(session:meta:) -> Bool`(AgentPetCore 纯函数,单测):`session.source` 有转录能力(claude/claude-code/qoder-cli/qoder-ide,即非 `dbBackedAgents`)且 `meta.summaryAnchor != session.lastSeq`。
-  - IO 部分:对 needsRefresh 的会话,后台队列跑 locate→read→parse→summarize,写回 `meta.cachedSummary/summaryAnchor`,持久化,触发面板刷新(经既有 changeHandler/applyMetas 路径)。
-  - 节流:每次 store 变更后合并计算,单会话同 seq 不重复算。
-- `SessionRowMapper.make` 增参 `summary: String?`(默认 nil),从 meta 注入(有效缓存才给)。
-- OpenCode/QoderWork(`dbBackedAgents`):`SummaryPlanner.needsRefresh` 恒 false → 无 summary → 不显摘要行(与「本地摘要右键隐藏」一致)。**遗留**:从 DB message 表做摘要(AI 评审提过),后续里程碑。
-
-**约束**:摘要 I/O 绝不在 main/映射同步做(约束隐含性能);`now` 无关(摘要不含时间派生)。
-
-**测试**:`SummaryPlanner.needsRefresh` 各分支(有/无转录源、anchor 命中/失效);`LocalSummarizer` 既有 + 注入过滤(本轮已修);SummaryRefresher 用 mock locate/read 验证「同 seq 不重算 / seq 变则重算 / 无转录源跳过」。
-
-## 5. 组件 C:Tab 分流(取代分区)
+## 5. 组件 B:Tab 分流(取代分区)
 
 **目标**:顶部 tab 栏,选中只显该类,平铺无分区标题。
 
@@ -70,7 +59,7 @@ public enum SessionTab: Equatable {
     case favorites      // 收藏:favorite == true
     case running        // 进行中:state == .running
     case read           // 已读:acknowledged 的 waiting(现「已读」组语义)
-    case group(String)  // 自定义分组(组件 D)
+    case group(String)  // 自定义分组(组件 C)
 }
 ```
 - **新纯函数** `SessionTabFilter.filter(sessions:tab:metas:) -> [Session]`(单测):按 tab 谓词过滤。`.all` 不过滤。
@@ -82,7 +71,7 @@ public enum SessionTab: Equatable {
 
 **测试**:`SessionTabFilter.filter` 每 tab(含空、含多属分组);`.all` 与现有 organize 置顶序一致的回归。
 
-## 6. 组件 D:自定义分组
+## 6. 组件 C:自定义分组
 
 **目标**:建命名分组,右键会话加入/移出,可多属,每组一个 tab。
 
@@ -105,25 +94,24 @@ public enum SessionTab: Equatable {
 
 ```
 SessionStore 变更 → changeHandler
-  → SummaryRefresher.plan(needsRefresh) → 后台算 → 写 meta.cachedSummary/anchor → 持久化
-  → applyMetas(注入 favorite/customName/groups/summary)
+  → applyMetas(注入 favorite/customName/groups)
   → SessionTabFilter.filter(by: config.selectedTab)
-  → organize(平铺:未读置顶 + 收藏优先)
-  → SessionRowMapper.make(summary:) → 面板渲染(3 行高:标题/目录/摘要 + 悬停☆)
+  → organizeFlat(未读置顶 + 收藏优先,无分区)
+  → SessionRowMapper.make → 面板渲染(标题/目录 + 悬停☆)
 ```
 
 ## 8. 交付里程碑(建议一块一 PR/一评审批次)
 
 - **M3-D-A**:悬停收藏按钮(§3)。最小,先落地验证行布局。
-- **M3-D-B**:内联本地摘要(§4)。接上预留字段 + 后台缓存。
-- **M3-D-C**:Tab 分流(§5)。取代分区。
-- **M3-D-D**:自定义分组(§6)。依赖 C。
+- **M3-D-B**:Tab 分流(§5)。取代分区。
+- **M3-D-C**:自定义分组(§6)。依赖 B 的 tab 栏。
 
-每块独立可测、可 ship;D 前需 C 的 tab 栏在位。
+每块独立可测、可 ship;C 前需 B 的 tab 栏在位。
 
 ## 9. 非目标 / 遗留
 
-- 模型摘要档 UI(仍遗留;本设计只接本地档,但缓存字段复用后模型档接入更顺)。
-- OpenCode/QoderWork 的 DB 摘要(从 message 表)——B 之后的独立里程碑。
+- **内联启发式摘要**(本设计原组件 B,实测后砍):标题已是 ai-title 好摘要,启发式冗余且差。
+- 模型摘要按需 UI(遗留):右键 → LLM 出丰富摘要,是唯一比标题多给价值的路径;`SessionMeta.cachedSummary/summaryAnchor` 预留字段为它备着。
+- OpenCode/QoderWork 的 DB 摘要(从 message 表)——独立里程碑。
 - 拖拽加入分组(本轮右键足够;拖拽 YAGNI)。
 - 分组嵌套 / 分组图标颜色(YAGNI)。
