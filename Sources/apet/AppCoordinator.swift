@@ -586,7 +586,15 @@ final class AppCoordinator {
     /// - `displayMode`, `panelHotKey`, `selectedPet` are applied immediately.
     private func applyConfig(_ newConfig: AppConfig) {
         let oldHotKey = config.panelHotKey
-        config = newConfig
+        // 面板私有字段(selectedTab/sessionGroups/panelWidth/Height)由面板运行时直接写 config,
+        // 不经 Preferences。Preferences 存盘用打开时的旧快照——直接 config=newConfig 会把面板期间
+        // 建的分组/切的 tab/拖的尺寸回滚(架构评审 config clobber)。故保留 live 值。
+        var merged = newConfig
+        merged.selectedTab   = config.selectedTab
+        merged.sessionGroups = config.sessionGroups
+        merged.panelWidth    = config.panelWidth
+        merged.panelHeight   = config.panelHeight
+        config = merged
 
         // Apply display mode immediately.
         if let pw = petWindow {
