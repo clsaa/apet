@@ -33,6 +33,8 @@ export _APET_OUT="$AGENTPET_OUT"
 export _APET_ROOT="${AGENTPET_ROOT:-$HOME/.claude}"
 export _APET_ITERM="${ITERM_SESSION_ID:-}"
 export _APET_TERM_PROG="${TERM_PROGRAM:-}"
+# 真 bundleId(macOS LaunchServices 给 GUI app 设,children 继承):区分 Cursor/Warp-Preview。
+export _APET_CFBUNDLE="${__CFBundleIdentifier:-}"
 # Controlling tty of the parent (the terminal running Claude). hook stdin is the
 # payload (not a tty), so we read the parent's tty via ps. Yields e.g. "ttys001"
 # or "??"/empty when detached; python validates before use.
@@ -51,6 +53,9 @@ def main():
     iterm_id  = os.environ.get("_APET_ITERM", "")
     term_prog = os.environ.get("_APET_TERM_PROG", "")
     raw_tty   = os.environ.get("_APET_TTY", "")
+    # macOS 给 GUI 启动的 app 设的真 bundleId——Cursor(vscode fork)/Warp-Preview 靠它区分,
+    # 否则会被硬编码成 VS Code / Warp-Stable(AI 评审:错图标+错激活+错标已读)。
+    real_bundle = os.environ.get("_APET_CFBUNDLE", "").strip()
 
     # Normalize tty: "ttys001" → "/dev/ttys001"; only accept /dev/tty + alnum.
     tty = ""
@@ -111,13 +116,16 @@ def main():
             "bundleId":       "com.googlecode.iterm2",
         }
     elif term_prog == "Apple_Terminal":
-        terminal = {"kind": "terminal", "bundleId": "com.apple.Terminal"}
+        terminal = {"kind": "terminal", "bundleId": real_bundle or "com.apple.Terminal"}
     elif term_prog == "WarpTerminal":
-        terminal = {"kind": "warp", "bundleId": "dev.warp.Warp-Stable"}
+        # Warp Preview 的 bundleId 是 dev.warp.Warp-Preview,Stable 是 dev.warp.Warp-Stable。
+        terminal = {"kind": "warp", "bundleId": real_bundle or "dev.warp.Warp-Stable"}
     elif term_prog == "ghostty":
-        terminal = {"kind": "ghostty", "bundleId": "com.mitchellh.ghostty"}
+        terminal = {"kind": "ghostty", "bundleId": real_bundle or "com.mitchellh.ghostty"}
     elif term_prog == "vscode":
-        terminal = {"kind": "vscode", "bundleId": "com.microsoft.VSCode"}
+        # Cursor 也设 TERM_PROGRAM=vscode,但 __CFBundleIdentifier 是 Cursor 的——用真值,
+        # kind 仍归 vscode(能力分级同档:activate-only + 手动切标签)。
+        terminal = {"kind": "vscode", "bundleId": real_bundle or "com.microsoft.VSCode"}
 
     if terminal is not None:
         # tty enables Terminal.app window-level focus; harmless extra field for others.

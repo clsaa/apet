@@ -22,6 +22,9 @@ public enum TerminalKind: String, Codable, Equatable { case iterm2, terminal, wa
 
 public extension TerminalKind {
     /// 默认 app bundleId(图标 + 激活兜底共用;other 未知→nil)。M3-D-D。
+    /// ⚠️ 仅**兜底**默认值:hook 优先写 `__CFBundleIdentifier` 真值(见 apet-emit-event.sh)。
+    /// 这里的 warp=Stable / vscode=VS Code 对 Warp-Preview / Cursor 是错的,仅在真值缺失时用。
+    /// 值取自各终端 Info.plist;新增/改名终端时同步 hook 与 TerminalFocusPlanner。
     var bundleId: String? {
         switch self {
         case .iterm2:   return "com.googlecode.iterm2"
