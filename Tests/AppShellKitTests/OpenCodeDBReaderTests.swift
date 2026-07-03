@@ -107,6 +107,66 @@ final class OpenCodeDBReaderTests: XCTestCase {
         XCTAssertEqual(row.lastActivity, 2000, "user 消息行插入时间进活动链")
     }
 
+    /// spec §3.1:json_extract 失败 → 完成信号缺席(窗口兜底),绝不 failed 整轮。
+    /// SQLite 的 json_extract 对 malformed JSON **抛错**——不设 json_valid 护栏会毒化全库读取
+    /// (实现评审 Blocker:单条坏 data → 每轮 .failed → 面板 OpenCode 全部消失且无解释)。
+    func test_malformedAssistantData_doesNotPoisonWholeRead() throws {
+        makeFixture { db in
+            exec(db, """
+            INSERT INTO session VALUES ('ses_bad','p',NULL,'/w','t','v',1000000,2000000,NULL);
+            INSERT INTO session_message VALUES ('m1','ses_bad','assistant',1,2000000,2000000,'not-json');
+            INSERT INTO session VALUES ('ses_good','p',NULL,'/g','t2','v',1000000,2000000,NULL);
+            """)
+        }
+        let rows = try XCTUnwrap(OpenCodeDBReader(dbPath: dbPath).read().rows,
+                                 "单条坏 data 不得毒化整轮(spec §3.1)")
+        XCTAssertEqual(rows.count, 2)
+        XCTAssertEqual(rows.first(where: { $0.sessionId == "ses_bad" })?.assistantSignal,
+                       AssistantSignal.none, "信号缺席 → 窗口兜底")
+    }
+
+    /// 上游 getCurrentAssistant 同构:取 seq 最大的 assistant——旧轮 completed 不遮蔽新轮 in-flight
+    /// (实现评审 Major:fixture 全是单 assistant,写成 ASC/MAX(completed) 照样全绿)。
+    func test_multiTurn_latestAssistantWins_inFlight() throws {
+        makeFixture { db in
+            exec(db, """
+            INSERT INTO session VALUES ('ses_a','p',NULL,'/w','t','v',1000000,1000000,NULL);
+            INSERT INTO session_message VALUES
+              ('m1','ses_a','assistant',2,1000000,1000000,'{"time":{"completed":1000000}}'),
+              ('m2','ses_a','user',3,2000000,2000000,'{}'),
+              ('m3','ses_a','assistant',4,2100000,2100000,'{"time":{"created":2100000}}');
+            """)
+        }
+        let row = try XCTUnwrap(OpenCodeDBReader(dbPath: dbPath).read().rows?.first)
+        XCTAssertEqual(row.assistantSignal, .inFlight, "seq 最大的 assistant 说了算")
+    }
+
+    func test_multiTurn_latestAssistantWins_completed() throws {
+        makeFixture { db in
+            exec(db, """
+            INSERT INTO session VALUES ('ses_a','p',NULL,'/w','t','v',1000000,1000000,NULL);
+            INSERT INTO session_message VALUES
+              ('m1','ses_a','assistant',2,1000000,1000000,'{"time":{"created":1000000}}'),
+              ('m3','ses_a','assistant',4,2100000,2100000,'{"time":{"completed":2200000}}');
+            """)
+        }
+        let row = try XCTUnwrap(OpenCodeDBReader(dbPath: dbPath).read().rows?.first)
+        XCTAssertEqual(row.assistantSignal, .completed, "镜像:最新 completed,旧轮 in-flight 不遮蔽")
+    }
+
+    /// 代码注释宣称「ISO 串等未来编码也归 completed(非 NULL 即完成)」——给它测试背书。
+    func test_isoStringCompleted_countsAsCompleted() throws {
+        makeFixture { db in
+            exec(db, """
+            INSERT INTO session VALUES ('ses_a','p',NULL,'/w','t','v',1000000,2000000,NULL);
+            INSERT INTO session_message VALUES ('m1','ses_a','assistant',1,2000000,2000000,
+              '{"time":{"completed":"2026-07-03T10:00:00Z"}}');
+            """)
+        }
+        let row = try XCTUnwrap(OpenCodeDBReader(dbPath: dbPath).read().rows?.first)
+        XCTAssertEqual(row.assistantSignal, .completed)
+    }
+
     /// 方言一致性 tripwire(评审:防 /1000 两次的静默失败——那会让面板永远空)。
     func test_millisecondConversion_matchesTimestampDialect() throws {
         makeFixture { db in

@@ -208,9 +208,14 @@ public struct OpenCodeDBReader {
         }
         // assistant 信号:NULL=无 assistant 行(none);0=completed IS NULL(inFlight);1=completed(completed)。
         // CASE 包裹使 ISO 串等未来编码也归 completed(非 NULL 即完成,评审 m3)。
+        // ⚠️ json_valid 护栏(实现评审 Blocker):json_extract 对 malformed JSON 是**抛错**而非
+        // 返回 NULL——错误发生在 step 期间会把整轮打成 .failed,单条坏 data 毒化全库读取。
+        // 坏 data → NULL → .none 走窗口兜底,与 spec §3.1「json_extract 失败 → 信号缺席」一致。
         let signalExpr = hasMsg
             ? """
-              (SELECT CASE WHEN json_extract(m.data, '$.time.completed') IS NULL THEN 0 ELSE 1 END
+              (SELECT CASE WHEN json_valid(m.data) = 0 THEN NULL
+                           WHEN json_extract(m.data, '$.time.completed') IS NULL THEN 0
+                           ELSE 1 END
                  FROM session_message m
                 WHERE m.session_id = s.id AND m.type = 'assistant'
                 ORDER BY m.seq DESC LIMIT 1)
