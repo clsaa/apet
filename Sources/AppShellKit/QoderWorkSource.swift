@@ -112,17 +112,10 @@ public struct QoderWorkDBReader {
 // MARK: - QoderWorkWatcher
 
 /// 定时轮询 agents.db → 纯扫描 → 差分 emit（对齐 JSONLDirectoryWatcher 的差分/幽灵语义）。
-/// 粗略状态只在窗口边界翻转，无需滞回。
+/// 实现已泛化为 DBPollWatcher（M3-C+ OpenCode 接入,评审 B4:回归网先行后重构），
+/// 此处保持公开签名、内部委托——读失败 nil 整轮跳过等语义随泛化件保持。
 public final class QoderWorkWatcher {
-    private let read: () -> [QoderWorkChatRow]?
-    private let root: String
-    private let now: () -> Double
-    private let emit: (ScanResult) -> Void
-    private let runningWindow: Double
-    private let idleWindow: Double
-
-    private var lastEmitted: [SessionKey: ScanState] = [:]
-    private var timer: DispatchSourceTimer?
+    private let inner: DBPollWatcher
 
     public init(
         read: @escaping () -> [QoderWorkChatRow]?,
@@ -132,44 +125,17 @@ public final class QoderWorkWatcher {
         runningWindow: Double = 120,
         idleWindow: Double = 1800
     ) {
-        self.read = read; self.root = root; self.now = now; self.emit = emit
-        self.runningWindow = runningWindow; self.idleWindow = idleWindow
+        inner = DBPollWatcher(
+            scan: { now in
+                read().map {
+                    QoderWorkScanner.scan(rows: $0, root: root, now: now,
+                                          runningWindow: runningWindow, idleWindow: idleWindow)
+                }
+            },
+            now: now, emit: emit)
     }
 
-    public func scanOnce() {
-        // 评审修复（AI M5/架构 M3）：读失败（nil，如写锁竞争半读）→ 整轮跳过，
-        // 不差分、不发幽灵 stale——一次锁抖动绝不能把全部活跃会话打灰。
-        guard let rows = read() else { return }
-        let results = QoderWorkScanner.scan(rows: rows, root: root, now: now(),
-                                            runningWindow: runningWindow, idleWindow: idleWindow)
-        var observed: Set<SessionKey> = []
-        for result in results {
-            guard case .observe(let state, let key, _, _) = result else { continue }
-            observed.insert(key)
-            if lastEmitted[key] != state {
-                emit(result)
-                lastEmitted[key] = state
-            }
-        }
-        // 幽灵对账：上轮活跃、本轮消失/过老 → 补发 stale 打灰。
-        let ghosts = lastEmitted.keys.filter { !observed.contains($0) }
-        for key in ghosts {
-            emit(.observe(state: .stale, key: key, cwd: nil, title: nil))
-            lastEmitted.removeValue(forKey: key)
-        }
-    }
-
-    public func start(every interval: Double) {
-        stop()  // 幂等：重复 start 不产生双 timer（测试评审 M6）
-        let src = DispatchSource.makeTimerSource(queue: .main)
-        src.schedule(deadline: .now() + interval, repeating: interval)
-        src.setEventHandler { [weak self] in self?.scanOnce() }
-        src.resume()
-        timer = src
-    }
-
-    public func stop() {
-        timer?.cancel()
-        timer = nil
-    }
+    public func scanOnce() { inner.scanOnce() }
+    public func start(every interval: Double) { inner.start(every: interval) }
+    public func stop() { inner.stop() }
 }
