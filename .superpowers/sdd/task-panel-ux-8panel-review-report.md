@@ -20,3 +20,25 @@ E10 ⋯ 溢出入口未做(需实现或回写遗留)；CopyHUD 主屏正中离�
 
 ## 正面(勿回退)
 纯逻辑层干净单测友好、硬约束落位；U1 跨tab常驻 spec/plan/实现/测试四处一致;B1/B2 双入口同构;诚实降级/防连击保留。
+
+---
+
+## 修复结果(8 视角评审后,feature/panel-ux)
+
+**Blocker(2)全修:**
+1. B1 对 iTerm2/Terminal 失效 → 新增 `FocusResult.missedButActivated` 区分「精确跳转未命中的兜底激活」vs「计划内 activate-only」,只有 `.focused`/`.activatedOnly` 标已读,兜底激活保留未读。
+2. 桌宠死 tab → 桌宠面板接通 tab/分组(与菜单栏共用闭包),`showsTabBar` 开关备用;默认 pet 模式旗舰功能可用。
+
+**Major 全修:**
+- 可缩放窗口:去除内容写死 320(拖宽真生效)、窗口复用不泄漏(orderOut 非新建)、`.floating` 层级不压 NSAlert、borderless 去残留关闭钮、contentMinSize 夹逼。
+- config clobber:applyConfig 保留面板私有字段 live 值。
+- 删组二次确认 + 建组切到新 tab + 非法名提示。
+- Cursor/Warp-Preview:hook 读 `__CFBundleIdentifier` 真 bundleId;TerminalKind.bundleId 降兜底+维护注释。
+- 文档同步:README/CLAUDE.md 补 tab/分组/终端图标/悬停收藏/可缩放,测试计数 752。
+- 测试假绿:AppConfig 4 字段、merge 排序不自掩盖、organizeFlat read/group/收藏稳定/集成链、PathAbbreviator 边界、isValidName 字素;pinned 改稳定排序。
+
+**Minor:** tab 计数随搜索收敛、勾选态对齐、pinned「始终置顶」说明、@MainActor 隔离、E11 已读 tab 消歧 tooltip、CopyHUD 改鼠标屏顶部、U3 桌宠已读常驻置灰。
+
+**遗留(spec §9 已回写):** E10 悬停 ⋯ 溢出入口未做;hidesOnDeactivate 常驻取舍待用户定;桌宠侧不可缩放。
+
+**最终:752 测试全绿,build 通过,App 运行无崩溃。**
