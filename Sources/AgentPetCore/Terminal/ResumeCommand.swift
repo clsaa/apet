@@ -25,17 +25,8 @@ public enum ResumeCommand {
         return parts.joined(separator: " ")
     }
 
-    /// 严格 UUID 校验：8-4-4-4-12 十六进制，只放行 `[0-9a-fA-F-]`。
+    /// 严格 UUID 校验(收敛至 SessionIdRule.uuid,M3-C+ 评审:消除双份实现)。
     private static func isValidUUID(_ s: String) -> Bool {
-        let groups = [8, 4, 4, 4, 12]
-        let parts = s.split(separator: "-", omittingEmptySubsequences: false)
-        guard parts.count == groups.count else { return false }
-        for (part, expected) in zip(parts, groups) {
-            guard part.count == expected else { return false }
-            guard part.allSatisfy({ c in
-                (c >= "0" && c <= "9") || (c >= "a" && c <= "f") || (c >= "A" && c <= "F")
-            }) else { return false }
-        }
-        return true
+        SessionIdRule.uuid.validate(s)
     }
 }

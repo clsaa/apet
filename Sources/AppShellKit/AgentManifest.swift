@@ -1,4 +1,5 @@
 import Foundation
+import AgentPetCore   // SessionIdRule 收敛委托所需(M3-C+)
 
 // MARK: - TimestampDialect
 
@@ -60,18 +61,10 @@ public struct AgentManifest: Equatable {
         return template.map { $0 == "{id}" ? sessionId : $0 }
     }
 
-    /// 严格 UUID（8-4-4-4-12 hex，**仅 ASCII**）。
-    /// 评审修复（测试 m9）：`Character.isHexDigit` 接受全角十六进制数字（如"８Ｆ"），改用 ASCII 区间。
+    /// 严格 UUID（收敛至 AgentPetCore.SessionIdRule.uuid，M3-C+ 评审：消除双份实现；
+    /// 全角十六进制拒绝语料（测试 m9）随委托继续生效）。
     static func isValidUUID(_ s: String) -> Bool {
-        let groups = [8, 4, 4, 4, 12]
-        let parts = s.split(separator: "-", omittingEmptySubsequences: false)
-        guard parts.count == groups.count else { return false }
-        for (part, expected) in zip(parts, groups) {
-            guard part.count == expected, part.allSatisfy({ c in
-                (c >= "0" && c <= "9") || (c >= "a" && c <= "f") || (c >= "A" && c <= "F")
-            }) else { return false }
-        }
-        return true
+        SessionIdRule.uuid.validate(s)
     }
 
     // MARK: - 内置 manifest
