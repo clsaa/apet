@@ -200,8 +200,10 @@ final class OpenCodeDBReaderTests: XCTestCase {
         exec(writer, "BEGIN IMMEDIATE;")
         exec(writer, "INSERT INTO session VALUES ('ses_b','p',NULL,'/w','t2','v',2000000,2000000,NULL);")
         defer { exec(writer, "ROLLBACK;"); sqlite3_close_v2(writer) }
-        // WAL 下读者取快照,不被写事务阻塞(评审:opencode 正在跑时轮询不空转)。
-        XCTAssertNotNil(OpenCodeDBReader(dbPath: dbPath).read().rows)
+        // WAL 下读者取快照,不被写事务阻塞(评审:opencode 正在跑时轮询不空转);
+        // 且未提交行不可见(测试评审:脏读防线一并钉死)。
+        let rows = OpenCodeDBReader(dbPath: dbPath).read().rows
+        XCTAssertEqual(rows?.map(\.sessionId), ["ses_a"], "未提交的 ses_b 不可见")
     }
 
     // ── 失败 ≠ 空:三态语义(评审:失败路径必须携带版本信号)──
@@ -217,8 +219,8 @@ final class OpenCodeDBReaderTests: XCTestCase {
                        .ok(rows: [], maxMigrationId: nil),
                        "空库=「装了没跑过」是常态,归 ok([]) 而非 failed(否则每轮永久跳过)")
     }
-    func test_garbageFile_failed() {
-        try! "not a sqlite db".write(toFile: dbPath, atomically: true, encoding: .utf8)
+    func test_garbageFile_failed() throws {
+        try "not a sqlite db".write(toFile: dbPath, atomically: true, encoding: .utf8)
         guard case .failed = OpenCodeDBReader(dbPath: dbPath).read() else {
             return XCTFail("垃圾文件应 failed")
         }

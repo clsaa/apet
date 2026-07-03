@@ -191,7 +191,7 @@ private struct SessionRowCell: View {
                             .background(Color.purple.opacity(0.15))
                             .cornerRadius(4).lineLimit(1)
                             .help(row.agent == "opencode"
-                                  ? "来自 opencode:仅面板可见,无通知(插件增强规划中);状态按内容信号+活动时间推断;30 分钟无活动灰显(会话仍在,活动后恢复),24 小时后移出"
+                                  ? "来自 opencode:仅面板可见,无通知(插件增强规划中);状态按内容信号+活动时间推断;长时间无活动会灰显(会话仍在,活动后恢复),数小时后自动清理"
                                   : "来自 \(row.agent)（状态按活动时间粗略推断）")
                     }
                     // M3-C+ 评审:noJumpHint 行抑制「推断」徽标(语义重叠,agent 徽标 tooltip
@@ -205,9 +205,9 @@ private struct SessionRowCell: View {
                     }
                     if row.noJumpHint {
                         Text("无跳转")
-                            .font(.system(size: 9))
-                            .foregroundStyle(.secondary)
-                            .help("OpenCode 在终端中运行,apet 无法定位窗口;点击查看恢复方式")
+                            .font(.system(size: 10))   // 与相邻徽标字号统一(实现评审)
+                            .foregroundStyle(.tertiary)
+                            .help("该会话在外部终端中运行,apet 无法定位窗口;点击查看恢复方式")
                     }
                     if row.activateOnly {
                         Text(row.needsManualTabHint ? "仅激活·手动切标签" : "仅激活")

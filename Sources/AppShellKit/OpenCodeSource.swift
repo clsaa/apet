@@ -49,7 +49,8 @@ public enum OpenCodeScanner {
         now: Double,
         runningWindow: Double = 120,
         idleWindow: Double = 1800,
-        staleHorizon: Double = 86400
+        staleHorizon: Double = 86400,
+        inFlightStaleWindow: Double = 7200
     ) -> [ScanResult] {
         rows.compactMap { row in
             guard row.lastActivity > 0 else { return nil }   // 0/负值:坏数据,静默排除
@@ -58,7 +59,10 @@ public enum OpenCodeScanner {
             let key = SessionKey(agent: "opencode", root: root, sessionId: row.sessionId)
             let state: ScanState
             if age >= idleWindow {
-                state = .stale
+                // in-flight 豁免(实现评审,用户视角):长工具/长生成期 lastActivity 冻结
+                //(upsert 不刷时间),按 1800 降档会中途灰再复活闪;kill 兜底交给 2h 窗。
+                state = (row.assistantSignal == .inFlight && age < inFlightStaleWindow)
+                    ? .running : .stale
             } else {
                 switch row.assistantSignal {
                 case .inFlight:  state = .running

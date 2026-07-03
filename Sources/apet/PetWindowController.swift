@@ -25,6 +25,8 @@ final class PetWindowController: NSObject {
 
     private var window: NSWindow?
     private var hostingView: NSHostingView<PetView>?
+    /// 防连击叠加阻塞弹窗(实现评审:与 MenuBarController 同款守卫)。
+    private var isShowingTapAlert = false
     private var popover: NSPopover?
     private var currentPresentation: PetPresentation
     private var currentSessions: [Session] = []
@@ -220,7 +222,11 @@ final class PetWindowController: NSObject {
         Task.detached {
             let result = fs.focus(terminal)
             if result == .targetGone || result == .unsupported {
-                await MainActor.run {
+                await MainActor.run { [weak self] in
+                    // 防连击(实现评审 Major:opencode 无 osascript 延迟,连击必现弹窗堆叠)。
+                    guard let self, !self.isShowingTapAlert else { return }
+                    self.isShowingTapAlert = true
+                    defer { self.isShowingTapAlert = false }
                     if isOpenCode {
                         SessionRowActions.showOpenCodeNoJumpAlert(session)
                         return

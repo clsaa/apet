@@ -1035,13 +1035,14 @@ struct PreferencesView: View {
             jsonlStatusRow(for: health.jsonlSource)
 
             // M3-C+(Task 8b):OpenCode 健康行——仅异常态展示(ok/未安装不打扰)。
+            // 样式对齐 hookStatusRow.failed(实现评审:最响的图标配最轻的文字自相矛盾)。
             if let ocMessage = openCodeHealthProvider?().userMessage {
                 HStack(alignment: .top, spacing: 6) {
-                    Image(systemName: "exclamationmark.triangle.fill")
+                    Image(systemName: "exclamationmark.circle")
                         .foregroundStyle(.orange)
                     Text(ocMessage)
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
+                        .font(.subheadline)
+                        .foregroundStyle(.orange)
                         .fixedSize(horizontal: false, vertical: true)
                 }
             }

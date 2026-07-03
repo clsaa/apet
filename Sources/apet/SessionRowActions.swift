@@ -38,10 +38,11 @@ enum SessionRowActions {
         alert.messageText = "OpenCode 在终端中运行"
         alert.informativeText = hasCmd
             ? "apet 无法定位它所在的终端窗口。若该会话的终端还开着,直接切换过去即可;终端已关时,可复制恢复命令粘贴到项目目录的终端里打开该会话。"
-            : "apet 无法定位它所在的终端窗口,且该会话 ID 来自旧版本、无可用恢复命令(可复制会话 ID 自行处理)。"
+            : "apet 无法定位它所在的终端窗口,且该会话 ID 格式无法核实(旧迁移或 SDK 自带),无可用恢复命令(可复制会话 ID 自行处理)。"
         alert.alertStyle = .informational
         alert.addButton(withTitle: hasCmd ? "复制恢复命令" : "复制会话 ID")
-        let cancel = alert.addButton(withTitle: "好")
+        // HIG(实现评审):与动作按钮并排的配对按钮用「取消」而非确认词「好」。
+        let cancel = alert.addButton(withTitle: "取消")
         cancel.keyEquivalent = "\u{1b}"   // Esc 可取消(HIG;NSAlert 不给"好"自动绑 Esc)
         NSApp.activate(ignoringOtherApps: true)   // LSUIElement:弹窗置前(既有惯例)
         guard alert.runModal() == .alertFirstButtonReturn else { return false }

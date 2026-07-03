@@ -205,25 +205,29 @@ final class QoderWorkDBReaderTests: XCTestCase {
         XCTAssertEqual(emitted.count, 2)
     }
 
-    /// start 幂等(源码注释宣称"测试评审 M6"但测试缺席——补上)+ stop 后不再 emit。
-    func test_watcher_startIdempotent_stopSilences() {
+    /// start 幂等 + stop 真断言(实现评审 Major:同 key 差分抑制使旧断言恒真——
+    /// 每 tick 换 chatId 使 emit 单调增,stop 后冻结才是有效断言)。
+    func test_watcher_startIdempotent_stopActuallySilences() {
+        var tick = 0
         var emitted = 0
         let watcher = QoderWorkWatcher(
-            read: { [QoderWorkChatRow(chatId: "c", name: nil, projectPath: nil,
-                                      sessionId: nil, updatedAt: 1000)] },
+            read: {
+                tick += 1
+                return [QoderWorkChatRow(chatId: "c\(tick)", name: nil, projectPath: nil,
+                                         sessionId: nil, updatedAt: 1000)]
+            },
             root: "/r", now: { 1001 }, emit: { _ in emitted += 1 })
         watcher.start(every: 0.05)
         watcher.start(every: 0.05)   // 幂等:不得产生双 timer
-        let exp = expectation(description: "first tick")
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.12) { exp.fulfill() }
-        wait(for: [exp], timeout: 2)
+        let exp = expectation(description: "ticks")
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) { exp.fulfill() }
+        wait(for: [exp], timeout: 5)
         watcher.stop()
         let after = emitted
+        XCTAssertGreaterThanOrEqual(after, 1)
         let exp2 = expectation(description: "silence after stop")
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.12) { exp2.fulfill() }
-        wait(for: [exp2], timeout: 2)
-        // 同 key 同态差分不重复 emit——用 stop 后静默 + 不崩钉行为(计数抓不到双 timer,注释自认)。
-        XCTAssertEqual(emitted, after, "stop 后不得再 emit")
-        XCTAssertGreaterThanOrEqual(emitted, 1)
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.2) { exp2.fulfill() }
+        wait(for: [exp2], timeout: 5)
+        XCTAssertEqual(emitted, after, "stop 后不得再 emit(每 tick 新 key,计数不会自然冻结)")
     }
 }

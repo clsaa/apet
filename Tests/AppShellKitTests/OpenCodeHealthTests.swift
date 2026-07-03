@@ -24,8 +24,8 @@ final class OpenCodeHealthTests: XCTestCase {
             outcome: .ok(rows: [], maxMigrationId: nil),
             dbExists: false, legacyStorageExists: false, configDirExists: true)
         XCTAssertEqual(h, .dbNotFound)
-        XCTAssertNotNil(h.userMessage)
-        XCTAssertTrue(h.userMessage!.contains("XDG"), "提示要点名 GUI 读不到 shell 环境变量的场景")
+        XCTAssertTrue(h.userMessage?.contains("XDG") == true,
+                      "提示要点名 GUI 读不到 shell 环境变量的场景")
     }
 
     func test_legacyStorage_upgradeHint() {

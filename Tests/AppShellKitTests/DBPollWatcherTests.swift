@@ -40,23 +40,30 @@ final class DBPollWatcherTests: XCTestCase {
         XCTAssertEqual(seenNow, 42)
     }
 
-    /// 幂等直测(spec §5:泛化本体三条之一;评审:只靠委托层回归网,QoderWorkWatcher 被删即失防线)。
-    func test_start_idempotent_stopSilences() {
+    /// 幂等直测 + stop 真断言(实现评审 Major:同 key 同态差分抑制使旧断言恒真——
+    /// 每 tick 产生新 key,emit 计数单调增,stop 后冻结才是有效断言;stop 改空函数此测必红)。
+    func test_start_idempotent_stopActuallySilences() {
+        var tick = 0
         var emitted = 0
         let w = DBPollWatcher(
-            scan: { [self] _ in [.observe(state: .running, key: key("s1"), cwd: nil, title: nil)] },
+            scan: { _ in
+                tick += 1
+                return [.observe(state: .running,
+                                 key: SessionKey(agent: "x", root: "/r", sessionId: "s\(tick)"),
+                                 cwd: nil, title: nil)]
+            },
             now: { 0 }, emit: { _ in emitted += 1 })
         w.start(every: 0.05)
-        w.start(every: 0.05)   // 幂等:不得产生双 timer
-        let exp = expectation(description: "first tick")
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.12) { exp.fulfill() }
-        wait(for: [exp], timeout: 2)
+        w.start(every: 0.05)   // 幂等:不得产生双 timer(崩溃/异常由此钉)
+        let exp = expectation(description: "ticks")
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) { exp.fulfill() }
+        wait(for: [exp], timeout: 5)
         w.stop()
         let after = emitted
+        XCTAssertGreaterThanOrEqual(after, 1)
         let exp2 = expectation(description: "silence after stop")
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.12) { exp2.fulfill() }
-        wait(for: [exp2], timeout: 2)
-        XCTAssertEqual(emitted, after, "stop 后不得再 emit")
-        XCTAssertGreaterThanOrEqual(emitted, 1)
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.2) { exp2.fulfill() }
+        wait(for: [exp2], timeout: 5)
+        XCTAssertEqual(emitted, after, "stop 后不得再 emit(每 tick 新 key,计数不可能自然冻结)")
     }
 }

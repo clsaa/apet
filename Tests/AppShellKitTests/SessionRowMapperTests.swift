@@ -252,4 +252,10 @@ final class SessionRowMapperTests: XCTestCase {
                              terminal: TerminalRef(kind: .other, bundleId: "com.qoder.work"))
         XCTAssertFalse(SessionRowMapper.make(qw).noJumpHint, "有 terminal 可激活 App,不显")
     }
+
+    /// dbBackedAgents 集合化判定的隐含行为钉死(测试评审):qoder-work 若丢失 terminal 也显。
+    func test_noJumpHint_qoderWorkWithoutTerminal_true() {
+        let qw = makeSession(agent: "qoder-work")
+        XCTAssertTrue(SessionRowMapper.make(qw).noJumpHint)
+    }
 }

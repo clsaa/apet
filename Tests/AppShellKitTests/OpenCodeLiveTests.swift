@@ -27,6 +27,8 @@ final class OpenCodeLiveTests: XCTestCase {
             // 秒量级哨兵:抓漏换算(≈1.78e12 即毫秒当秒)与方言漂移(评审 tripwire)。
             XCTAssertGreaterThan(row.lastActivity, 1_577_836_800, "2020 之前?换算/方言异常:\(row.sessionId)")
             XCTAssertLessThan(row.lastActivity, now + 86_400, "未来一天开外?\(row.sessionId)")
+            XCTAssertGreaterThan(row.createdAt, 1_577_836_800, "createdAt 换算异常:\(row.sessionId)")
+            XCTAssertLessThan(row.createdAt, now + 86_400, "createdAt 未来:\(row.sessionId)")
             // id 不过白名单只打印不断言(spec §6-6:旧迁移异形 id 合法存在,硬断言会误炸真机门)。
             if !rule.validate(row.sessionId) {
                 print("[live] 异形 id(旧迁移?):\(row.sessionId)——无恢复命令但应正常展示")

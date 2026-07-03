@@ -49,9 +49,9 @@
 
 ### 3.1 AppShellKit:`OpenCodeSource.swift`(新文件)
 
-- **`OpenCodeSessionRow`**(纯数据):`sessionId, directory(空串→nil), title(空串→nil), lastActivity(秒), lastAssistantCompleted(秒?), createdAt(秒)`。Reader 层毫秒→秒换算,Row 内统一 Unix 秒。
+- **`OpenCodeSessionRow`**(纯数据):`sessionId, directory(空串→nil), title(空串→nil), lastActivity(秒), assistantSignal(none/inFlight/completed 三态), createdAt(秒)`。Reader 层毫秒→秒换算,Row 内统一 Unix 秒;信号 SQL 以 `json_valid` 护栏 + CASE 包裹产出 NULL/0/1(坏 JSON 归 none 走窗口兜底,绝不 failed 整轮)。
 - **`OpenCodeScanner`**(纯函数):`scan(rows:root:now:runningWindow:idleWindow:staleHorizon:) -> [ScanResult]`,状态派生**内容信号优先、活动窗口兜底**(约束 11;计划评审 v3:in-flight 结构性判据取代 ε 时间比较):
-  1. `age = now - lastActivity`;`age >= staleHorizon(86400,注入)` → 不进面板;`age >= idleWindow(1800)` → **stale**(灰显,**不移除**——常开 TUI 挂机 30 分钟蒸发违背用户直觉)。**年龄降档先于内容信号**(防完成会话永悬;也是 in-flight 的兜底——进程被 kill 后 completed 永为 NULL,靠年龄降档出场)。
+  1. `age = now - lastActivity`;`age >= staleHorizon(86400,注入)` → 不进面板;`age >= idleWindow(1800)` → **stale**(灰显,**不移除**——常开 TUI 挂机 30 分钟蒸发违背用户直觉)。**年龄降档先于内容信号**(防完成会话永悬)。**例外(实现评审,用户视角)**:`.inFlight` 在 `age < inFlightStaleWindow(7200,注入)` 内豁免 idleWindow 降档仍判 running——单工具/单段生成 >30 分钟时 lastActivity 冻结(upsert 不刷时间),按 1800 降档会中途灰再复活闪;kill 兜底(进程死后 completed 永为 NULL)由 2 小时窗承担。
   2. 活跃窗口内按**最后一条 assistant 消息的信号**(与上游 `getCurrentAssistant` 同构,`ORDER BY seq DESC LIMIT 1`):
      - `inFlight`(`$.time.completed` IS NULL)→ **running**。⚠️ 这是长操作的唯一可靠信号:`part` 的 upsert **只更新 data、time_created 冻结**(projector.ts:319-324),长工具/长文本期间整条活动时间链停摆,任何窗口判据都会误降——in-flight 布尔不受影响。
      - `completed`(非 NULL,任意类型——ISO 串也算完成)→ **waitingStop**(本轮真实完成,不等窗口)。

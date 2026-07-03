@@ -14,12 +14,12 @@ macOS 原生 App（Swift / SwiftUI / AppKit，背景常驻 `LSUIElement`，无 D
 - 🎯 **点通知/点列表跳回终端**：iTerm2 精确到 window+tab；Terminal.app 窗口级（tty）；Warp/Ghostty 激活应用；VSCode/Cursor 激活+提示手动切标签；OpenCode 无跳转（TUI 宿主终端未知），点击弹窗内一键复制恢复命令。精确跳转未命中自动兜底激活 App。
 - 🗂 **会话管理**：面板搜索（名字/目录/ID）、「⏳N 个等你」置顶高亮、收藏置顶、重命名、相对时间、复制 sessionID/恢复命令、右键**本地摘要**（一句话概括最近进展，零网络零成本）。
 - 🎨 **自定义**：5 种状态圆点颜色取色器、首选项四分页（外观/通知/会话/通用）、**改动即时生效**、开机自启。
-- 🤖 **多 Agent**：Claude Code（hook 实时 + jsonl 兜底）、**Qoder CLI**（`~/.qoder`，实测接入）、**QoderWork**（SQLite agents.db，实测接入）、**OpenCode**（opencode.db 只读轮询，内容信号优先状态；面板可见/复制恢复命令，无通知无跳转——插件增强规划中）；面板 agent 徽标区分来源。
+- 🤖 **多 Agent**：Claude Code（hook 实时 + jsonl 兜底）、**Qoder CLI**（`~/.qoder`，实测接入）、**QoderWork**（SQLite agents.db，实测接入）、**OpenCode**（opencode.db 只读轮询，内容信号优先状态；面板可见/复制恢复命令，无通知无跳转——插件增强规划中；**真机验证待过**）；面板 agent 徽标区分来源。
 - 🔌 **公开插件契约**：`AgentManifest`（roots/时间方言/resume argv 模板/状态规则），第三方可自助接入（JSON Schema 在 M4 交付）。
 
 ## 状态
 
-✅ **M1 / M1.5 / M2 / M3 完成**：**689 个单元测试全绿**，多轮多视角（架构/产品/AI/用户/测试/开源）对抗评审 + 修复。零配置开箱即用：不装 hook 也能靠只读扫描 `~/.claude/projects/**.jsonl` 看到所有会话（含当前在跑的）；hook 为可选增强（精确跳转 + 通知），安装前预览确认、自动备份、一键卸载。
+✅ **M1 / M1.5 / M2 / M3 完成**：**708 个单元测试全绿**，多轮多视角（架构/产品/AI/用户/测试/开源）对抗评审 + 修复。零配置开箱即用：不装 hook 也能靠只读扫描 `~/.claude/projects/**.jsonl` 看到所有会话（含当前在跑的）；hook 为可选增强（精确跳转 + 通知），安装前预览确认、自动备份、一键卸载。
 
 ## 架构
 
@@ -49,7 +49,7 @@ Resources/apet-emit-event.sh  ← Claude hook 调用，把事件写进 events.nd
 ## 构建 / 运行
 
 ```bash
-swift test                       # 689 tests 全绿
+swift test                       # 708 tests 全绿
 bash scripts/package-app.sh      # 产出 ./AgentPet.app（unsigned，本地可运行）
 open AgentPet.app                # 菜单栏彩色计数 + 桌面宠物 + 首启精简引导
 ```
@@ -83,7 +83,7 @@ open AgentPet.app                # 菜单栏彩色计数 + 桌面宠物 + 首启
 apet 以**只读**方式（`SQLITE_OPEN_READONLY`，绝不写入）读取 OpenCode 的本地数据库
 （`~/.local/share/opencode/opencode*.db`）。该数据库是 OpenCode 的内部实现，上游无兼容性承诺：
 
-- 已验证版本：**v1.17.13**（migration ≤ `20260622202450_simplify_session_input`，2026-07-03）。
+- 已核对上游源码版本：**v1.17.13**（migration ≤ `20260622202450_simplify_session_input`，2026-07-03；**源码级核对,真机端到端验证待过**——见路线图,过门后删本注）。
 - OpenCode 升级导致 schema 变化时，apet 可能暂时看不到其会话——「首选项 → 会话 → 配置健康」会提示
   「schema 新于已验证版本」；请升级 apet 或提 [issue](https://github.com/clsaa/apet/issues)。
 - 旧版 OpenCode（JSON 文件存储，未迁 SQLite）不支持，请升级 OpenCode。
