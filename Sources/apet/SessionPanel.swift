@@ -220,10 +220,12 @@ private struct SessionRowCell: View {
                     }
                     Spacer(minLength: 4)
                     if !row.relativeText.isEmpty {
+                        // 固定宽度右对齐列:跨行对齐时间 + 硬防换行(M3-C+ 修复)。
                         Text(row.relativeText)
                             .font(.system(size: 10))
                             .foregroundStyle(.tertiary)
-                            .lineLimit(1).fixedSize()
+                            .lineLimit(1)
+                            .frame(width: 58, alignment: .trailing)
                     }
                 }
 
