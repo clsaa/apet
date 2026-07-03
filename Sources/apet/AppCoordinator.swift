@@ -63,7 +63,7 @@ final class AppCoordinator {
             legacyStorageExists: FileManager.default.fileExists(
                 atPath: (root as NSString).appendingPathComponent("storage/session")),
             configDirExists: FileManager.default.fileExists(
-                atPath: (NSHomeDirectory() as NSString).appendingPathComponent(".config/opencode")))
+                atPath: OpenCodeDBReader.defaultConfigDir(env: ProcessInfo.processInfo.environment)))
         guard health != openCodeHealth else { return }
         openCodeHealth = health
         if let msg = health.userMessage { appendToLog("[warn] \(msg)\n") }

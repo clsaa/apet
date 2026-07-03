@@ -258,6 +258,39 @@ final class OpenCodeDBReaderTests: XCTestCase {
         XCTAssertEqual(row.assistantSignal, AssistantSignal.none, "降级:无消息信号,回窗口兜底")
     }
 
+    /// 产品评审 F1:session 表被上游改名/删除 ∧ migration 新于已验证 → 按 failed 携带版本信号
+    /// (否则面板静默清空、健康区全绿——恰是 spec 的最差体验)。空库(版本未超)仍归 ok([])。
+    func test_sessionTableMissing_newerMigration_failedWithVersion() {
+        var db: OpaquePointer?
+        XCTAssertEqual(sqlite3_open(dbPath, &db), SQLITE_OK)
+        exec(db, "CREATE TABLE migration (id text PRIMARY KEY, time_completed integer NOT NULL);")
+        exec(db, "INSERT INTO migration VALUES ('20990101000000_renamed_session', 1);")
+        sqlite3_close_v2(db)
+        XCTAssertEqual(OpenCodeDBReader(dbPath: dbPath).read(),
+                       .failed(maxMigrationId: "20990101000000_renamed_session"))
+    }
+    func test_sessionTableMissing_oldMigration_okEmpty() {
+        var db: OpaquePointer?
+        XCTAssertEqual(sqlite3_open(dbPath, &db), SQLITE_OK)
+        exec(db, "CREATE TABLE migration (id text PRIMARY KEY, time_completed integer NOT NULL);")
+        exec(db, "INSERT INTO migration VALUES ('20260127222353_familiar_lady_ursula', 1);")
+        sqlite3_close_v2(db)
+        XCTAssertEqual(OpenCodeDBReader(dbPath: dbPath).read(),
+                       .ok(rows: [], maxMigrationId: "20260127222353_familiar_lady_ursula"))
+    }
+
+    /// configDir 解析(用户/架构评审:XDG_CONFIG_HOME 也自定义的机器不该失明)。
+    func test_defaultConfigDir_xdgLookup() {
+        XCTAssertEqual(OpenCodeDBReader.defaultConfigDir(env: [:], launchctlGetenv: { _ in nil }),
+                       NSHomeDirectory() + "/.config/opencode")
+        XCTAssertEqual(OpenCodeDBReader.defaultConfigDir(env: ["XDG_CONFIG_HOME": "/c"],
+                                                         launchctlGetenv: { _ in nil }),
+                       "/c/opencode")
+        XCTAssertEqual(OpenCodeDBReader.defaultConfigDir(env: [:],
+                                                         launchctlGetenv: { $0 == "XDG_CONFIG_HOME" ? "/lc" : nil }),
+                       "/lc/opencode")
+    }
+
     // ── 过滤 ──
     func test_filters_parentAndArchived() {
         makeFixture { db in

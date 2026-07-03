@@ -158,6 +158,23 @@ public struct OpenCodeDBReader {
         return dir + "/opencode.db"
     }
 
+    /// OpenCode 配置目录解析(健康探测用;用户/架构评审:XDG_CONFIG_HOME 也自定义的机器
+    /// 不该被判 notInstalled 静默失明)。env → launchctl → 默认 ~/.config。
+    public static func defaultConfigDir(
+        env: [String: String],
+        launchctlGetenv: ((String) -> String?)? = nil
+    ) -> String {
+        let getenv = launchctlGetenv ?? Self.realLaunchctlGetenv
+        func accept(_ v: String?) -> String? {
+            guard let v, !v.isEmpty, v.hasPrefix("/") else { return nil }
+            return v
+        }
+        let configHome = accept(env["XDG_CONFIG_HOME"])
+            ?? accept(getenv("XDG_CONFIG_HOME"))
+            ?? NSHomeDirectory() + "/.config"
+        return configHome + "/opencode"
+    }
+
     /// GUI 进程(launchd 拉起)env 兜底:`launchctl getenv`。只在启动路径解析时调用一次,非轮询热路径。
     /// 实现评审:走已加固的 ProcessRunner 缝(超时→SIGTERM→SIGKILL、异步抽干防 pipe 死锁)——
     /// launchd 卡死时 2 秒超时兜底,不再无限挂起启动主线程;也消灭仓内两套 Process 用法。
@@ -196,6 +213,12 @@ public struct OpenCodeDBReader {
         // 版本信号永远带不出来——恰是唯一需要它的场景)。migration 表结构 5 个月未变,最稳。
         let maxMigration: String? = tables.contains("migration") ? maxMigrationId(db) : nil
         guard tables.contains("session") else {
+            // session 表缺失:空库常态归 ok([]);但 migration 新于已验证 → 上游改名/重构了表,
+            // 按 failed 携带版本信号(产品评审 F1:否则面板静默清空、健康区全绿——
+            // 恰是 spec 定义的最差体验「会话昨天还在、今天消失且无解释」)。
+            if let maxMigration, Self.isNewerThanVerified(maxMigration) {
+                return .failed(maxMigrationId: maxMigration)
+            }
             return .ok(rows: [], maxMigrationId: maxMigration)
         }
         let hasPart = tables.contains("part")
@@ -321,7 +344,7 @@ public enum OpenCodeHealth: Equatable {
         case .ok, .notInstalled:
             return nil
         case .dbNotFound:
-            return "OpenCode:找到配置但未找到数据库——若你在 shell 里设置了 XDG_DATA_HOME,GUI 应用读不到它;可用 `launchctl setenv XDG_DATA_HOME <路径>` 后重启 apet"
+            return "OpenCode:找到配置但未找到数据库——若你在 shell 里设置了 XDG_DATA_HOME,GUI 应用读不到它,可用 `launchctl setenv XDG_DATA_HOME <路径>` 后重启 apet;若 OpenCode 已卸载,删除 ~/.config/opencode 可消除本提示"
         case .legacyStorage:
             return "OpenCode:检测到旧版 JSON 存储(未迁 SQLite),apet 不支持——请升级 OpenCode"
         case .readFailed:
