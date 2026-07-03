@@ -1,10 +1,10 @@
-# 会话面板 UX 升级 实现计划(内联摘要 / 悬停收藏 / Tab / 自定义分组)
+# 会话面板 UX 升级 实现计划(悬停收藏 / Tab / 自定义分组)
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** 会话面板:目录下内联本地摘要、悬停收藏按钮、顶部 Tab 取代分区、可多属的自定义分组。
+**Goal:** 会话面板:悬停收藏按钮、顶部 Tab 取代分区、可多属的自定义分组。
 
-**Architecture:** 纯逻辑(摘要刷新决策 / tab 过滤 / 分组成员 / 组名校验 / 平铺组织)入 AgentPetCore/AppShellKit 单测;摘要 I/O 走既有缝后台算并缓存进 `SessionMeta.cachedSummary/summaryAnchor`(预留字段);GUI(SwiftUI 行/tab 栏/右键)薄胶水。分四里程碑 A→B→C→D 独立交付。
+**Architecture:** 纯逻辑(tab 过滤 / 分组成员 / 组名校验 / 平铺组织)入 AgentPetCore/AppShellKit 单测;GUI(SwiftUI 行/tab 栏/右键)薄胶水。分三里程碑 A→B→C 独立交付(实测决策:内联启发式摘要已砍,标题已是 Claude ai-title 好摘要)。
 
 **Tech Stack:** Swift 5.9(SwiftPM 三 target)、XCTest、SwiftUI/AppKit。
 
@@ -15,7 +15,6 @@
 - 零第三方依赖;AgentPetCore 只用 Foundation。
 - 禁 `Date()`/`Date.now`——`now: Double` 注入(apet 组织层既有 `Date().timeIntervalSince1970` 闭包除外)。
 - 归一键 `SessionMetaMerger.metaKey(key) = "agent::root::sessionId"`。
-- 摘要 I/O 绝不在 main 同步/映射内做;走可注入闭包缝,后台队列。
 - 测试是规范:失败改实现不改测试;提交前 `swift test` 全绿(当前基线 716)。
 - 中文 commit;小步一交付物一 commit;分支 `feature/panel-ux`(不在 main 开发)。
 - 面板 320pt 宽;新增文本标签一律 `.lineLimit(1)` + `.fixedSize()`(否则 CJK 竖排乱码——本轮已踩)。
@@ -24,19 +23,14 @@
 
 | 文件 | 责任 | 里程碑 |
 |---|---|---|
-| `Sources/AgentPetCore/Store/SessionMeta.swift`(改) | 加 `groups: [String]`;merge/apply 带上 | D |
-| `Sources/AgentPetCore/Store/SessionMeta.swift`(改) | `SessionMetaMerger.apply` 镜像 groups/summary 进 Session | B/D |
-| `Sources/AgentPetCore/Model/SessionState.swift`(改) | `Session` 加 `groups: [String]` + `summary: String?` | B/D |
-| `Sources/AgentPetCore/Summarize/SummaryPlanner.swift`(建) | 纯函数:哪些会话需重算摘要 | B |
-| `Sources/AgentPetCore/Session/SessionTab.swift`(建) | `SessionTab` 枚举 + `SessionTabFilter` 纯过滤 | C/D |
-| `Sources/AgentPetCore/Session/GroupMembership.swift`(建) | 分组增删/组名校验 纯函数 | D |
-| `Sources/AppShellKit/SessionListOrganizer.swift`(改) | `organizeFlat` 平铺出口 | C |
-| `Sources/AppShellKit/SummaryRefresher.swift`(建) | I/O 缝:对 needsRefresh 会话后台算摘要写回 meta | B |
-| `Sources/AppShellKit/AppConfig.swift`(改) | 加 `sessionGroups: [String]` + `selectedTab: String` | C/D |
-| `Sources/AppShellKit/SessionRowModel.swift`(改) | `SessionRowModel` 加 `summary: String?`;mapper 注入 | B |
-| `Sources/apet/SessionPanel.swift`(改) | 摘要行 / 悬停☆ / tab 栏 / 分组右键 | A/B/C/D |
-| `Sources/apet/AppCoordinator.swift`(改) | applyMetas 带 groups/summary;SummaryRefresher 接线;tab/组持久化 | B/C/D |
-| `Sources/apet/SessionRowActions.swift`(改) | 「加入分组▸」菜单 / 建组删组 | D |
+| `Sources/AgentPetCore/Model/SessionState.swift`(改) | `Session` 加 `groups: [String]`;`SessionMetaMerger.apply` 镜像 groups | B/C |
+| `Sources/AgentPetCore/Session/SessionTab.swift`(建) | `SessionTab` 枚举 + `SessionTabFilter` 纯过滤 | B/C |
+| `Sources/AgentPetCore/Session/GroupMembership.swift`(建) | 分组增删/组名校验 纯函数 | C |
+| `Sources/AppShellKit/SessionListOrganizer.swift`(改) | `organizeFlat` 平铺出口 | B |
+| `Sources/AppShellKit/AppConfig.swift`(改) | 加 `sessionGroups: [String]` + `selectedTab: String` | B/C |
+| `Sources/apet/SessionPanel.swift`(改) | 悬停☆ / tab 栏 / 分组右键 | A/B/C |
+| `Sources/apet/AppCoordinator.swift`(改) | applyMetas 带 groups;tab/组持久化 | B/C |
+| `Sources/apet/SessionRowActions.swift`(改) | 「加入分组▸」菜单 / 建组删组 | C |
 
 ---
 
@@ -93,340 +87,9 @@ git commit -m "feat(m3d-a): 行尾悬停收藏☆按钮,收藏视觉统一(移�
 
 ---
 
-# 里程碑 B:内联本地摘要
+# 里程碑 B:Tab 分流(取代分区)
 
-### Task B1: Session 加 summary 字段;mapper 注入
-
-**Files:**
-- Modify: `Sources/AgentPetCore/Model/SessionState.swift`(`Session` 加 `summary: String?`)
-- Modify: `Sources/AppShellKit/SessionRowModel.swift`(`SessionRowModel` 加 `summary`;`make` 注入)
-- Test: `Tests/AppShellKitTests/SessionRowMapperTests.swift`(追加)
-
-**Interfaces:**
-- Produces: `Session.summary: String?`、`SessionRowModel.summary: String?`
-
-- [ ] **Step 1: 写失败测试**(追加到 SessionRowMapperTests)
-
-```swift
-    // M3-D-B:Session.summary 透传进行模型。
-    func test_summary_passthrough() {
-        var s = makeSession()
-        s.summary = "指令：修 bug · 最近：完成"
-        XCTAssertEqual(SessionRowMapper.make(s).summary, "指令：修 bug · 最近：完成")
-    }
-    func test_summary_nilByDefault() {
-        XCTAssertNil(SessionRowMapper.make(makeSession()).summary)
-    }
-```
-
-- [ ] **Step 2: 跑测试确认失败**
-Run: `swift test --filter SessionRowMapperTests 2>&1 | grep -E "error:" | head -2`
-Expected: `value of type 'Session' has no member 'summary'`
-
-- [ ] **Step 3: 实现**
-
-`SessionState.swift` `Session` 结构体加存储属性(放 favorite/customName 旁,默认 nil):
-```swift
-    /// 面板内联本地摘要(M3-D-B;由 SessionMetaMerger 从 meta 镜像,nil=不显摘要行)。
-    public var summary: String?
-```
-在 `Session` 的 memberwise `init` 里加 `summary: String? = nil` 参数并赋值(放末位保既有构造点不变)。
-
-`SessionRowModel.swift`:结构体加 `public let summary: String?`;init 加 `summary: String? = nil`(放末位)并赋值;`make` 的 return 加 `summary: session.summary`。
-
-- [ ] **Step 4: 跑测试** → PASS;`swift test` 全绿。
-
-- [ ] **Step 5: 提交**
-```bash
-git add Sources/AgentPetCore/Model/SessionState.swift Sources/AppShellKit/SessionRowModel.swift Tests/AppShellKitTests/SessionRowMapperTests.swift
-git commit -m "feat(m3d-b): Session/SessionRowModel 加 summary 字段"
-```
-
-### Task B2: SummaryPlanner 纯函数(哪些需重算)
-
-**Files:**
-- Create: `Sources/AgentPetCore/Summarize/SummaryPlanner.swift`
-- Test: `Tests/AgentPetCoreTests/SummaryPlannerTests.swift`(新)
-
-**Interfaces:**
-- Produces: `SummaryPlanner.needsRefresh(agent: String, lastSeq: Int, cachedAnchor: Int?, hasTranscript: Bool) -> Bool`
-
-- [ ] **Step 1: 写失败测试**
-
-```swift
-import XCTest
-@testable import AgentPetCore
-
-final class SummaryPlannerTests: XCTestCase {
-    func test_transcriptSource_anchorStale_needsRefresh() {
-        XCTAssertTrue(SummaryPlanner.needsRefresh(agent: "claude-code", lastSeq: 5, cachedAnchor: 3, hasTranscript: true))
-    }
-    func test_anchorMatches_noRefresh() {
-        XCTAssertFalse(SummaryPlanner.needsRefresh(agent: "claude-code", lastSeq: 5, cachedAnchor: 5, hasTranscript: true))
-    }
-    func test_neverSummarized_needsRefresh() {
-        XCTAssertTrue(SummaryPlanner.needsRefresh(agent: "claude-code", lastSeq: 1, cachedAnchor: nil, hasTranscript: true))
-    }
-    func test_noTranscriptSource_neverRefresh() {
-        // OpenCode/QoderWork 无 jsonl 转录 → 不做本地摘要(spec §4)。
-        XCTAssertFalse(SummaryPlanner.needsRefresh(agent: "opencode", lastSeq: 5, cachedAnchor: nil, hasTranscript: false))
-        XCTAssertFalse(SummaryPlanner.needsRefresh(agent: "qoder-work", lastSeq: 5, cachedAnchor: nil, hasTranscript: false))
-    }
-}
-```
-
-- [ ] **Step 2: 跑测试确认失败** → `cannot find 'SummaryPlanner'`
-
-- [ ] **Step 3: 实现**
-
-```swift
-import Foundation
-
-/// 纯函数:判定某会话是否需要(重新)计算本地摘要。
-/// 规则:有转录能力的源 且 缓存锚(上次算摘要时的 lastSeq)与当前 lastSeq 不一致 → 需重算。
-/// 无转录源(OpenCode/QoderWork 等 DB 源)一律不做本地摘要(spec §4)。
-public enum SummaryPlanner {
-    public static func needsRefresh(agent: String, lastSeq: Int, cachedAnchor: Int?, hasTranscript: Bool) -> Bool {
-        guard hasTranscript else { return false }
-        return cachedAnchor != lastSeq
-    }
-}
-```
-
-- [ ] **Step 4: 跑测试** → PASS
-
-- [ ] **Step 5: 提交**
-```bash
-git add Sources/AgentPetCore/Summarize/SummaryPlanner.swift Tests/AgentPetCoreTests/SummaryPlannerTests.swift
-git commit -m "feat(m3d-b): SummaryPlanner 纯函数——按 lastSeq 锚失效判定,DB 源跳过"
-```
-
-### Task B3: apply 镜像 summary 进 Session
-
-**Files:**
-- Modify: `Sources/AgentPetCore/Store/SessionMeta.swift`(`SessionMetaMerger.apply`)
-- Test: `Tests/AgentPetCoreTests/`(找现有 SessionMeta/Merger 测试追加;若无则新建 `SessionMetaMergerTests.swift`)
-
-**Interfaces:**
-- Consumes: `SessionMeta.cachedSummary/summaryAnchor`、`Session.lastSeq`、`Session.summary`
-- Produces: `apply` 在 `meta.summaryAnchor == session.lastSeq` 时把 `cachedSummary` 写进 `session.summary`
-
-- [ ] **Step 1: 写失败测试**(先 `grep -rln "SessionMetaMerger.apply" Tests/` 定位现有文件)
-
-```swift
-    func test_apply_mirrorsSummary_whenAnchorFresh() {
-        let s = makeSession(lastSeq: 7)   // helper 需支持 lastSeq;若无则直接构造 Session
-        let meta = SessionMeta(cachedSummary: "指令：X · 最近：Y", summaryAnchor: 7)
-        XCTAssertEqual(SessionMetaMerger.apply(into: s, meta: meta).summary, "指令：X · 最近：Y")
-    }
-    func test_apply_dropsSummary_whenAnchorStale() {
-        let s = makeSession(lastSeq: 8)
-        let meta = SessionMeta(cachedSummary: "旧摘要", summaryAnchor: 7)
-        XCTAssertNil(SessionMetaMerger.apply(into: s, meta: meta).summary, "锚过期不显旧摘要")
-    }
-```
-(若无 makeSession helper,用 `Session(key:..., lastSeq: 7, ...)` 直接构造,参照 SessionRowMapperTests 的构造式。)
-
-- [ ] **Step 2: 跑测试确认失败**
-
-- [ ] **Step 3: 实现**(`SessionMetaMerger.apply` 末尾、`return s` 前加)
-
-```swift
-        // M3-D-B:锚(summaryAnchor)与当前 lastSeq 一致才镜像缓存摘要,否则视为过期不显。
-        if let cached = meta.cachedSummary, meta.summaryAnchor == session.lastSeq {
-            s.summary = cached
-        }
-```
-
-- [ ] **Step 4: 跑测试** → PASS;全量绿。
-
-- [ ] **Step 5: 提交**
-```bash
-git add Sources/AgentPetCore/Store/SessionMeta.swift Tests/AgentPetCoreTests/
-git commit -m "feat(m3d-b): apply 按锚镜像缓存摘要进 Session.summary(过期不显)"
-```
-
-### Task B4: SummaryRefresher(I/O 缝,后台算写回 meta)
-
-**Files:**
-- Create: `Sources/AppShellKit/SummaryRefresher.swift`
-- Test: `Tests/AppShellKitTests/SummaryRefresherTests.swift`(新)
-
-**Interfaces:**
-- Consumes: `SummaryPlanner`、`LocalSummarizer`、`ConversationTailParser`、`AgentManifest.dbBackedAgents`
-- Produces: `SummaryRefresher.refresh(sessions:metas:locate:readTail:now:) -> [String: SessionMeta]`
-  - `locate: (SessionKey) -> String?`(转录路径,nil=无);`readTail: (String) -> [String]`(尾部行)
-  - 返回**更新后的 metas**(只改需重算会话的 cachedSummary/summaryAnchor);纯函数(I/O 由注入闭包承担,可 mock)
-
-- [ ] **Step 1: 写失败测试**
-
-```swift
-import XCTest
-@testable import AppShellKit
-import AgentPetCore
-
-final class SummaryRefresherTests: XCTestCase {
-    private func sess(_ agent: String, _ id: String, seq: Int) -> Session {
-        Session(key: SessionKey(agent: agent, root: "/r", sessionId: id),
-                state: .running, cwd: nil, title: nil, terminal: nil,
-                lastSeq: seq, lastActiveAt: 1000, acknowledged: false)
-    }
-    private let userLine = #"{"type":"user","message":{"content":"修登录 bug"}}"#
-    private let asstLine = #"{"type":"assistant","message":{"content":[{"type":"text","text":"完成"}],"stop_reason":"end_turn"}}"#
-
-    func test_computesSummary_forTranscriptSource_whenStale() {
-        let s = sess("claude-code", "a", seq: 3)
-        let out = SummaryRefresher.refresh(
-            sessions: [s], metas: [:],
-            locate: { _ in "/fake.jsonl" },
-            readTail: { _ in [self.userLine, self.asstLine] })
-        let m = out[SessionMetaMerger.metaKey(s.key)]
-        XCTAssertEqual(m?.summaryAnchor, 3)
-        XCTAssertTrue(m?.cachedSummary?.contains("修登录 bug") == true, "\(String(describing: m?.cachedSummary))")
-    }
-    func test_skips_whenAnchorFresh() {
-        let s = sess("claude-code", "a", seq: 3)
-        let metas = [SessionMetaMerger.metaKey(s.key): SessionMeta(cachedSummary: "旧", summaryAnchor: 3)]
-        var readCalled = false
-        let out = SummaryRefresher.refresh(sessions: [s], metas: metas,
-            locate: { _ in "/x" }, readTail: { _ in readCalled = true; return [] })
-        XCTAssertFalse(readCalled, "锚新鲜不该读文件")
-        XCTAssertEqual(out[SessionMetaMerger.metaKey(s.key)]?.cachedSummary, "旧")
-    }
-    func test_skips_dbBackedSource() {
-        let s = sess("opencode", "a", seq: 3)
-        var locateCalled = false
-        let out = SummaryRefresher.refresh(sessions: [s], metas: [:],
-            locate: { _ in locateCalled = true; return "/x" }, readTail: { _ in [] })
-        XCTAssertFalse(locateCalled, "DB 源不定位转录")
-        XCTAssertNil(out[SessionMetaMerger.metaKey(s.key)]?.cachedSummary)
-    }
-    func test_noTranscriptFile_marksAnchor_noSummary() {
-        // 有转录能力的源但文件找不到(如 hook-only 会话):记锚避免每轮重试,cachedSummary=nil。
-        let s = sess("claude-code", "a", seq: 3)
-        let out = SummaryRefresher.refresh(sessions: [s], metas: [:],
-            locate: { _ in nil }, readTail: { _ in [] })
-        let m = out[SessionMetaMerger.metaKey(s.key)]
-        XCTAssertEqual(m?.summaryAnchor, 3)
-        XCTAssertNil(m?.cachedSummary)
-    }
-}
-```
-
-- [ ] **Step 2: 跑测试确认失败** → `cannot find 'SummaryRefresher'`
-
-- [ ] **Step 3: 实现**
-
-```swift
-import Foundation
-import AgentPetCore
-
-/// 会话本地摘要刷新(I/O 缝可注入,纯粹靠闭包做 I/O 便于单测)。
-/// 对需重算(SummaryPlanner)的会话:定位转录 → 读尾部 → 解析 → LocalSummarizer,
-/// 写回 meta.cachedSummary/summaryAnchor;返回更新后的整个 metas map(未变的原样)。
-/// 找不到转录文件也记锚(避免每轮重试),cachedSummary 置 nil。
-public enum SummaryRefresher {
-    public static func refresh(
-        sessions: [Session],
-        metas: [String: SessionMeta],
-        locate: (SessionKey) -> String?,
-        readTail: (String) -> [String]
-    ) -> [String: SessionMeta] {
-        var out = metas
-        for s in sessions {
-            let hasTranscript = !AgentManifest.dbBackedAgents.contains(s.key.agent)
-            let mk = SessionMetaMerger.metaKey(s.key)
-            let anchor = out[mk]?.summaryAnchor
-            guard SummaryPlanner.needsRefresh(agent: s.key.agent, lastSeq: s.lastSeq,
-                                              cachedAnchor: anchor, hasTranscript: hasTranscript) else { continue }
-            var meta = out[mk] ?? SessionMeta()
-            if let path = locate(s.key) {
-                let turns = ConversationTailParser.turns(lines: readTail(path))
-                meta.cachedSummary = turns.isEmpty ? nil : LocalSummarizer.summarize(turns: turns)
-            } else {
-                meta.cachedSummary = nil
-            }
-            meta.summaryAnchor = s.lastSeq
-            out[mk] = meta
-        }
-        return out
-    }
-}
-```
-
-- [ ] **Step 4: 跑测试** → PASS;全量绿。
-
-- [ ] **Step 5: 提交**
-```bash
-git add Sources/AppShellKit/SummaryRefresher.swift Tests/AppShellKitTests/SummaryRefresherTests.swift
-git commit -m "feat(m3d-b): SummaryRefresher——needsRefresh 会话后台算本地摘要写回 meta(I/O 缝可测)"
-```
-
-### Task B5: AppCoordinator 接线 + 面板摘要行
-
-**Files:**
-- Modify: `Sources/apet/AppCoordinator.swift`(change handler 里调 SummaryRefresher,后台队列;applyMetas 已经过 apply 自动带 summary)
-- Modify: `Sources/apet/SessionPanel.swift`(目录下方渲染摘要行)
-
-**Interfaces:**
-- Consumes: `SummaryRefresher.refresh`、`SessionTranscriptLocator.find`、`TailLineReader.lastLines`、`SessionRowModel.summary`
-
-- [ ] **Step 1: AppCoordinator 摘要刷新接线**
-
-在 change handler(store 变更 → applyMetas 之前)加后台刷新:定位并读尾部走既有 `SessionTranscriptLocator.find` + `TailLineReader.lastLines(path:maxLines:100,maxBytes:524_288)`;`.ok(lines)` 取 lines 否则 `[]`。刷新在**后台队列**跑,完成回主线程写 `self.sessionMetas`、`sessionMetaStore.save`、触发面板刷新。示意:
-```swift
-        // M3-D-B:本地摘要后台刷新(needsRefresh 会话才算,零网络零成本)。
-        let snapshot = store.activeSessions()
-        let metasNow = self.sessionMetas
-        DispatchQueue.global(qos: .utility).async {
-            let updated = SummaryRefresher.refresh(
-                sessions: snapshot, metas: metasNow,
-                locate: { SessionTranscriptLocator.find(root: $0.root, sessionId: $0.sessionId) },
-                readTail: { path in
-                    if case .ok(let lines) = TailLineReader.lastLines(path: path, maxLines: 100, maxBytes: 524_288) {
-                        return lines
-                    }
-                    return []
-                })
-            DispatchQueue.main.async { [weak self] in
-                guard let self, updated != self.sessionMetas else { return }
-                self.sessionMetas = updated
-                try? self.sessionMetaStore.save(updated)
-                self.refreshPanels()   // 用既有刷新路径(applyMetas → menuBar/petWindow update)
-            }
-        }
-```
-(`refreshPanels()` 用现场既有的刷新方法名;若无独立方法,复用 reap timer 里那段 `applyMetas(store.activeSessions())` → `menuBar?.update` / `petWindow?.update`。放进一个私有方法便于调用。)
-
-- [ ] **Step 2: 面板摘要行**
-
-`SessionPanel.swift` `SessionRowCell` 的 VStack 里,`subtitle`(目录)之后加:
-```swift
-                if let summary = row.summary, !summary.isEmpty {
-                    Text(summary)
-                        .font(.system(size: 10))
-                        .foregroundStyle(.tertiary)
-                        .lineLimit(1)
-                        .truncationMode(.tail)
-                }
-```
-
-- [ ] **Step 3: 编译 + 全量 + 冒烟**
-
-Run: `swift build 2>&1 | tail -1` / `swift test 2>&1 | grep -E "tests, with" | tail -1`(全绿)
-冒烟:重启 App,有转录的 Claude 会话目录下出现「指令：… · 最近：…」;OpenCode 会话无摘要行;新提问后摘要更新。
-
-- [ ] **Step 4: 提交**
-```bash
-git add Sources/apet/AppCoordinator.swift Sources/apet/SessionPanel.swift
-git commit -m "feat(m3d-b): 面板目录下内联本地摘要——后台刷新写回缓存,按 seq 失效"
-```
-
----
-
-# 里程碑 C:Tab 分流(取代分区)
-
-### Task C1: SessionTab + SessionTabFilter 纯过滤
+### Task B1: SessionTab + SessionTabFilter 纯过滤
 
 **Files:**
 - Create: `Sources/AgentPetCore/Session/SessionTab.swift`
@@ -534,17 +197,17 @@ public enum SessionTabFilter {
 ```
 
 - [ ] **Step 4: 跑测试** → PASS
-     (注:`Session.groups` 由 Task D1 加;若 C 先于 D 做,先在 SessionState 加空 `groups: [String] = []`——见 Task C1a。)
+     (注:`Session.groups` 由 Task D1 加;若 C 先于 D 做,先在 SessionState 加空 `groups: [String] = []`——见 Task B1a。)
 
-- [ ] **Step 4a(前置)**:若 `Session` 尚无 `groups`,先在 `SessionState.swift` 加 `public var groups: [String] = []`(memberwise init 末位加 `groups: [String] = []`),使本任务编译。此改与 Task D1 合流,提前做无害。
+- [ ] **Step 4a(前置)**:在 `SessionState.swift` 给 `Session` 加 `public var groups: [String] = []`(memberwise init 末位加 `groups: [String] = []`),使本任务编译。此改与 Task C1(分组)合流,提前做无害。
 
 - [ ] **Step 5: 提交**
 ```bash
 git add Sources/AgentPetCore/Session/SessionTab.swift Sources/AgentPetCore/Model/SessionState.swift Tests/AgentPetCoreTests/SessionTabFilterTests.swift
-git commit -m "feat(m3d-c): SessionTab 枚举 + SessionTabFilter 纯过滤 + 编码往返"
+git commit -m "feat(m3d-b): SessionTab 枚举 + SessionTabFilter 纯过滤 + 编码往返"
 ```
 
-### Task C2: organizeFlat 平铺出口
+### Task B2: organizeFlat 平铺出口
 
 **Files:**
 - Modify: `Sources/AppShellKit/SessionListOrganizer.swift`
@@ -619,10 +282,10 @@ extension SessionListOrganizer {
 - [ ] **Step 5: 提交**
 ```bash
 git add Sources/AppShellKit/SessionListOrganizer.swift Tests/AppShellKitTests/
-git commit -m "feat(m3d-c): organizeFlat 平铺出口——tab 过滤 + 未读置顶,无分区标题"
+git commit -m "feat(m3d-b): organizeFlat 平铺出口——tab 过滤 + 未读置顶,无分区标题"
 ```
 
-### Task C3: config 加 selectedTab;面板 tab 栏 + 改用 organizeFlat
+### Task B3: config 加 selectedTab;面板 tab 栏 + 改用 organizeFlat
 
 **Files:**
 - Modify: `Sources/AppShellKit/AppConfig.swift`(加 `selectedTab: String`)
@@ -648,14 +311,14 @@ git commit -m "feat(m3d-c): organizeFlat 平铺出口——tab 过滤 + 未读�
 - [ ] **Step 4: 提交**
 ```bash
 git add Sources/AppShellKit/AppConfig.swift Sources/apet/SessionPanel.swift Sources/apet/AppCoordinator.swift Tests/
-git commit -m "feat(m3d-c): 面板 tab 栏取代分区——全部/收藏/进行中/已读,选中态持久化"
+git commit -m "feat(m3d-b): 面板 tab 栏取代分区——全部/收藏/进行中/已读,选中态持久化"
 ```
 
 ---
 
-# 里程碑 D:自定义分组
+# 里程碑 C:自定义分组
 
-### Task D1: SessionMeta.groups + apply 镜像 + GroupMembership 纯函数
+### Task C1: SessionMeta.groups + apply 镜像 + GroupMembership 纯函数
 
 **Files:**
 - Modify: `Sources/AgentPetCore/Store/SessionMeta.swift`(加 `groups`;merge/apply 带上)
@@ -664,7 +327,7 @@ git commit -m "feat(m3d-c): 面板 tab 栏取代分区——全部/收藏/进行
 
 **Interfaces:**
 - Produces:
-  - `SessionMeta.groups: [String]`(默认 `[]`);merge 并集去重;apply 镜像进 `session.groups`
+  - `SessionMeta.groups: [String]`(默认 `[]`);merge 并集去重;apply 镜像进 `session.groups`(`Session.groups` 字段已由 Task B1 Step 4a 加)
   - `GroupMembership.toggle(_ group: String, in groups: [String]) -> [String]`(有则移除无则加,去重)
   - `GroupMembership.isValidName(_ s: String) -> Bool`(非空 trim、长度 ≤ 30、无控制字符/bidi)
 
@@ -730,10 +393,10 @@ public enum GroupMembership {
 - [ ] **Step 5: 提交**
 ```bash
 git add Sources/AgentPetCore/Store/SessionMeta.swift Sources/AgentPetCore/Session/GroupMembership.swift Tests/AgentPetCoreTests/
-git commit -m "feat(m3d-d): SessionMeta.groups(并集去重)+ apply 镜像 + GroupMembership.toggle/isValidName"
+git commit -m "feat(m3d-c): SessionMeta.groups(并集去重)+ apply 镜像 + GroupMembership.toggle/isValidName"
 ```
 
-### Task D2: config 分组注册表 + 右键加入分组 + tab 栏动态分组
+### Task C2: config 分组注册表 + 右键加入分组 + tab 栏动态分组
 
 **Files:**
 - Modify: `Sources/AppShellKit/AppConfig.swift`(加 `sessionGroups: [String]`)
@@ -764,10 +427,10 @@ git commit -m "feat(m3d-d): SessionMeta.groups(并集去重)+ apply 镜像 + Gro
 - [ ] **Step 5: 提交**
 ```bash
 git add Sources/AppShellKit/AppConfig.swift Sources/apet/ Tests/
-git commit -m "feat(m3d-d): 自定义分组——config 注册表 + 右键加入/建组/删组 + tab 栏动态分组 tab"
+git commit -m "feat(m3d-c): 自定义分组——config 注册表 + 右键加入/建组/删组 + tab 栏动态分组 tab"
 ```
 
-### Task D3: 文档同步
+### Task C3: 文档同步
 
 **Files:**
 - Modify: `README.md`(会话管理功能补 tab/分组/内联摘要/悬停收藏)
