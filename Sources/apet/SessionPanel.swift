@@ -170,17 +170,20 @@ private struct SessionRowCell: View {
                             .font(.system(size: 9))
                             .foregroundStyle(.yellow)
                     }
+                    // 标题走默认优先级 + 尾截断:让固有宽度的小徽标/标签(下方 fixedSize)先占位,
+                    // 标题吃剩余宽度并省略。M3-C+ 修复:此前 layoutPriority(1) 令长标题贪婪吃光宽度,
+                    // 把徽标饿到趋零、无 lineLimit 的标签逐字竖排成乱码。
                     Text(row.title)
                         .font(.system(size: 13, weight: .semibold))
                         .lineLimit(1)
-                        .layoutPriority(1)   // M3-C+ 评审:防徽标簇把标题挤空
+                        .truncationMode(.tail)
 
                     if let tag = row.profileTag {
                         Text(tag)
                             .font(.system(size: 10, weight: .medium))
                             .padding(.horizontal, 5).padding(.vertical, 1)
                             .background(Color.accentColor.opacity(0.13))
-                            .cornerRadius(4).lineLimit(1)
+                            .cornerRadius(4).lineLimit(1).fixedSize()
                     }
                     // M3-C：非 Claude 会话显 agent 徽标（多 Agent 辨识度，产品/用户评审双确认）+
                     // 「状态粗略」语义随徽标传达（设计 §7.2）。
@@ -189,7 +192,7 @@ private struct SessionRowCell: View {
                             .font(.system(size: 10, weight: .medium))
                             .padding(.horizontal, 5).padding(.vertical, 1)
                             .background(Color.purple.opacity(0.15))
-                            .cornerRadius(4).lineLimit(1)
+                            .cornerRadius(4).lineLimit(1).fixedSize()
                             .help(row.agent == "opencode"
                                   ? "来自 opencode:仅面板可见,无通知(插件增强规划中);状态按内容信号+活动时间推断;长时间无活动会灰显(会话仍在,活动后恢复),数小时后自动清理"
                                   : "来自 \(row.agent)（状态按活动时间粗略推断）")
@@ -201,23 +204,26 @@ private struct SessionRowCell: View {
                             .font(.system(size: 10, weight: .medium))
                             .padding(.horizontal, 5).padding(.vertical, 1)
                             .background(Color.secondary.opacity(0.15))
-                            .cornerRadius(4).foregroundStyle(.secondary).lineLimit(1)
+                            .cornerRadius(4).foregroundStyle(.secondary).lineLimit(1).fixedSize()
                     }
                     if row.noJumpHint {
                         Text("无跳转")
                             .font(.system(size: 10))   // 与相邻徽标字号统一(实现评审)
                             .foregroundStyle(.tertiary)
+                            .lineLimit(1).fixedSize()
                             .help("该会话在外部终端中运行,apet 无法定位窗口;点击查看恢复方式")
                     }
                     if row.activateOnly {
                         Text(row.needsManualTabHint ? "仅激活·手动切标签" : "仅激活")
                             .font(.system(size: 10)).foregroundStyle(.tertiary)
+                            .lineLimit(1).fixedSize()
                     }
-                    Spacer(minLength: 0)
+                    Spacer(minLength: 4)
                     if !row.relativeText.isEmpty {
                         Text(row.relativeText)
                             .font(.system(size: 10))
                             .foregroundStyle(.tertiary)
+                            .lineLimit(1).fixedSize()
                     }
                 }
 
