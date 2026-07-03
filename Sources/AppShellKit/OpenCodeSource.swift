@@ -293,3 +293,52 @@ public struct OpenCodeDBReader {
         return names
     }
 }
+
+// MARK: - OpenCodeHealth(纯决策表,用户可见健康提示)
+
+/// spec §3.3:「未安装」与「版本不匹配/路径失明/旧版」必须可区分——
+/// 「会话昨天还在、今天消失且无解释」是最差体验(评审)。
+public enum OpenCodeHealth: Equatable {
+    case ok
+    case notInstalled                          // 无 db 无任何痕迹:常态,不打扰
+    case dbNotFound                            // 无 db 但有 ~/.config/opencode 痕迹(XDG 失明嫌疑)
+    case legacyStorage                         // 无 db 但有旧 JSON storage:请升级 OpenCode
+    case readFailed                            // 本轮读失败(锁抖动/损坏),版本未超
+    case versionTooNew(maxMigrationId: String) // 读失败 ∧ migration 新于已验证
+
+    /// 用户可见文案;nil = 不展示(ok/notInstalled)。
+    public var userMessage: String? {
+        switch self {
+        case .ok, .notInstalled:
+            return nil
+        case .dbNotFound:
+            return "OpenCode:找到配置但未找到数据库——若你在 shell 里设置了 XDG_DATA_HOME,GUI 应用读不到它;可用 `launchctl setenv XDG_DATA_HOME <路径>` 后重启 apet"
+        case .legacyStorage:
+            return "OpenCode:检测到旧版 JSON 存储(未迁 SQLite),apet 不支持——请升级 OpenCode"
+        case .readFailed:
+            return "OpenCode:数据库暂时读不出(可能被占用),会自动重试"
+        case .versionTooNew(let id):
+            return "OpenCode:数据库 schema(\(id))新于 apet 已验证版本,暂不支持——请升级 apet 或提 issue"
+        }
+    }
+}
+
+public enum OpenCodeHealthDecider {
+    public static func decide(
+        outcome: OpenCodeReadOutcome,
+        dbExists: Bool,
+        legacyStorageExists: Bool,
+        configDirExists: Bool
+    ) -> OpenCodeHealth {
+        if case .failed(let maxId) = outcome {
+            if let maxId, OpenCodeDBReader.isNewerThanVerified(maxId) {
+                return .versionTooNew(maxMigrationId: maxId)
+            }
+            return .readFailed
+        }
+        guard !dbExists else { return .ok }
+        if legacyStorageExists { return .legacyStorage }
+        if configDirExists { return .dbNotFound }
+        return .notInstalled
+    }
+}
