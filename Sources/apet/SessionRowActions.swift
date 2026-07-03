@@ -17,11 +17,37 @@ enum SessionRowActions {
     static func copyId(_ s: Session) { copyToPasteboard(s.key.sessionId) }
 
     static func copyResume(_ s: Session) {
-        if let cmd = ResumeCommand.display(agent: s.key.agent, sessionId: s.key.sessionId) {
+        // M3-C+:opencode 目录敏感(TUI 按 cwd 解析 project),恢复命令带目录位置参数。
+        if let cmd = ResumeCommand.display(agent: s.key.agent, sessionId: s.key.sessionId,
+                                           directory: s.cwd) {
             copyToPasteboard(cmd)
         } else {
             copyToPasteboard(s.key.sessionId)  // 未知 agent 兜底复制 ID
         }
+    }
+
+    /// opencode 点击弹窗(M3-C+ 评审 B3:诚实降级 + 把死路变恢复路径)。@MainActor 调用。
+    /// 返回 true = 用户点了主按钮并已复制。
+    /// 评审:复制按钮继承右键菜单的 hasResumeCommand 门控(产品 M3「不静默复制假命令」)——
+    /// 异形 id(旧迁移/SDK 自带)拿不到恢复命令时按钮如实降级为「复制会话 ID」。
+    @discardableResult
+    static func showOpenCodeNoJumpAlert(_ s: Session) -> Bool {
+        let hasCmd = ResumeCommand.display(agent: s.key.agent, sessionId: s.key.sessionId,
+                                           directory: s.cwd) != nil
+        let alert = NSAlert()
+        alert.messageText = "OpenCode 在终端中运行"
+        alert.informativeText = hasCmd
+            ? "apet 无法定位它所在的终端窗口。若该会话的终端还开着,直接切换过去即可;终端已关时,可复制恢复命令粘贴到项目目录的终端里打开该会话。"
+            : "apet 无法定位它所在的终端窗口,且该会话 ID 格式无法核实(旧迁移或 SDK 自带),无可用恢复命令(可复制会话 ID 自行处理)。"
+        alert.alertStyle = .informational
+        alert.addButton(withTitle: hasCmd ? "复制恢复命令" : "复制会话 ID")
+        // HIG(实现评审):与动作按钮并排的配对按钮用「取消」而非确认词「好」。
+        let cancel = alert.addButton(withTitle: "取消")
+        cancel.keyEquivalent = "\u{1b}"   // Esc 可取消(HIG;NSAlert 不给"好"自动绑 Esc)
+        NSApp.activate(ignoringOtherApps: true)   // LSUIElement:弹窗置前(既有惯例)
+        guard alert.runModal() == .alertFirstButtonReturn else { return false }
+        if hasCmd { copyResume(s) } else { copyId(s) }
+        return true
     }
 
     /// M3-D①：免费本地摘要——定位 jsonl → 读尾部 → 提取对话 → 启发式一句话，弹窗展示。

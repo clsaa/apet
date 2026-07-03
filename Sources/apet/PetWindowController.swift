@@ -25,6 +25,8 @@ final class PetWindowController: NSObject {
 
     private var window: NSWindow?
     private var hostingView: NSHostingView<PetView>?
+    /// 防连击叠加阻塞弹窗(实现评审:与 MenuBarController 同款守卫)。
+    private var isShowingTapAlert = false
     private var popover: NSPopover?
     private var currentPresentation: PetPresentation
     private var currentSessions: [Session] = []
@@ -215,10 +217,20 @@ final class PetWindowController: NSObject {
         let fs = focusService
         // osascript blocks; run off main thread (same pattern as MenuBarController / Fix B2).
         // 评审修复（产品 m7）：跳转失败给反馈——与菜单栏面板行为对等，不再静默吞结果。
+        // M3-C+:opencode 走共享专属弹窗(诚实降级 + 复制恢复命令;评审:两处弹窗不同构,勿各写一份)。
+        let isOpenCode = (session.key.agent == "opencode")
         Task.detached {
             let result = fs.focus(terminal)
             if result == .targetGone || result == .unsupported {
-                await MainActor.run {
+                await MainActor.run { [weak self] in
+                    // 防连击(实现评审 Major:opencode 无 osascript 延迟,连击必现弹窗堆叠)。
+                    guard let self, !self.isShowingTapAlert else { return }
+                    self.isShowingTapAlert = true
+                    defer { self.isShowingTapAlert = false }
+                    if isOpenCode {
+                        SessionRowActions.showOpenCodeNoJumpAlert(session)
+                        return
+                    }
                     NSApp.activate(ignoringOtherApps: true)
                     let alert = NSAlert()
                     alert.messageText = "无法跳转到会话"

@@ -48,4 +48,45 @@ final class ResumeCommandTests: XCTestCase {
         XCTAssertNil(ResumeCommand.argv(agent: "qoder-work", sessionId: validId))
         XCTAssertNil(ResumeCommand.display(agent: "qoder", sessionId: validId))
     }
+
+    // MARK: - opencode(M3-C+):id 规则 ses_+26;目录敏感 → 位置参数;display 引号
+
+    private let sesId = "ses_0189f3ab2c4dXyZ01234abcDEF"
+
+    func test_opencode_argv_withDirectory() {
+        XCTAssertEqual(
+            ResumeCommand.argv(agent: "opencode", sessionId: sesId, directory: "/Users/x/proj"),
+            ["opencode", "/Users/x/proj", "--session", sesId])
+    }
+
+    func test_opencode_argv_withoutDirectory_degrades() {
+        XCTAssertEqual(ResumeCommand.argv(agent: "opencode", sessionId: sesId),
+                       ["opencode", "--session", sesId])
+    }
+
+    /// 交叉拒绝(测试评审:防"先选规则"重构后规则窜线)。
+    func test_crossRules_rejected() {
+        XCTAssertNil(ResumeCommand.argv(agent: "opencode", sessionId: validId))
+        XCTAssertNil(ResumeCommand.argv(agent: "claude-code", sessionId: sesId))
+        XCTAssertNil(ResumeCommand.argv(agent: "qoder-cli", sessionId: sesId))
+    }
+
+    /// display:含空格目录必须单引号引用,不得裸空格 join 产出坏命令(评审)。
+    func test_opencode_display_quotesSpacedDirectory() {
+        XCTAssertEqual(
+            ResumeCommand.display(agent: "opencode", sessionId: sesId, directory: "/Users/x/My Proj"),
+            "opencode '/Users/x/My Proj' --session \(sesId)")
+    }
+
+    func test_opencode_display_quotesSingleQuoteInDirectory() {
+        XCTAssertEqual(
+            ResumeCommand.display(agent: "opencode", sessionId: sesId, directory: "/Users/x/it's"),
+            "opencode '/Users/x/it'\\''s' --session \(sesId)")
+    }
+
+    /// 既有 agent 的 display 不受引用逻辑影响(无 shell 元字符 → 原样)。
+    func test_claude_display_unchangedByQuoting() {
+        XCTAssertEqual(ResumeCommand.display(agent: "claude", sessionId: validId),
+                       "claude --resume \(validId)")
+    }
 }

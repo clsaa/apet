@@ -332,13 +332,19 @@ struct PreferencesView: View {
     @State private var launchAtLogin: Bool = false
     @State private var launchAtLoginError: String?
 
+    /// M3-C+(Task 8b):OpenCode 健康提供者(nil = 不展示该行;评审 Blocker:版本过新/XDG
+    /// 失明必须用户可见,不能只进日志)。
+    var openCodeHealthProvider: (() -> OpenCodeHealth)?
+
     init(
         config: AppConfig,
         configStore: ConfigStore,
         onSave: @escaping (AppConfig) -> Void,
         uploadController: PetUploadController? = nil,
-        customStore: CustomPetStore? = nil
+        customStore: CustomPetStore? = nil,
+        openCodeHealthProvider: (() -> OpenCodeHealth)? = nil
     ) {
+        self.openCodeHealthProvider = openCodeHealthProvider
         _config = State(initialValue: config)
         // 自定义宠物名持久化：Application Support/AgentPet/pet-names.json
         let appSupport = (NSHomeDirectory() as NSString)
@@ -1028,6 +1034,19 @@ struct PreferencesView: View {
             // JSONL source row
             jsonlStatusRow(for: health.jsonlSource)
 
+            // M3-C+(Task 8b):OpenCode 健康行——仅异常态展示(ok/未安装不打扰)。
+            // 样式对齐 hookStatusRow.failed(实现评审:最响的图标配最轻的文字自相矛盾)。
+            if let ocMessage = openCodeHealthProvider?().userMessage {
+                HStack(alignment: .top, spacing: 6) {
+                    Image(systemName: "exclamationmark.circle")
+                        .foregroundStyle(.orange)
+                    Text(ocMessage)
+                        .font(.subheadline)
+                        .foregroundStyle(.orange)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+            }
+
             // Other-profile hint (M4 future scope note)
             if hasOtherProfiles {
                 HStack(alignment: .top, spacing: 4) {
@@ -1275,7 +1294,8 @@ final class PreferencesWindowController: NSWindowController {
         configStore: ConfigStore,
         onSave: @escaping (AppConfig) -> Void,
         uploadController: PetUploadController? = nil,
-        customStore: CustomPetStore? = nil
+        customStore: CustomPetStore? = nil,
+        openCodeHealthProvider: (() -> OpenCodeHealth)? = nil
     ) {
         let window = NSWindow(
             contentRect: NSRect(x: 0, y: 0, width: 520, height: 520),
@@ -1294,7 +1314,8 @@ final class PreferencesWindowController: NSWindowController {
             configStore: configStore,
             onSave: onSave,
             uploadController: uploadController,
-            customStore: customStore
+            customStore: customStore,
+            openCodeHealthProvider: openCodeHealthProvider
         )
         let hc = NSHostingController(rootView: view)
         hostingController = hc

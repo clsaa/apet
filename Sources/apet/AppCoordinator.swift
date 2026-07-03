@@ -43,8 +43,31 @@ final class AppCoordinator {
     private var isStopped = false
 
     private var jsonlWatchers: [JSONLDirectoryWatcher] = []
-    /// M3-C：QoderWork（agents.db）轮询源。QoderWork 未安装时为 nil。
+    /// M3-C：QoderWork（agents.db）轮询源。M3-C+ 评审：无条件注册（安装顺序不应击穿零配置）。
     private var qoderWorkWatcher: QoderWorkWatcher?
+    /// M3-C+：OpenCode（opencode.db）轮询源。同上无条件注册。
+    private var openCodeWatcher: DBPollWatcher?
+    /// OpenCode 最近一轮读取结果的健康信号（Task 8b 决策表输入；主线程独占——timer queue=.main）。
+    private var openCodeLastOutcome: OpenCodeReadOutcome?
+    private var openCodeDBPath: String = ""
+    /// 最近一次 OpenCode 健康(去抖:状态变化才更新/记日志)。Preferences 健康区读取。
+    private(set) var openCodeHealth: OpenCodeHealth = .ok
+
+    /// Task 8b:健康决策去抖上报(scan 闭包每轮调用,状态未变零成本)。
+    private func reportOpenCodeHealthIfChanged() {
+        guard let outcome = openCodeLastOutcome else { return }
+        let root = (openCodeDBPath as NSString).deletingLastPathComponent
+        let health = OpenCodeHealthDecider.decide(
+            outcome: outcome,
+            dbExists: FileManager.default.fileExists(atPath: openCodeDBPath),
+            legacyStorageExists: FileManager.default.fileExists(
+                atPath: (root as NSString).appendingPathComponent("storage/session")),
+            configDirExists: FileManager.default.fileExists(
+                atPath: OpenCodeDBReader.defaultConfigDir(env: ProcessInfo.processInfo.environment)))
+        guard health != openCodeHealth else { return }
+        openCodeHealth = health
+        if let msg = health.userMessage { appendToLog("[warn] \(msg)\n") }
+    }
     private var hotKeyManager: HotKeyManager?
     /// 进程内单调计数器，用于 jsonl 合成事件的唯一 eventId（替代 UUID，防 seenEventIds 慢泄漏）。
     private var jsonlSeqCounter: Int = 0
@@ -188,19 +211,40 @@ final class AppCoordinator {
             appendToLog("[info] 发现 Qoder IDE 会话目录，已挂监控（agent=qoder-ide）\n")
         }
 
-        // ─── 2a-2. QoderWork 源（M3-C）：agents.db 存在才建，走与 jsonl 相同的静默通道 ──
+        // ─── 2a-2. QoderWork 源（M3-C）：无条件注册——reader 对文件不存在返回 []，
+        // 常驻成本趋零；后装 QoderWork 无需重启 apet（M3-C+ 评审：安装顺序击穿零配置）。──
         let qwDBPath = QoderWorkDBReader.defaultDBPath
-        if FileManager.default.fileExists(atPath: qwDBPath) {
-            let qwReader = QoderWorkDBReader(dbPath: qwDBPath)
-            let qwRoot = (qwDBPath as NSString).deletingLastPathComponent // …/QoderWork/data
-            qoderWorkWatcher = QoderWorkWatcher(
-                read: { qwReader.read() },
-                root: qwRoot,
-                now: { Date().timeIntervalSince1970 },
-                emit: { [weak self] result in self?.applyScanResult(result) }
-            )
-            appendToLog("[info] 发现 QoderWork agents.db，已接入会话监控（粗略状态）\n")
-        }
+        let qwReader = QoderWorkDBReader(dbPath: qwDBPath)
+        let qwRoot = (qwDBPath as NSString).deletingLastPathComponent // …/QoderWork/data
+        qoderWorkWatcher = QoderWorkWatcher(
+            read: { qwReader.read() },
+            root: qwRoot,
+            now: { Date().timeIntervalSince1970 },
+            emit: { [weak self] result in self?.applyScanResult(result) }
+        )
+        appendToLog("[info] QoderWork 会话监控已挂载（粗略状态；DB 出现即生效）\n")
+
+        // ─── 2a-3. OpenCode 源（M3-C+）：只读轮询 opencode.db，静默通道。──
+        // 路径解析含 launchctl getenv 兜底（评审 Blocker：GUI 进程读不到 shell rc 的 XDG）。
+        let ocPath = OpenCodeDBReader.defaultDBPath(env: ProcessInfo.processInfo.environment)
+        openCodeDBPath = ocPath
+        let ocReader = OpenCodeDBReader(dbPath: ocPath)
+        let ocRoot = (ocPath as NSString).deletingLastPathComponent
+        openCodeWatcher = DBPollWatcher(
+            scan: { [weak self] now in
+                // 契约：DBPollWatcher timer queue=.main——openCodeLastOutcome 主线程独占
+                //（评审：该假设只有注释保障，precondition 让漂移当场爆）。
+                dispatchPrecondition(condition: .onQueue(.main))
+                let outcome = ocReader.read()
+                self?.openCodeLastOutcome = outcome
+                self?.reportOpenCodeHealthIfChanged()   // Task 8b：去抖上报
+                guard let rows = outcome.rows else { return nil }   // .failed → 整轮跳过
+                return OpenCodeScanner.scan(rows: rows, root: ocRoot, now: now)
+            },
+            now: { Date().timeIntervalSince1970 },
+            emit: { [weak self] result in self?.applyScanResult(result) }
+        )
+        appendToLog("[info] OpenCode 会话监控已挂载（路径：\(ocPath)；内容信号优先）\n")
         // ──────────────────────────────────────────────────────────────────────────
         // 2b. Create and start NotificationService (safe to call before replay).
         // Single shared TerminalFocusService instance injected into both consumers (Fix M-3).
@@ -402,6 +446,8 @@ final class AppCoordinator {
         jsonlWatchers.forEach { $0.start(every: 8) } // 每 8 秒定期扫描，queue:.main
         qoderWorkWatcher?.scanOnce()                 // QoderWork seed（同 jsonl 语义：静默、面板可见）
         qoderWorkWatcher?.start(every: 10)           // DB 轮询稍稀，减少读放大
+        openCodeWatcher?.scanOnce()                  // OpenCode seed（M3-C+，同款语义）
+        openCodeWatcher?.start(every: 10)
 
         // 5. Live file watch via DispatchSource
         openWatchSource()
@@ -437,6 +483,7 @@ final class AppCoordinator {
         reapTimer = nil
         jsonlWatchers.forEach { $0.stop() }
         qoderWorkWatcher?.stop()
+        openCodeWatcher?.stop()   // M3-C+ 评审：漏停则 teardown 后 timer 继续打事件
         jsonlWatchers.removeAll()
         hotKeyManager?.unregister()
         hotKeyManager = nil
@@ -459,7 +506,8 @@ final class AppCoordinator {
                 self?.applyConfig(newConfig)
             },
             uploadController: uploadController,
-            customStore: customStore
+            customStore: customStore,
+            openCodeHealthProvider: { [weak self] in self?.openCodeHealth ?? .ok }
         )
         preferencesController = pc
         pc.show()
@@ -599,6 +647,7 @@ final class AppCoordinator {
                 )
                 ev.source = .jsonl
                 // M3-C：QoderWork/Qoder IDE 会话点击 → 激活对应 App（无终端概念，App 级跳转）。
+                // opencode 不注入 terminal：TUI 宿主终端未知，诚实降级（M3-C+ 评审 B3）。
                 if key.agent == "qoder-work" {
                     ev.terminal = TerminalRef(kind: .other, bundleId: "com.qoder.work")
                 } else if key.agent == "qoder-ide" {
@@ -610,7 +659,8 @@ final class AppCoordinator {
                 // 评审修复（架构 m6）：QoderWork 是**粗略态**（仅按活动时间，无内容信号），
                 // 其 waitingStop 不代表真实「等你」——预置已读（黄点），不进「等你」置顶、
                 // 不污染未读徽标；真实 attention 语义只留给有内容信号的源。
-                if key.agent == "qoder-work", kind == .stop {
+                // M3-C+ 评审 B2：集合判定取代 agent 字符串 if（别每接一源加一个分支）。
+                if AgentManifest.dbBackedAgents.contains(key.agent), kind == .stop {
                     _ = store.acknowledge(key: key)
                 }
 

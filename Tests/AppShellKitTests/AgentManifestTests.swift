@@ -102,4 +102,63 @@ final class AgentManifestTests: XCTestCase {
         XCTAssertNil(m.renderResumeArgv(sessionId: "`whoami`"))
         XCTAssertNil(m.renderResumeArgv(sessionId: ""))
     }
+
+    // MARK: - M3-C+:openCode manifest 与 sessionIdRule/{dir}
+
+    private var sesId: String { "ses_0189f3ab2c4dXyZ01234abcDEF" }
+
+    func test_openCode_manifest_rendersArgvWithDir() {
+        XCTAssertEqual(AgentManifest.openCode.renderResumeArgv(sessionId: sesId, directory: "/w"),
+                       ["opencode", "/w", "--session", sesId])
+    }
+
+    func test_openCode_manifest_nilDir_omitsElement() {
+        XCTAssertEqual(AgentManifest.openCode.renderResumeArgv(sessionId: sesId),
+                       ["opencode", "--session", sesId])
+    }
+
+    func test_openCode_manifest_rejectsUUID() {
+        XCTAssertNil(AgentManifest.openCode.renderResumeArgv(
+            sessionId: "8dd7ca5f-e655-47b7-8a5f-ad28336c1d34"))
+    }
+
+    /// {dir} 占位与 {id} 同规则:只允许独立元素(评审 AI m8⑤ 同构)。
+    func test_partialDirPlaceholder_rejected() {
+        let m = AgentManifest(id: "x", rootsGlobs: [], tsDialect: .iso,
+                              resumeArgvTemplate: ["run", "--dir={dir}", "{id}"],
+                              hasStateRules: false)
+        XCTAssertNil(m.renderResumeArgv(sessionId: "8dd7ca5f-e655-47b7-8a5f-ad28336c1d34",
+                                        directory: "/w"))
+    }
+
+    /// 既有 manifest 默认 .uuid,行为不变(默认参数回归)。
+    func test_existingManifests_defaultUUIDRule() {
+        XCTAssertEqual(AgentManifest.claude.sessionIdRule, .uuid)
+        XCTAssertEqual(AgentManifest.qoderCli.sessionIdRule, .uuid)
+    }
+
+    func test_builtins_containOpenCode() {
+        // glob 不重叠由既有 test_builtins_noGlobOverlap 自动扩展覆盖(评审:测试名别撒谎)。
+        XCTAssertTrue(AgentManifest.builtins.contains(where: { $0.id == "opencode" }))
+    }
+
+    /// 双源一致性遍历(开源/架构评审:ResumeCommand 与 manifest 模板第三处复制的防漂移网)。
+    func test_resumeCommand_manifest_consistency_allBuiltins() {
+        let samples: [(agent: String, id: String, dir: String?)] = [
+            ("claude-code", "8dd7ca5f-e655-47b7-8a5f-ad28336c1d34", nil),
+            ("qoder-cli", "8dd7ca5f-e655-47b7-8a5f-ad28336c1d34", nil),
+            ("opencode", "ses_0189f3ab2c4dXyZ01234abcDEF", "/w"),
+            ("opencode", "ses_0189f3ab2c4dXyZ01234abcDEF", nil),
+            ("qoder-work", "8dd7ca5f-e655-47b7-8a5f-ad28336c1d34", nil),  // 两边同为 nil
+            ("qoder-ide", "task-abc", nil),                                // 两边同为 nil
+        ]
+        for s in samples {
+            let manifest = AgentManifest.builtins.first { $0.id == s.agent }
+            let fromCommand = ResumeCommand.argv(agent: s.agent, sessionId: s.id, directory: s.dir)
+            let fromManifest = manifest?.renderResumeArgv(sessionId: s.id, directory: s.dir)
+            // optional chaining 已扁平为 [String]?,直接比较(评审:?? nil 冗余)。
+            XCTAssertEqual(fromCommand, fromManifest,
+                           "双源漂移:\(s.agent) ResumeCommand=\(String(describing: fromCommand)) manifest=\(String(describing: fromManifest))")
+        }
+    }
 }
