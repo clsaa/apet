@@ -1,10 +1,11 @@
 import XCTest
 @testable import AgentPetCore
 
-/// 纯函数 `LocalSummarizer.summarize`：免费本地启发式摘要（最后指令 + 最近动作）。
+/// 纯函数 `LocalSummarizer.summarize`:会话主题=第一条真实用户指令(开场任务)。
 final class LocalSummarizerTests: XCTestCase {
 
-    func test_lastUserInstruction_and_assistantStopReason() {
+    func test_firstUserInstruction_isTheSessionTopic() {
+        // 会话主题=开场任务(第一条真实指令),不是最后一条活动。
         let turns = [
             ConversationTurn(role: "user", text: "修复登录 bug", stopReason: nil),
             ConversationTurn(role: "assistant", text: "好的，我来看看", stopReason: "end_turn"),
@@ -12,8 +13,8 @@ final class LocalSummarizerTests: XCTestCase {
             ConversationTurn(role: "assistant", text: "已加测试并跑通", stopReason: "end_turn"),
         ]
         let s = LocalSummarizer.summarize(turns: turns)
-        XCTAssertTrue(s.contains("顺便加个测试"), "应含最后一条用户指令")
-        XCTAssertTrue(s.contains("已加测试并跑通") || s.contains("end_turn"), "应含最近 assistant 动作")
+        XCTAssertTrue(s.contains("修复登录 bug"), "应取开场任务(第一条),得: \(s)")
+        XCTAssertFalse(s.contains("顺便加个测试"), "不应是最后一条活动: \(s)")
     }
 
     func test_truncatesLongText() {
@@ -82,5 +83,22 @@ final class LocalSummarizerTests: XCTestCase {
             turns: [ConversationTurn(role: "assistant", text: "", stopReason: longReason)], maxLen: 20)
         XCTAssertFalse(s.contains("\u{202E}"))
         XCTAssertLessThan(s.count, 60, "stopReason 同样限长")
+    }
+
+    func test_skipsTrivialOpening_picksFirstRealTask() {
+        // 开场是 "hello" 寒暄 → 跳过,取下一条真正的任务。
+        let turns = [
+            ConversationTurn(role: "user", text: "hello"),
+            ConversationTurn(role: "assistant", text: "你好,有什么可以帮你?"),
+            ConversationTurn(role: "user", text: "帮我把 apet 的通知改成静默模式"),
+        ]
+        let out = LocalSummarizer.summarize(turns: turns)
+        XCTAssertTrue(out.contains("静默模式"), "应跳过 hello 取真任务,得: \(out)")
+        XCTAssertFalse(out.contains("hello"), "寒暄不该是摘要: \(out)")
+    }
+    func test_allTrivial_fallsBackToFirstUser() {
+        let turns = [ConversationTurn(role: "user", text: "hi"), ConversationTurn(role: "user", text: "ok")]
+        let out = LocalSummarizer.summarize(turns: turns)
+        XCTAssertEqual(out, "hi", "全寒暄时退化到第一条,总比空好")
     }
 }

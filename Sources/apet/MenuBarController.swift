@@ -20,7 +20,7 @@ private struct PanelRootView: View {
     let onToggleFavorite: (String) -> Void
     let onCopyId: (String) -> Void
     let onCopyResume: (String) -> Void
-    var onSummarize: (String) async -> SummaryResult = { _ in .error("未接入") }
+    var onSummarize: (String, Bool) async -> SummaryResult = { _, _ in .error("未接入") }
     let onTogglePet: () -> Void
     let onOpenPreferences: () -> Void
     let onQuit: () -> Void
@@ -281,7 +281,7 @@ final class MenuBarController: NSObject {
             onToggleFavorite: { [weak self] id in self?.handleToggleFavorite(id: id) },
             onCopyId: { [weak self] id in self?.handleCopyId(id: id) },
             onCopyResume: { [weak self] id in self?.handleCopyResume(id: id) },
-            onSummarize: { [weak self] id in await self?.summarize(id: id) ?? .error("面板已关闭") },
+            onSummarize: { [weak self] id, useAI in await self?.summarize(id: id, useAI: useAI) ?? .error("面板已关闭") },
             onTogglePet: { [weak self] in
                 self?.onTogglePet?()
                 self?.panelHosting?.rootView = self?.makePanelRootView() ?? PanelRootView(
@@ -338,9 +338,9 @@ final class MenuBarController: NSObject {
         currentSessions.first { "\($0.key.agent)|\($0.key.root)|\($0.key.sessionId)" == id }
     }
 
-    func summarize(id: String) async -> SummaryResult {
+    func summarize(id: String, useAI: Bool) async -> SummaryResult {
         guard let s = sessionForId(id) else { return .error("会话不存在") }
-        return await SessionRowActions.aiSummary(s)
+        return useAI ? await SessionRowActions.aiSummary(s) : SessionRowActions.quickSummary(s)
     }
 
 

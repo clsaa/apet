@@ -42,6 +42,16 @@ public enum TailLineReader {
         return .ok(lines: lines)
     }
 
+    /// 读文件开头至多 maxLines 行 / maxBytes(拿开场用户指令用)。
+    public static func firstLines(path: String, maxLines: Int, maxBytes: Int = 262_144) -> [String] {
+        guard let fh = FileHandle(forReadingAtPath: path) else { return [] }
+        defer { try? fh.close() }
+        fh.seek(toFileOffset: 0)
+        let data = fh.readData(ofLength: maxBytes)
+        let text = String(decoding: data, as: UTF8.self)
+        return Array(text.components(separatedBy: "\n").filter { !$0.isEmpty }.prefix(maxLines))
+    }
+
     public static func firstLine(path: String) -> String? {
         guard let fh = FileHandle(forReadingAtPath: path) else { return nil }
         defer { try? fh.close() }

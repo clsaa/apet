@@ -8,28 +8,23 @@ public struct ConversationTurn: Equatable {
     }
 }
 
-/// 纯函数：免费本地启发式摘要——「最后一条用户指令 + 最近 assistant 动作/stop_reason」。
-/// 即时零成本，是默认展示（模型摘要为可选升级）。
+/// 纯函数：免费本地启发式摘要——**「这个会话在做什么」= 第一条真实用户指令(开场任务)**。
+/// 一句话/几个字,让用户扫一眼认出会话主题(而非最近活动)。即时零成本;AI 摘要为可选深度升级。
+/// 注意:入参 turns 应是转录**开头**的若干轮(开场任务在最前),不是尾部。
 public enum LocalSummarizer {
-    public static func summarize(turns: [ConversationTurn], maxLen: Int = 60) -> String {
+    public static func summarize(turns: [ConversationTurn], maxLen: Int = 40) -> String {
         guard !turns.isEmpty else { return "（无可总结内容）" }
 
-        // 优先取「最后一条真实用户指令」——跳过 harness 注入的系统消息(在 jsonl 里也是 user
-        // 角色,但不是用户输入);全被跳过时退化到最后一条非空 user(有内容比空好)。
-        let lastUser = turns.last { $0.role == "user" && !$0.text.isEmpty && !Self.isInjected($0.text) }
-            ?? turns.last { $0.role == "user" && !$0.text.isEmpty }
-        let lastAssistant = turns.last { $0.role == "assistant" }
-
-        var parts: [String] = []
-        if let u = lastUser {
-            parts.append("指令：\(sanitize(u.text, maxLen))")
+        // 会话主题 = 第一条**有实质内容**的用户指令。跳过 harness 注入 + 寒暄/太短(hello/ok/继续),
+        // 那些不代表任务;全是寒暄时退化到第一条真实 user,再退化到第一条 assistant 文本(总比空好)。
+        let realUsers = turns.filter { $0.role == "user" && !$0.text.isEmpty && !Self.isInjected($0.text) }
+        if let u = realUsers.first(where: { !Self.isTrivial($0.text) }) ?? realUsers.first {
+            return sanitize(u.text, maxLen)
         }
-        if let a = lastAssistant {
-            // stopReason 同样来自不可信 jsonl——一并消毒限长（评审修复 AI m6）
-            let desc = a.text.isEmpty ? sanitize(a.stopReason ?? "完成", maxLen) : sanitize(a.text, maxLen)
-            parts.append("最近：\(desc)")
+        if let a = turns.first(where: { $0.role == "assistant" && !$0.text.isEmpty }) {
+            return sanitize(a.text, maxLen)
         }
-        return parts.isEmpty ? "（无可总结内容）" : parts.joined(separator: " · ")
+        return "（无可总结内容）"
     }
 
     /// 是否为 harness/工具注入的系统消息(非真实用户指令)。用前缀匹配去掉首部空白后判断——
@@ -44,6 +39,18 @@ public enum LocalSummarizer {
             "[SYSTEM NOTIFICATION", "Caveat: The messages below",
         ]
         return markers.contains { t.hasPrefix($0) }
+    }
+
+    /// 是否为寒暄/无实质内容的开场(不代表会话任务):太短 或 命中常见问候/继续词。
+    static func isTrivial(_ text: String) -> Bool {
+        let t = text.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        if t.count < 4 { return true }
+        let greetings: Set<String> = [
+            "hi", "hello", "hey", "yo", "sup", "hello?", "hi there", "嗨", "嘿", "你好", "在吗", "在么",
+            "ok", "okay", "好", "好的", "行", "嗯", "go", "start", "开始", "继续", "go on", "continue",
+            "test", "测试", "ping", "?", "？"
+        ]
+        return greetings.contains(t)
     }
 
     /// 不可信文本消毒：滤控制字符（C0/C1）与 bidi 覆盖符（RTL 欺骗）、拉平换行、限长。

@@ -511,7 +511,7 @@ private struct PetPanelRootView: View {
     let onToggleFavorite: (String) -> Void
     let onCopyId: (String) -> Void
     let onCopyResume: (String) -> Void
-    var onSummarize: (String) async -> SummaryResult = { _ in .error("未接入") }
+    var onSummarize: (String, Bool) async -> SummaryResult = { _, _ in .error("未接入") }
     let onOpenPreferences: () -> Void
     let onAcknowledgeAll: () -> Void
     var selectedTab: SessionTab = .all
@@ -611,9 +611,9 @@ private final class SessionPanelHostController: NSViewController {
         sessions.first { "\($0.key.agent)|\($0.key.root)|\($0.key.sessionId)" == id }
     }
 
-    func summarize(id: String) async -> SummaryResult {
+    func summarize(id: String, useAI: Bool) async -> SummaryResult {
         guard let s = petSessionForId(id) else { return .error("会话不存在") }
-        return await SessionRowActions.aiSummary(s)
+        return useAI ? await SessionRowActions.aiSummary(s) : SessionRowActions.quickSummary(s)
     }
 
 
@@ -623,7 +623,7 @@ private final class SessionPanelHostController: NSViewController {
                          hotkeyHint: hotkeyHint, onTap: onTap,
                          onToggleFavorite: onToggleFavorite,
                          onCopyId: onCopyId, onCopyResume: onCopyResume,
-                         onSummarize: { [weak self] id in await self?.summarize(id: id) ?? .error("面板已关闭") },
+                         onSummarize: { [weak self] id, useAI in await self?.summarize(id: id, useAI: useAI) ?? .error("面板已关闭") },
                          onOpenPreferences: onOpenPreferences, onAcknowledgeAll: onAcknowledgeAll,
                          selectedTab: selectedTabProvider?() ?? .all,
                          onSelectTab: { [weak self] tab in

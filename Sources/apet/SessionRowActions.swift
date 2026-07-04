@@ -51,16 +51,35 @@ enum SessionRowActions {
     }
 
     /// M3-D①：免费本地摘要——定位 jsonl → 读尾部 → 提取对话 → 启发式一句话，弹窗展示。
-    /// AI 摘要:定位会话转录 → 读 tail → 后台跑 `claude -p` 出一句中文总结。
+    /// 快速摘要(本地即时零成本):读转录**开头**若干轮 → 第一条真实用户指令 = 会话主题。
+    /// 「这个会话在做什么」的近似答案,一句话/几个字。找不到文件如实提示。
+    static func quickSummary(_ s: Session) -> SummaryResult {
+        guard let path = SessionTranscriptLocator.find(root: s.key.root, sessionId: s.key.sessionId) else {
+            return .error("找不到该会话的记录文件")
+        }
+        let headLines = TailLineReader.firstLines(path: path, maxLines: 80)
+        guard !headLines.isEmpty else { return .error("会话暂无可总结内容") }
+        let turns = ConversationTailParser.turns(lines: headLines)
+        let summary = LocalSummarizer.summarize(turns: turns)
+        return summary.hasPrefix("（") ? .error("会话暂无可总结内容") : .text(summary)
+    }
+
+    /// AI 摘要:定位会话转录 → 读**开头(开场任务)+结尾(近期)** → 后台跑 `claude -p` 出一句短标题。
     /// 用本机已装 claude CLI(无额外 key);找不到文件/无 claude/失败均如实提示。
     static func aiSummary(_ s: Session) async -> SummaryResult {
-        guard let path = SessionTranscriptLocator.find(root: s.key.root, sessionId: s.key.sessionId),
-              case .ok(let lines) = TailLineReader.lastLines(path: path, maxLines: 200, maxBytes: 524_288) else {
+        guard let path = SessionTranscriptLocator.find(root: s.key.root, sessionId: s.key.sessionId) else {
             return .error("找不到该会话的记录文件,无法生成 AI 摘要")
         }
-        let turns = ConversationTailParser.turns(lines: lines)
-        guard !turns.isEmpty else { return .error("会话暂无可总结内容") }
-        let tail = turns.map { "\($0.role): \($0.text)" }.joined(separator: "\n")
+        // 会话主题最强信号是开场任务;近期给一点上下文。喂「开头 + 结尾」两段。
+        let headLines = TailLineReader.firstLines(path: path, maxLines: 60)
+        let tailLines: [String]
+        if case .ok(let l) = TailLineReader.lastLines(path: path, maxLines: 120, maxBytes: 262_144) { tailLines = l } else { tailLines = [] }
+        let headTurns = ConversationTailParser.turns(lines: headLines)
+        let tailTurns = ConversationTailParser.turns(lines: tailLines)
+        guard !headTurns.isEmpty || !tailTurns.isEmpty else { return .error("会话暂无可总结内容") }
+        let opening = headTurns.prefix(6).map { "\($0.role): \($0.text)" }.joined(separator: "\n")
+        let recent = tailTurns.suffix(8).map { "\($0.role): \($0.text)" }.joined(separator: "\n")
+        let tail = "【会话开场】\n\(opening)\n\n【最近进展】\n\(recent)"
         let cwd = s.cwd ?? NSHomeDirectory()
         return await withCheckedContinuation { cont in
             DispatchQueue.global(qos: .userInitiated).async {

@@ -27,8 +27,8 @@ struct SessionPanel: View {
     /// 复制恢复命令（claude --resume <id>）。
     var onCopyResume: (String) -> Void = { _ in }
     /// M3-D①：免费本地摘要（一句话概括最近进展）。
-    /// AI 摘要:异步跑 claude -p 读会话日志出一句总结。返回摘要文本或错误提示。
-    var onSummarize: (String) async -> SummaryResult = { _ in .error("未接入") }
+    /// 摘要:useAI=false 走本地即时快速摘要(开场任务);true 走 claude -p 深度短标题。
+    var onSummarize: (String, Bool) async -> SummaryResult = { _, _ in .error("未接入") }
     /// 面板顶部快捷键提示，如 "⌥⌘P 打开/关闭"。为 nil 不显示。
     var hotkeyHint: String? = nil
     /// 状态圆点配色（F3）。默认系统色。
@@ -58,6 +58,8 @@ struct SessionPanel: View {
     @State private var confirmDeleteGroup: String? = nil
     @State private var summaryRowId: String? = nil
     @State private var summaryOutcome: SummaryOutcome? = nil
+    @State private var summaryUseAI = false
+    @State private var summaryNonce = 0
     @FocusState private var inlineFieldFocused: Bool
 
     private var organizedFlat: OrganizedFlat {
@@ -310,9 +312,13 @@ struct SessionPanel: View {
         }
         if !AgentManifest.dbBackedAgents.contains(row.agent) {
             Divider()
+            Button("快速摘要") {
+                summaryUseAI = false; summaryNonce += 1
+                summaryOutcome = .loading; summaryRowId = row.id
+            }
             Button("AI 摘要") {
-                summaryOutcome = .loading
-                summaryRowId = row.id
+                summaryUseAI = true; summaryNonce += 1
+                summaryOutcome = .loading; summaryRowId = row.id
             }
         }
         Divider()
@@ -330,9 +336,10 @@ struct SessionPanel: View {
                 summaryBanner(outcome)
             }
         }
-        .task(id: summaryRowId == row.id ? row.id : nil) {
+        .task(id: summaryRowId == row.id ? "\(row.id)#\(summaryNonce)" : nil) {
             guard summaryRowId == row.id, case .loading? = summaryOutcome else { return }
-            let result = await onSummarize(row.id)
+            let useAI = summaryUseAI
+            let result = await onSummarize(row.id, useAI)
             guard summaryRowId == row.id else { return }   // 期间用户切走则丢弃
             switch result {
             case .text(let t): summaryOutcome = .text(t)
@@ -375,7 +382,7 @@ struct SessionPanel: View {
             case .loading:
                 HStack(spacing: 6) {
                     ProgressView().controlSize(.small)
-                    Text("AI 生成中…").font(.system(size: 11)).foregroundStyle(.secondary)
+                    Text(summaryUseAI ? "AI 生成中…" : "生成中…").font(.system(size: 11)).foregroundStyle(.secondary)
                 }
             case .text(let t):
                 Text(t).font(.system(size: 11)).foregroundStyle(.primary)
