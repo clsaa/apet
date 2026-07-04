@@ -38,11 +38,21 @@ struct SessionPanel: View {
     var groups: [String] = []
     /// M3-D-C:会话加入/移出分组(sessionId, groupName)。
     var onToggleGroup: (String, String) -> Void = { _, _ in }
-    /// M3-D-C:新建分组(控制器弹输入)/删除分组。
-    var onCreateGroup: (String?) -> Void = { _ in }
+    /// M3-D-C:提交新建分组(name, 可选加入的会话 id)/删除分组/提交重命名(id, 新名)。
+    /// UI 重设计:面板内内联输入,回调只收「已确认的值」,不再触发 NSAlert。
+    var onCommitNewGroup: (String, String?) -> Void = { _, _ in }
     var onDeleteGroup: (String) -> Void = { _ in }
+    var onCommitRename: (String, String) -> Void = { _, _ in }
 
     @State private var filter: String = ""
+    // 内联轻量弹层状态(放 @State：rootView 每 8s 重设 value,identity 存活保草稿/焦点不丢)。
+    @State private var creatingGroupAttachId: String? = nil   // "" = 建空组(tab+);非空=建并加入该行
+    @State private var isCreatingGroup = false
+    @State private var newGroupText = ""
+    @State private var renamingId: String? = nil
+    @State private var renameText = ""
+    @State private var confirmDeleteGroup: String? = nil
+    @FocusState private var inlineFieldFocused: Bool
 
     private var organizedFlat: OrganizedFlat {
         SessionListOrganizer.organizeFlat(sessions: sessions, tab: selectedTab, filter: filter, now: now,
@@ -144,18 +154,92 @@ struct SessionPanel: View {
                 tabChip(.running, "进行中")
                 tabChip(.read, "已读")
                 ForEach(groups, id: \.self) { g in
-                    tabChip(.group(g), "#\(g)")
-                        .contextMenu { Button("删除分组「\(g)」", role: .destructive) { onDeleteGroup(g) } }
+                    if confirmDeleteGroup == g {
+                        deleteConfirmChip(g)
+                    } else {
+                        tabChip(.group(g), "#\(g)")
+                            .contextMenu {
+                                Button("删除分组「\(g)」", role: .destructive) {
+                                    withAnimation(.spring(response: 0.25, dampingFraction: 0.85)) { confirmDeleteGroup = g }
+                                }
+                            }
+                    }
                 }
-                Button { onCreateGroup(nil) } label: {
-                    Image(systemName: "plus").font(.system(size: 11))
+                if isCreatingGroup {
+                    newGroupInputChip
+                } else {
+                    Button { startCreateGroup(attach: nil) } label: {
+                        Image(systemName: "plus").font(.system(size: 11))
+                    }
+                    .buttonStyle(.plain).foregroundStyle(.secondary).help("新建分组")
+                    .padding(.horizontal, 4)
                 }
-                .buttonStyle(.plain).foregroundStyle(.secondary).help("新建分组")
-                .padding(.horizontal, 4)
             }
             .padding(.horizontal, 8)
             .padding(.vertical, 4)
         }
+    }
+
+    // 建组内联输入 chip(就地把 + 展成输入框;回车确认/Esc 取消/失焦取消)。
+    private var newGroupInputChip: some View {
+        let trimmed = newGroupText.trimmingCharacters(in: .whitespacesAndNewlines)
+        let valid = GroupMembership.isValidName(newGroupText) && !groups.contains(trimmed)
+        let dupe = !trimmed.isEmpty && groups.contains(trimmed)
+        return HStack(spacing: 4) {
+            TextField("分组名", text: $newGroupText)
+                .textFieldStyle(.plain).font(.system(size: 11))
+                .frame(width: 110)
+                .focused($inlineFieldFocused)
+                .onSubmit { commitNewGroup(valid: valid) }
+                .onExitCommand { cancelCreateGroup() }
+            if !newGroupText.isEmpty {
+                Text(dupe ? "已存在" : "\(newGroupText.count)/30")
+                    .font(.system(size: 9))
+                    .foregroundStyle(valid ? Color.secondary : Color.red)
+            }
+            Button { commitNewGroup(valid: valid) } label: {
+                Image(systemName: "return").font(.system(size: 9))
+            }.buttonStyle(.plain).foregroundStyle(valid ? Color.accentColor : Color.secondary).disabled(!valid)
+            Button { cancelCreateGroup() } label: {
+                Image(systemName: "xmark").font(.system(size: 9))
+            }.buttonStyle(.plain).foregroundStyle(.secondary)
+        }
+        .padding(.horizontal, 8).padding(.vertical, 3)
+        .background((dupe ? Color.red : Color.accentColor).opacity(0.08))
+        .overlay(RoundedRectangle(cornerRadius: 6).strokeBorder(
+            (dupe ? Color.red : Color.accentColor).opacity(inlineFieldFocused ? 1 : 0.5),
+            lineWidth: inlineFieldFocused ? 1.5 : 1))
+        .cornerRadius(6)
+        .onAppear { inlineFieldFocused = true }
+    }
+
+    // 删组二段式内联确认 chip。
+    private func deleteConfirmChip(_ g: String) -> some View {
+        HStack(spacing: 4) {
+            Text("删「\(g)」?").font(.system(size: 11)).foregroundStyle(.red)
+            Button { onDeleteGroup(g); confirmDeleteGroup = nil } label: {
+                Image(systemName: "checkmark").font(.system(size: 9))
+            }.buttonStyle(.plain).foregroundStyle(.red).help("确认删除,不可撤销")
+            Button { confirmDeleteGroup = nil } label: {
+                Image(systemName: "xmark").font(.system(size: 9))
+            }.buttonStyle(.plain).foregroundStyle(.secondary)
+        }
+        .padding(.horizontal, 8).padding(.vertical, 3)
+        .background(Color.red.opacity(0.12)).cornerRadius(6)
+    }
+
+    private func startCreateGroup(attach id: String?) {
+        newGroupText = ""; creatingGroupAttachId = id
+        withAnimation(.spring(response: 0.25, dampingFraction: 0.85)) { isCreatingGroup = true }
+    }
+    private func commitNewGroup(valid: Bool) {
+        guard valid else { return }
+        let name = newGroupText.trimmingCharacters(in: .whitespacesAndNewlines)
+        onCommitNewGroup(name, creatingGroupAttachId)
+        isCreatingGroup = false; newGroupText = ""; creatingGroupAttachId = nil
+    }
+    private func cancelCreateGroup() {
+        isCreatingGroup = false; newGroupText = ""; creatingGroupAttachId = nil
     }
 
     @ViewBuilder
@@ -206,7 +290,9 @@ struct SessionPanel: View {
     @ViewBuilder
     private func rowMenuItems(_ row: SessionRowModel) -> some View {
         Button(row.favorite ? "取消收藏" : "收藏") { onToggleFavorite(row.id) }
-        Button("重命名…") { onRename(row.id) }
+        Button("重命名…") {
+            renameText = row.title; renamingId = row.id
+        }
         Menu("加入分组") {
             ForEach(groups, id: \.self) { g in
                 Button { onToggleGroup(row.id, g) } label: {
@@ -214,7 +300,7 @@ struct SessionPanel: View {
                 }
             }
             if !groups.isEmpty { Divider() }
-            Button("新建分组…") { onCreateGroup(row.id) }
+            Button("新建分组…") { startCreateGroup(attach: row.id) }
         }
         if !AgentManifest.dbBackedAgents.contains(row.agent) {
             Divider()
@@ -237,7 +323,14 @@ struct SessionPanel: View {
                 }
                 .menuStyle(.borderlessButton).menuIndicator(.hidden)
                 .frame(width: 18)
-            )
+            ),
+            renaming: renamingId == row.id,
+            renameText: renamingId == row.id ? $renameText : nil,
+            onRenameCommit: {
+                onCommitRename(row.id, renameText.trimmingCharacters(in: .whitespacesAndNewlines))
+                renamingId = nil
+            },
+            onRenameCancel: { renamingId = nil }
         )
             .contentShape(Rectangle())
             .onTapGesture { onTap(row.id) }
@@ -271,7 +364,12 @@ private struct SessionRowCell: View {
     let palette: DotPalette
     var onFavorite: () -> Void = {}
     var overflowMenu: AnyView? = nil    // E10:悬停 ⋯ 溢出入口(= 右键菜单同款)
+    var renaming: Bool = false
+    var renameText: Binding<String>? = nil
+    var onRenameCommit: () -> Void = {}
+    var onRenameCancel: () -> Void = {}
     @State private var hovering = false
+    @FocusState private var renameFocused: Bool
 
     var body: some View {
         HStack(alignment: .center, spacing: 7) {
@@ -292,10 +390,25 @@ private struct SessionRowCell: View {
 
             VStack(alignment: .leading, spacing: 2) {
                 HStack(spacing: 5) {
-                    Text(row.title)
-                        .font(.system(size: 13, weight: .semibold))
-                        .lineLimit(1)
-                        .truncationMode(.tail)
+                    if renaming, let rt = renameText {
+                        TextField("留空恢复默认名", text: rt)
+                            .textFieldStyle(.plain)
+                            .font(.system(size: 13, weight: .semibold))
+                            .focused($renameFocused)
+                            .onSubmit { onRenameCommit() }
+                            .onExitCommand { onRenameCancel() }
+                            .onAppear { renameFocused = true }
+                            .padding(.horizontal, 3).padding(.vertical, 1)
+                            .background(Color.accentColor.opacity(0.08))
+                            .overlay(RoundedRectangle(cornerRadius: 4)
+                                .strokeBorder(Color.accentColor, lineWidth: 1.5))
+                            .cornerRadius(4)
+                    } else {
+                        Text(row.title)
+                            .font(.system(size: 13, weight: .semibold))
+                            .lineLimit(1)
+                            .truncationMode(.tail)
+                    }
 
                     // E9:profileTag 随 E3 灰化(只 agent 保留彩 chip)。
                     if let tag = row.profileTag {

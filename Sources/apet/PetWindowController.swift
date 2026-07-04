@@ -50,7 +50,7 @@ final class PetWindowController: NSObject {
     var sessionGroupsProvider: (() -> [String])?
     var onSelectTab: ((SessionTab) -> Void)?
     var onToggleGroupMembership: ((SessionKey, String) -> Void)?
-    var onCreateGroupFor: ((SessionKey?) -> Void)?
+    var onCommitNewGroupFor: ((String, SessionKey?) -> Void)?
     var onDeleteGroup: ((String) -> Void)?
     /// F3：状态圆点配色，由 AppCoordinator 从 config 注入。
     var dotPalette: DotPalette = .system
@@ -382,7 +382,6 @@ final class PetWindowController: NSObject {
             hotkeyHint: hotkeyHint,
             onTap: { [weak self] id in self?.handleSessionTap(id: id) },
             onToggleFavorite: { [weak self] id in self?.handleToggleFavorite(id: id) },
-            onRename: { [weak self] id in self?.handleRename(id: id) },
             onCopyId: { [weak self] id in self?.handleCopyId(id: id) },
             onCopyResume: { [weak self] id in self?.handleCopyResume(id: id) },
             onLocalSummary: { [weak self] id in self?.handleLocalSummary(id: id) },
@@ -394,7 +393,8 @@ final class PetWindowController: NSObject {
         panelVC.sessionGroupsProvider = { [weak self] in self?.sessionGroupsProvider?() ?? [] }
         panelVC.onSelectTab = { [weak self] tab in self?.onSelectTab?(tab) }
         panelVC.onToggleGroup = { [weak self] key, g in self?.onToggleGroupMembership?(key, g) }
-        panelVC.onCreateGroup = { [weak self] keyOrNil in self?.onCreateGroupFor?(keyOrNil) }
+        panelVC.onCommitNewGroup = { [weak self] name, key in self?.onCommitNewGroupFor?(name, key) }
+        panelVC.onCommitRename = { [weak self] key, name in self?.onRenameSession?(key, name.isEmpty ? nil : name) }
         panelVC.onDeleteGroup = { [weak self] g in self?.onDeleteGroup?(g) }
         let p = NSPopover()
         p.contentViewController = panelVC
@@ -434,10 +434,6 @@ final class PetWindowController: NSObject {
     }
     private func handleToggleFavorite(id: String) {
         sessionForId(id).map { onToggleFavorite?($0.key) }
-    }
-    private func handleRename(id: String) {
-        guard let s = sessionForId(id) else { return }
-        if case .set(let name) = SessionRowActions.promptRename(s) { onRenameSession?(s.key, name) }
     }
     private func handleCopyId(id: String) { sessionForId(id).map(SessionRowActions.copyId) }
     private func handleCopyResume(id: String) { sessionForId(id).map(SessionRowActions.copyResume) }
@@ -524,7 +520,6 @@ private struct PetPanelRootView: View {
     let hotkeyHint: String?
     let onTap: (String) -> Void
     let onToggleFavorite: (String) -> Void
-    let onRename: (String) -> Void
     let onCopyId: (String) -> Void
     let onCopyResume: (String) -> Void
     let onLocalSummary: (String) -> Void
@@ -534,8 +529,9 @@ private struct PetPanelRootView: View {
     var onSelectTab: (SessionTab) -> Void = { _ in }
     var groups: [String] = []
     var onToggleGroup: (String, String) -> Void = { _, _ in }
-    var onCreateGroup: (String?) -> Void = { _ in }
+    var onCommitNewGroup: (String, String?) -> Void = { _, _ in }
     var onDeleteGroup: (String) -> Void = { _ in }
+    var onCommitRename: (String, String) -> Void = { _, _ in }
 
     /// 是否存在未读 waiting 会话（红/橙点）。
     /// 避免全绿/全已读时按钮可见却点了无反应（产品评审 MAJOR-1）。
@@ -549,14 +545,15 @@ private struct PetPanelRootView: View {
     var body: some View {
         VStack(spacing: 0) {
             SessionPanel(sessions: sessions, now: now, onTap: onTap,
-                         onToggleFavorite: onToggleFavorite, onRename: onRename,
+                         onToggleFavorite: onToggleFavorite,
                          onCopyId: onCopyId, onCopyResume: onCopyResume,
                          onLocalSummary: onLocalSummary,
                          hotkeyHint: hotkeyHint, palette: palette,
                          showsTabBar: true,
                          selectedTab: selectedTab, onSelectTab: onSelectTab,
                          groups: groups, onToggleGroup: onToggleGroup,
-                         onCreateGroup: onCreateGroup, onDeleteGroup: onDeleteGroup)
+                         onCommitNewGroup: onCommitNewGroup, onDeleteGroup: onDeleteGroup,
+                         onCommitRename: onCommitRename)
             Divider()
             // 紧凑操作行：已读常驻置灰(U3)/首选项/退出。
             HStack(spacing: 0) {
@@ -582,7 +579,6 @@ private final class SessionPanelHostController: NSViewController {
     private let hotkeyHint: String?
     private let onTap: (String) -> Void
     private let onToggleFavorite: (String) -> Void
-    private let onRename: (String) -> Void
     private let onCopyId: (String) -> Void
     private let onCopyResume: (String) -> Void
     private let onLocalSummary: (String) -> Void
@@ -594,7 +590,8 @@ private final class SessionPanelHostController: NSViewController {
     var sessionGroupsProvider: (() -> [String])?
     var onSelectTab: ((SessionTab) -> Void)?
     var onToggleGroup: ((SessionKey, String) -> Void)?
-    var onCreateGroup: ((SessionKey?) -> Void)?
+    var onCommitNewGroup: ((String, SessionKey?) -> Void)?
+    var onCommitRename: ((SessionKey, String) -> Void)?
     var onDeleteGroup: ((String) -> Void)?
 
     init(
@@ -603,7 +600,6 @@ private final class SessionPanelHostController: NSViewController {
         hotkeyHint: String?,
         onTap: @escaping (String) -> Void,
         onToggleFavorite: @escaping (String) -> Void,
-        onRename: @escaping (String) -> Void,
         onCopyId: @escaping (String) -> Void,
         onCopyResume: @escaping (String) -> Void,
         onLocalSummary: @escaping (String) -> Void,
@@ -615,7 +611,6 @@ private final class SessionPanelHostController: NSViewController {
         self.hotkeyHint = hotkeyHint
         self.onTap = onTap
         self.onToggleFavorite = onToggleFavorite
-        self.onRename = onRename
         self.onCopyId = onCopyId
         self.onCopyResume = onCopyResume
         self.onLocalSummary = onLocalSummary
@@ -634,7 +629,7 @@ private final class SessionPanelHostController: NSViewController {
         PetPanelRootView(sessions: sessions, now: Date().timeIntervalSince1970,
                          palette: palette,
                          hotkeyHint: hotkeyHint, onTap: onTap,
-                         onToggleFavorite: onToggleFavorite, onRename: onRename,
+                         onToggleFavorite: onToggleFavorite,
                          onCopyId: onCopyId, onCopyResume: onCopyResume,
                          onLocalSummary: onLocalSummary,
                          onOpenPreferences: onOpenPreferences, onAcknowledgeAll: onAcknowledgeAll,
@@ -648,12 +643,16 @@ private final class SessionPanelHostController: NSViewController {
                              guard let self, let sess = self.petSessionForId(id) else { return }
                              self.onToggleGroup?(sess.key, g)
                          },
-                         onCreateGroup: { [weak self] idOrNil in
+                         onCommitNewGroup: { [weak self] name, idOrNil in
                              guard let self else { return }
-                             if let id = idOrNil, let sess = self.petSessionForId(id) { self.onCreateGroup?(sess.key) }
-                             else { self.onCreateGroup?(nil) }
+                             let key = idOrNil.flatMap { self.petSessionForId($0)?.key }
+                             self.onCommitNewGroup?(name, key)
                          },
-                         onDeleteGroup: { [weak self] g in self?.onDeleteGroup?(g) })
+                         onDeleteGroup: { [weak self] g in self?.onDeleteGroup?(g) },
+                         onCommitRename: { [weak self] id, name in
+                             guard let self, let sess = self.petSessionForId(id) else { return }
+                             self.onCommitRename?(sess.key, name)
+                         })
     }
 
     override func loadView() {

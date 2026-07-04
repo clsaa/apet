@@ -18,7 +18,6 @@ private struct PanelRootView: View {
     let hotkeyHint: String?
     let onTap: (String) -> Void
     let onToggleFavorite: (String) -> Void
-    let onRename: (String) -> Void
     let onCopyId: (String) -> Void
     let onCopyResume: (String) -> Void
     let onLocalSummary: (String) -> Void
@@ -31,8 +30,9 @@ private struct PanelRootView: View {
     var onSelectTab: (SessionTab) -> Void = { _ in }
     var groups: [String] = []
     var onToggleGroup: (String, String) -> Void = { _, _ in }
-    var onCreateGroup: (String?) -> Void = { _ in }
+    var onCommitNewGroup: (String, String?) -> Void = { _, _ in }
     var onDeleteGroup: (String) -> Void = { _ in }
+    var onCommitRename: (String, String) -> Void = { _, _ in }
     var pinned: Bool = false
     var onTogglePin: () -> Void = {}
 
@@ -47,13 +47,14 @@ private struct PanelRootView: View {
     var body: some View {
         VStack(spacing: 0) {
             SessionPanel(sessions: sessions, now: now, onTap: onTap,
-                         onToggleFavorite: onToggleFavorite, onRename: onRename,
+                         onToggleFavorite: onToggleFavorite,
                          onCopyId: onCopyId, onCopyResume: onCopyResume,
                          onLocalSummary: onLocalSummary,
                          hotkeyHint: hotkeyHint, palette: palette,
                          selectedTab: selectedTab, onSelectTab: onSelectTab,
                          groups: groups, onToggleGroup: onToggleGroup,
-                         onCreateGroup: onCreateGroup, onDeleteGroup: onDeleteGroup)
+                         onCommitNewGroup: onCommitNewGroup, onDeleteGroup: onDeleteGroup,
+                         onCommitRename: onCommitRename)
             Divider()
 
             // 未装 hook 时的 slim 开启入口；已装则完全隐藏（省空间，去掉冗余「已启用」状态行）。
@@ -159,7 +160,7 @@ final class MenuBarController: NSObject {
     var sessionGroupsProvider: (() -> [String])?
     var onSelectTab: ((SessionTab) -> Void)?
     var onToggleGroupMembership: ((SessionKey, String) -> Void)?
-    var onCreateGroupFor: ((SessionKey?) -> Void)?    // nil = 建空组(tab栏+)
+    var onCommitNewGroupFor: ((String, SessionKey?) -> Void)?    // 内联提交:name + 可选加入的会话
     var onDeleteGroup: ((String) -> Void)?
     // M3-D-F:面板窗口尺寸持久化。
     var panelFrameProvider: (() -> NSRect?)?
@@ -278,7 +279,6 @@ final class MenuBarController: NSObject {
             hotkeyHint: hotkeyHint,
             onTap: { [weak self] id in self?.handleSessionTap(id: id) },
             onToggleFavorite: { [weak self] id in self?.handleToggleFavorite(id: id) },
-            onRename: { [weak self] id in self?.handleRename(id: id) },
             onCopyId: { [weak self] id in self?.handleCopyId(id: id) },
             onCopyResume: { [weak self] id in self?.handleCopyResume(id: id) },
             onLocalSummary: { [weak self] id in self?.handleLocalSummary(id: id) },
@@ -286,7 +286,7 @@ final class MenuBarController: NSObject {
                 self?.onTogglePet?()
                 self?.panelHosting?.rootView = self?.makePanelRootView() ?? PanelRootView(
                     sessions: [], now: 0, palette: .system, petVisible: false, hookInstalled: false, hotkeyHint: nil,
-                    onTap: { _ in }, onToggleFavorite: { _ in }, onRename: { _ in },
+                    onTap: { _ in }, onToggleFavorite: { _ in },
                     onCopyId: { _ in }, onCopyResume: { _ in }, onLocalSummary: { _ in },
                     onTogglePet: {}, onOpenPreferences: {}, onQuit: {}, onAcknowledgeAll: {}
                 )
@@ -302,7 +302,7 @@ final class MenuBarController: NSObject {
                 self?.onSelectTab?(tab)
                 self?.panelHosting?.rootView = self?.makePanelRootView() ?? PanelRootView(
                     sessions: [], now: 0, palette: .system, petVisible: false, hookInstalled: false, hotkeyHint: nil,
-                    onTap: { _ in }, onToggleFavorite: { _ in }, onRename: { _ in },
+                    onTap: { _ in }, onToggleFavorite: { _ in },
                     onCopyId: { _ in }, onCopyResume: { _ in }, onLocalSummary: { _ in },
                     onTogglePet: {}, onOpenPreferences: {}, onQuit: {}, onAcknowledgeAll: {})
             },
@@ -311,12 +311,16 @@ final class MenuBarController: NSObject {
                 guard let self, let s = self.sessionForId(id) else { return }
                 self.onToggleGroupMembership?(s.key, group)
             },
-            onCreateGroup: { [weak self] idOrNil in
+            onCommitNewGroup: { [weak self] name, attachId in
                 guard let self else { return }
-                if let id = idOrNil, let sess = self.sessionForId(id) { self.onCreateGroupFor?(sess.key) }
-                else { self.onCreateGroupFor?(nil) }
+                let key = attachId.flatMap { self.sessionForId($0)?.key }
+                self.onCommitNewGroupFor?(name, key)
             },
             onDeleteGroup: { [weak self] g in self?.onDeleteGroup?(g) },
+            onCommitRename: { [weak self] id, name in
+                guard let self, let s = self.sessionForId(id) else { return }
+                self.onRenameSession?(s.key, name.isEmpty ? nil : name)
+            },
             pinned: panelPinnedProvider?() ?? false,
             onTogglePin: { [weak self] in
                 self?.onTogglePin?()
@@ -339,12 +343,6 @@ final class MenuBarController: NSObject {
         onToggleFavorite?(s.key)
     }
 
-    private func handleRename(id: String) {
-        guard let s = sessionForId(id) else { return }
-        if case .set(let name) = SessionRowActions.promptRename(s) {
-            onRenameSession?(s.key, name)
-        }
-    }
 
     private func handleCopyId(id: String) {
         sessionForId(id).map(SessionRowActions.copyId)

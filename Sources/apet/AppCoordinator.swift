@@ -377,15 +377,13 @@ final class AppCoordinator {
             let toggleGroupMem: (SessionKey, String) -> Void = { [weak self] key, group in
                 self?.updateMeta(key) { $0.groups = GroupMembership.toggle(group, in: $0.groups) }
             }
-            let createGroup: (SessionKey?) -> Void = { [weak self] keyOrNil in
+            // 内联提交:面板已实时校验+去重,这里兜底 isValidName(防非 UI 调用)。
+            let commitNewGroup: (String, SessionKey?) -> Void = { [weak self] rawName, keyOrNil in
                 guard let self else { return }
-                guard let name = self.promptGroupName() else { return }
-                guard GroupMembership.isValidName(name) else {
-                    self.showInfoAlert("分组名无效", "请输入 1–30 字符、不含控制字符的名称。")
-                    return
-                }
+                let name = rawName.trimmingCharacters(in: .whitespacesAndNewlines)
+                guard GroupMembership.isValidName(name) else { return }
                 if !self.config.sessionGroups.contains(name) { self.config.sessionGroups.append(name) }
-                self.config.selectedTab = SessionTab.group(name).encoded  // 建组后切到该 tab(别静默成功)
+                self.config.selectedTab = SessionTab.group(name).encoded  // 建组后切到该 tab
                 try? self.configStore.save(self.config)
                 if let key = keyOrNil {
                     self.updateMeta(key) { m in if !m.groups.contains(name) { m.groups.append(name) } }
@@ -395,9 +393,7 @@ final class AppCoordinator {
             }
             let deleteGroup: (String) -> Void = { [weak self] g in
                 guard let self else { return }
-                let memberCount = self.sessionMetas.values.filter { $0.groups.contains(g) }.count
-                guard self.confirmDestructive("删除分组「\(g)」?",
-                        "将从 \(memberCount) 个会话移除该分组归属,不可撤销。", confirm: "删除") else { return }
+                // 确认已在面板二段式内联完成,这里直接执行。
                 self.config.sessionGroups.removeAll { $0 == g }
                 if self.config.selectedTab == SessionTab.group(g).encoded { self.config.selectedTab = "all" }
                 try? self.configStore.save(self.config)
@@ -412,7 +408,7 @@ final class AppCoordinator {
             mb.sessionGroupsProvider = groupsProvider; pw.sessionGroupsProvider = groupsProvider
             mb.onSelectTab = selectTab; pw.onSelectTab = selectTab
             mb.onToggleGroupMembership = toggleGroupMem; pw.onToggleGroupMembership = toggleGroupMem
-            mb.onCreateGroupFor = createGroup; pw.onCreateGroupFor = createGroup
+            mb.onCommitNewGroupFor = commitNewGroup; pw.onCommitNewGroupFor = commitNewGroup
             mb.onDeleteGroup = deleteGroup; pw.onDeleteGroup = deleteGroup
             // M3-D-F:面板尺寸持久化(仅菜单栏可缩放窗口)。
             mb.panelSizeProvider = { [weak self] in
@@ -662,38 +658,8 @@ final class AppCoordinator {
         }
     }
 
-    /// 显式用户操作触发的 meta 变更：改内存 + 落盘 + 立即刷新 UI。空 meta 一并 GC。
-    /// 信息提示弹窗。
-    private func showInfoAlert(_ title: String, _ msg: String) {
-        let a = NSAlert(); a.messageText = title; a.informativeText = msg
-        a.alertStyle = .informational; a.addButton(withTitle: "好")
-        NSApp.activate(ignoringOtherApps: true); a.runModal()
-    }
 
-    /// 破坏性操作二次确认。confirm=确认按钮标题。返回是否确认。
-    private func confirmDestructive(_ title: String, _ msg: String, confirm: String) -> Bool {
-        let a = NSAlert(); a.messageText = title; a.informativeText = msg
-        a.alertStyle = .warning
-        a.addButton(withTitle: confirm)   // 第一个=默认
-        a.addButton(withTitle: "取消")
-        NSApp.activate(ignoringOtherApps: true)
-        return a.runModal() == .alertFirstButtonReturn
-    }
 
-    /// 弹输入框取分组名(建组用)。取消/空 → nil。
-    private func promptGroupName() -> String? {
-        let alert = NSAlert()
-        alert.messageText = "新建分组"
-        alert.informativeText = "输入分组名(≤30 字符)。"
-        let tf = NSTextField(frame: NSRect(x: 0, y: 0, width: 220, height: 24))
-        alert.accessoryView = tf
-        alert.addButton(withTitle: "创建")
-        alert.addButton(withTitle: "取消")
-        NSApp.activate(ignoringOtherApps: true)
-        guard alert.runModal() == .alertFirstButtonReturn else { return nil }
-        let name = tf.stringValue.trimmingCharacters(in: .whitespacesAndNewlines)
-        return name.isEmpty ? nil : name
-    }
 
     private func updateMeta(_ key: SessionKey, _ mutate: (inout SessionMeta) -> Void) {
         let mk = SessionMetaMerger.metaKey(key)
