@@ -103,6 +103,8 @@ public struct AppConfig: Codable, Equatable {
     /// M3-D-F：面板窗口尺寸(可缩放窗口持久化)。默认 360×480。
     public var panelWidth: Double
     public var panelHeight: Double
+    /// M3-D-F:面板窗口图钉(常驻不失焦自隐)。默认 false(近 popover transient)。
+    public var panelPinned: Bool
 
     // CodingKeys：含全部字段，供自定义 decoder 和 synthesized encoder 共同使用。
     private enum CodingKeys: String, CodingKey {
@@ -110,7 +112,7 @@ public struct AppConfig: Codable, Equatable {
              waitingEndedAfterSec, selectedPet, readGrayAfterSec, panelHotKey,
              dndEnabled, dndStartMin, dndEndMin, excludedRoots, menuBarStyle, stateColors,
              notifyBannerEnabled, notifySoundEnabled,
-             selectedTab, sessionGroups, panelWidth, panelHeight
+             selectedTab, sessionGroups, panelWidth, panelHeight, panelPinned
     }
 
     /// 自定义解码：旧版 config.json 缺少可选字段时用默认值，不丢失其他已有设置。
@@ -143,6 +145,7 @@ public struct AppConfig: Codable, Equatable {
         sessionGroups        = try c.decodeIfPresent([String].self, forKey: .sessionGroups) ?? []
         panelWidth           = try c.decodeIfPresent(Double.self,   forKey: .panelWidth)    ?? 360
         panelHeight          = try c.decodeIfPresent(Double.self,   forKey: .panelHeight)   ?? 480
+        panelPinned          = try c.decodeIfPresent(Bool.self,     forKey: .panelPinned)   ?? false
     }
 
     public init(
@@ -166,7 +169,8 @@ public struct AppConfig: Codable, Equatable {
         selectedTab: String = "all",
         sessionGroups: [String] = [],
         panelWidth: Double = 360,
-        panelHeight: Double = 480
+        panelHeight: Double = 480,
+        panelPinned: Bool = false
     ) {
         self.dataRoots = dataRoots
         self.displayMode = displayMode
@@ -189,6 +193,7 @@ public struct AppConfig: Codable, Equatable {
         self.sessionGroups = sessionGroups
         self.panelWidth = panelWidth
         self.panelHeight = panelHeight
+        self.panelPinned = panelPinned
     }
 
     /// Factory that produces the out-of-the-box defaults.

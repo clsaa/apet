@@ -202,39 +202,46 @@ struct SessionPanel: View {
         .background(emphasized ? Color.orange.opacity(0.06) : Color.clear)
     }
 
-    private func rowCell(_ row: SessionRowModel) -> some View {
-        SessionRowCell(row: row, palette: palette, onFavorite: { onToggleFavorite(row.id) })
-            .contentShape(Rectangle())
-            .onTapGesture { onTap(row.id) }
-            .contextMenu {
-                Button(row.favorite ? "取消收藏" : "收藏") { onToggleFavorite(row.id) }
-                Button("重命名…") { onRename(row.id) }
-                // M3-D-C:加入分组子菜单(勾选=在组;末尾新建分组)。
-                Menu("加入分组") {
-                    ForEach(groups, id: \.self) { g in
-                        Button {
-                            onToggleGroup(row.id, g)
-                        } label: {
-                            // 勾选态:已在组显 ✓,未在组用 circle 占位保左缘对齐(空 systemImage 会告警且不齐)。
-                            Label(g, systemImage: row.groups.contains(g) ? "checkmark.circle.fill" : "circle")
-                        }
-                    }
-                    if !groups.isEmpty { Divider() }
-                    Button("新建分组…") { onCreateGroup(row.id) }
-                }
-                // 本地摘要:DB 型 agent 无 jsonl 转录,必弹「找不到记录文件」死弹窗 → 隐藏
-                //(M3-C+ 评审;Divider 随项内移,免得留双分隔线)。
-                if !AgentManifest.dbBackedAgents.contains(row.agent) {
-                    Divider()
-                    Button("本地摘要") { onLocalSummary(row.id) }
-                }
-                Divider()
-                Button("复制 sessionID") { onCopyId(row.id) }
-                // 仅对有已核实恢复命令的 agent 显示（产品评审 M3：不静默复制假命令）。
-                if SessionRowActions.hasResumeCommand(agent: row.agent, sessionId: row.sessionId) {
-                    Button("复制恢复命令") { onCopyResume(row.id) }
+    // E10:行操作菜单抽成共享,右键 contextMenu 与悬停 ⋯ 复用同一份。
+    @ViewBuilder
+    private func rowMenuItems(_ row: SessionRowModel) -> some View {
+        Button(row.favorite ? "取消收藏" : "收藏") { onToggleFavorite(row.id) }
+        Button("重命名…") { onRename(row.id) }
+        Menu("加入分组") {
+            ForEach(groups, id: \.self) { g in
+                Button { onToggleGroup(row.id, g) } label: {
+                    Label(g, systemImage: row.groups.contains(g) ? "checkmark.circle.fill" : "circle")
                 }
             }
+            if !groups.isEmpty { Divider() }
+            Button("新建分组…") { onCreateGroup(row.id) }
+        }
+        if !AgentManifest.dbBackedAgents.contains(row.agent) {
+            Divider()
+            Button("本地摘要") { onLocalSummary(row.id) }
+        }
+        Divider()
+        Button("复制 sessionID") { onCopyId(row.id) }
+        if SessionRowActions.hasResumeCommand(agent: row.agent, sessionId: row.sessionId) {
+            Button("复制恢复命令") { onCopyResume(row.id) }
+        }
+    }
+
+    private func rowCell(_ row: SessionRowModel) -> some View {
+        SessionRowCell(
+            row: row, palette: palette,
+            onFavorite: { onToggleFavorite(row.id) },
+            overflowMenu: AnyView(
+                Menu { rowMenuItems(row) } label: {
+                    Image(systemName: "ellipsis.circle").font(.system(size: 11))
+                }
+                .menuStyle(.borderlessButton).menuIndicator(.hidden)
+                .frame(width: 18)
+            )
+        )
+            .contentShape(Rectangle())
+            .onTapGesture { onTap(row.id) }
+            .contextMenu { rowMenuItems(row) }
     }
 
     // MARK: - Header / empty
@@ -263,6 +270,7 @@ private struct SessionRowCell: View {
     let row: SessionRowModel
     let palette: DotPalette
     var onFavorite: () -> Void = {}
+    var overflowMenu: AnyView? = nil    // E10:悬停 ⋯ 溢出入口(= 右键菜单同款)
     @State private var hovering = false
 
     var body: some View {
@@ -334,6 +342,12 @@ private struct SessionRowCell: View {
                 }
             }
 
+            // E10:悬停 ⋯ 溢出入口(固定 18pt 常驻位,悬停才现,不抖动)。
+            if let overflow = overflowMenu {
+                overflow
+                    .foregroundStyle(.secondary)
+                    .opacity(hovering ? 1 : 0)
+            }
             // A/E8:收藏☆固定 18pt 尾列(空间常驻→无位移抖动);悬停或已收藏才显。
             Image(systemName: row.favorite ? "star.fill" : "star")
                 .font(.system(size: 11))

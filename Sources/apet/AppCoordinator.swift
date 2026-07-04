@@ -424,6 +424,12 @@ final class AppCoordinator {
                 self.config.panelHeight = Double(size.height)
                 try? self.configStore.save(self.config)
             }
+            mb.panelPinnedProvider = { [weak self] in self?.config.panelPinned ?? false }
+            mb.onTogglePin = { [weak self] in
+                guard let self else { return }
+                self.config.panelPinned.toggle()
+                try? self.configStore.save(self.config)
+            }
 
             // 面板顶部快捷键提示
             let hint = config.panelHotKey.displayString + " 打开/关闭"
@@ -594,6 +600,7 @@ final class AppCoordinator {
         merged.sessionGroups = config.sessionGroups
         merged.panelWidth    = config.panelWidth
         merged.panelHeight   = config.panelHeight
+        merged.panelPinned   = config.panelPinned
         config = merged
 
         // Apply display mode immediately.

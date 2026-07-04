@@ -33,6 +33,8 @@ private struct PanelRootView: View {
     var onToggleGroup: (String, String) -> Void = { _, _ in }
     var onCreateGroup: (String?) -> Void = { _ in }
     var onDeleteGroup: (String) -> Void = { _ in }
+    var pinned: Bool = false
+    var onTogglePin: () -> Void = {}
 
     /// 是否存在未读 waiting 会话——仅此时显示「全部已读」（产品评审 MAJOR-1）。
     private var hasUnread: Bool {
@@ -72,6 +74,9 @@ private struct PanelRootView: View {
                 // E6/U3:已读常驻,无未读时置灰(此前「有未读才显」点完塌成3按钮抖动)。
                 PanelFooterButton(icon: "checkmark.circle", label: "已读", action: onAcknowledgeAll,
                                   enabled: hasUnread, help: "把所有「等你」会话标为已读")
+                PanelFooterButton(icon: pinned ? "pin.fill" : "pin",
+                                  label: pinned ? "已固定" : "固定", action: onTogglePin,
+                                  help: pinned ? "取消固定:点别处自动隐藏" : "固定:常驻不自动隐藏")
                 PanelFooterButton(icon: petVisible ? "eye.slash" : "eye",
                                   label: petVisible ? "隐藏" : "显示", action: onTogglePet,
                                   help: petVisible ? "隐藏桌面宠物" : "显示桌面宠物")
@@ -159,6 +164,8 @@ final class MenuBarController: NSObject {
     // M3-D-F:面板窗口尺寸持久化。
     var panelSizeProvider: (() -> CGSize)?
     var onPanelResize: ((CGSize) -> Void)?
+    var panelPinnedProvider: (() -> Bool)?
+    var onTogglePin: (() -> Void)?
 
     // MARK: - State
 
@@ -308,7 +315,15 @@ final class MenuBarController: NSObject {
                 if let id = idOrNil, let sess = self.sessionForId(id) { self.onCreateGroupFor?(sess.key) }
                 else { self.onCreateGroupFor?(nil) }
             },
-            onDeleteGroup: { [weak self] g in self?.onDeleteGroup?(g) }
+            onDeleteGroup: { [weak self] g in self?.onDeleteGroup?(g) },
+            pinned: panelPinnedProvider?() ?? false,
+            onTogglePin: { [weak self] in
+                self?.onTogglePin?()
+                if let self, let w = self.panelWindow {
+                    w.hidesOnDeactivate = !(self.panelPinnedProvider?() ?? false)
+                    self.panelHosting?.rootView = self.makePanelRootView()
+                }
+            }
         )
     }
 
@@ -361,6 +376,7 @@ final class MenuBarController: NSObject {
         let win: PanelResizeWindow
         if let existing = panelWindow {
             win = existing
+            win.hidesOnDeactivate = !(panelPinnedProvider?() ?? false)
             panelHosting?.rootView = makePanelRootView()   // 刷新内容
             win.setContentSize(size)
         } else {
@@ -374,7 +390,7 @@ final class MenuBarController: NSObject {
                 backing: .buffered, defer: false)
             w.isMovableByWindowBackground = true
             w.level = .floating
-            w.hidesOnDeactivate = true
+            w.hidesOnDeactivate = !(panelPinnedProvider?() ?? false)   // 图钉常驻则不自隐
             w.isReleasedWhenClosed = false
             w.contentMinSize = NSSize(width: 300, height: 240)
             w.contentViewController = hc
