@@ -105,6 +105,10 @@ public struct AppConfig: Codable, Equatable {
     public var panelHeight: Double
     /// M3-D-F:面板窗口图钉(常驻不失焦自隐)。默认 false(近 popover transient)。
     public var panelPinned: Bool
+    /// M3-D-F:面板窗口位置(屏幕坐标)。panelPositioned=false 时忽略,首开锚到菜单栏图标。
+    public var panelX: Double
+    public var panelY: Double
+    public var panelPositioned: Bool
 
     // CodingKeys：含全部字段，供自定义 decoder 和 synthesized encoder 共同使用。
     private enum CodingKeys: String, CodingKey {
@@ -112,7 +116,8 @@ public struct AppConfig: Codable, Equatable {
              waitingEndedAfterSec, selectedPet, readGrayAfterSec, panelHotKey,
              dndEnabled, dndStartMin, dndEndMin, excludedRoots, menuBarStyle, stateColors,
              notifyBannerEnabled, notifySoundEnabled,
-             selectedTab, sessionGroups, panelWidth, panelHeight, panelPinned
+             selectedTab, sessionGroups, panelWidth, panelHeight, panelPinned,
+             panelX, panelY, panelPositioned
     }
 
     /// 自定义解码：旧版 config.json 缺少可选字段时用默认值，不丢失其他已有设置。
@@ -146,6 +151,9 @@ public struct AppConfig: Codable, Equatable {
         panelWidth           = try c.decodeIfPresent(Double.self,   forKey: .panelWidth)    ?? 360
         panelHeight          = try c.decodeIfPresent(Double.self,   forKey: .panelHeight)   ?? 480
         panelPinned          = try c.decodeIfPresent(Bool.self,     forKey: .panelPinned)   ?? false
+        panelX               = try c.decodeIfPresent(Double.self,   forKey: .panelX)        ?? 0
+        panelY               = try c.decodeIfPresent(Double.self,   forKey: .panelY)        ?? 0
+        panelPositioned      = try c.decodeIfPresent(Bool.self,     forKey: .panelPositioned) ?? false
     }
 
     public init(
@@ -170,7 +178,10 @@ public struct AppConfig: Codable, Equatable {
         sessionGroups: [String] = [],
         panelWidth: Double = 360,
         panelHeight: Double = 480,
-        panelPinned: Bool = false
+        panelPinned: Bool = false,
+        panelX: Double = 0,
+        panelY: Double = 0,
+        panelPositioned: Bool = false
     ) {
         self.dataRoots = dataRoots
         self.displayMode = displayMode
@@ -194,6 +205,9 @@ public struct AppConfig: Codable, Equatable {
         self.panelWidth = panelWidth
         self.panelHeight = panelHeight
         self.panelPinned = panelPinned
+        self.panelX = panelX
+        self.panelY = panelY
+        self.panelPositioned = panelPositioned
     }
 
     /// Factory that produces the out-of-the-box defaults.

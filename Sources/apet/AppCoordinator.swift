@@ -418,10 +418,18 @@ final class AppCoordinator {
             mb.panelSizeProvider = { [weak self] in
                 CGSize(width: self?.config.panelWidth ?? 360, height: self?.config.panelHeight ?? 480)
             }
-            mb.onPanelResize = { [weak self] size in
+            mb.panelFrameProvider = { [weak self] in
+                guard let self, self.config.panelPositioned else { return nil }
+                return NSRect(x: self.config.panelX, y: self.config.panelY,
+                              width: self.config.panelWidth, height: self.config.panelHeight)
+            }
+            mb.onPanelFrameChange = { [weak self] f in
                 guard let self else { return }
-                self.config.panelWidth = Double(size.width)
-                self.config.panelHeight = Double(size.height)
+                self.config.panelX = Double(f.origin.x)
+                self.config.panelY = Double(f.origin.y)
+                self.config.panelWidth = Double(f.size.width)
+                self.config.panelHeight = Double(f.size.height)
+                self.config.panelPositioned = true
                 try? self.configStore.save(self.config)
             }
             mb.panelPinnedProvider = { [weak self] in self?.config.panelPinned ?? false }
@@ -601,6 +609,9 @@ final class AppCoordinator {
         merged.panelWidth    = config.panelWidth
         merged.panelHeight   = config.panelHeight
         merged.panelPinned   = config.panelPinned
+        merged.panelX        = config.panelX
+        merged.panelY        = config.panelY
+        merged.panelPositioned = config.panelPositioned
         config = merged
 
         // Apply display mode immediately.

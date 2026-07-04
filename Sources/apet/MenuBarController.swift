@@ -162,8 +162,9 @@ final class MenuBarController: NSObject {
     var onCreateGroupFor: ((SessionKey?) -> Void)?    // nil = 建空组(tab栏+)
     var onDeleteGroup: ((String) -> Void)?
     // M3-D-F:面板窗口尺寸持久化。
+    var panelFrameProvider: (() -> NSRect?)?
     var panelSizeProvider: (() -> CGSize)?
-    var onPanelResize: ((CGSize) -> Void)?
+    var onPanelFrameChange: ((NSRect) -> Void)?
     var panelPinnedProvider: (() -> Bool)?
     var onTogglePin: (() -> Void)?
 
@@ -371,49 +372,59 @@ final class MenuBarController: NSObject {
             return
         }
 
-        // 复用已有窗口(失焦 orderOut 后重开):只刷新内容、重锚定,不新建。
+        let savedFrame = panelFrameProvider?()   // 已保存的完整 frame(位置+尺寸)
         let size = clampPanelSize(panelSizeProvider?() ?? CGSize(width: 360, height: 480))
         let win: PanelResizeWindow
         if let existing = panelWindow {
             win = existing
             win.hidesOnDeactivate = !(panelPinnedProvider?() ?? false)
-            panelHosting?.rootView = makePanelRootView()   // 刷新内容
-            win.setContentSize(size)
+            panelHosting?.rootView = makePanelRootView()
         } else {
             let hc = NSHostingController(rootView: makePanelRootView())
             panelHosting = hc
-            // 无标题栏浮窗:去掉 .titled 避免残留交通灯;.floating 而非 .statusBar,
-            // 否则会盖住面板自身弹出的 NSAlert(重命名/建组/摘要,交互评审 Major)。
             let w = PanelResizeWindow(
                 contentRect: NSRect(origin: .zero, size: size),
                 styleMask: [.borderless, .resizable, .fullSizeContentView],
                 backing: .buffered, defer: false)
             w.isMovableByWindowBackground = true
             w.level = .floating
-            w.hidesOnDeactivate = !(panelPinnedProvider?() ?? false)   // 图钉常驻则不自隐
+            w.hidesOnDeactivate = !(panelPinnedProvider?() ?? false)
             w.isReleasedWhenClosed = false
             w.contentMinSize = NSSize(width: 300, height: 240)
             w.contentViewController = hc
-            w.onResize = { [weak self] newSize in self?.onPanelResize?(newSize) }
+            w.onFrameChange = { [weak self] f in self?.onPanelFrameChange?(f) }
             win = w
             panelWindow = w
         }
 
-        // 定位在菜单栏图标下方,右对齐图标。
-        if let screen = button.window?.screen ?? NSScreen.main,
-           let btnFrame = button.window?.convertToScreen(button.convert(button.bounds, to: nil)) {
+        // 定位:有保存的 frame(用户拖过)→ 精确恢复;否则首开锚到菜单栏图标下方。
+        if let saved = savedFrame, saved.width >= 300, saved.height >= 240 {
+            win.setFrame(clampFrameOnScreen(saved), display: true)
+        } else if let screen = button.window?.screen ?? NSScreen.main,
+                  let btnFrame = button.window?.convertToScreen(button.convert(button.bounds, to: nil)) {
             var x = btnFrame.maxX - size.width
             x = max(screen.visibleFrame.minX + 8, x)
             let y = btnFrame.minY - size.height - 4
-            win.setFrameOrigin(NSPoint(x: x, y: y))
+            win.setFrame(NSRect(x: x, y: y, width: size.width, height: size.height), display: true)
         }
         win.makeKeyAndOrderFront(nil)
         NSApp.activate(ignoringOtherApps: true)
     }
 
-    /// 夹逼面板尺寸下限(防被拖成残尺寸后持久化,交互评审 Minor)。
     private func clampPanelSize(_ s: CGSize) -> CGSize {
         CGSize(width: max(300, s.width), height: max(240, s.height))
+    }
+
+    /// 保证窗口至少部分在可见屏内(防保存位置落在已拔掉的外接屏上→找不回)。
+    private func clampFrameOnScreen(_ f: NSRect) -> NSRect {
+        let visible = (NSScreen.screens.first { $0.frame.intersects(f) } ?? NSScreen.main)?.visibleFrame
+            ?? NSRect(x: 0, y: 0, width: 1440, height: 900)
+        var r = f
+        r.size.width = max(300, min(r.width, visible.width))
+        r.size.height = max(240, min(r.height, visible.height))
+        r.origin.x = min(max(r.origin.x, visible.minX), visible.maxX - r.width)
+        r.origin.y = min(max(r.origin.y, visible.minY), visible.maxY - r.height)
+        return r
     }
 
     // MARK: - Actions
