@@ -89,7 +89,7 @@ swift test --filter SessionStoreOrderingTests   # 跑单个测试类
   - **M3-B 会话管理** ✅（搜索/等你置顶/收藏+重命名 F7/相对时间 F10/复制 ID+恢复命令 F11；SessionMeta 持久化）
   - **M3-A2 外观/体验** ✅（首选项即时生效、状态圆点自定义色 F3、通知横幅/声音分开 F1、首选项四分页 F4、内置宠物名 F5、面板页脚瘦身）。F9 主动不改 ⌥⌘S（footgun）。
   - **M3-C 多 Agent** ✅（AgentManifest 契约 + **QoderWork 实测接入**：SQLite agents.db 只读轮询/粗略态/点击激活 App + **Qoder CLI 实测接入**：~/.qoder jsonl 与 Claude 同构/resume=`qodercli --resume`）。
-  - **M3-D AI 总结** ✅（本地摘要已接面板右键；模型摘要核心+安全缝已备、UI 待接）。F5 宠物命名持久化 ✅（pet-names.json，01=用户本人语义）。
+  - **M3-D AI 总结** ✅（**模型摘要已接**：右键「AI 摘要」→ ExecutableLocator 定位本机 claude(-lic 补 nvm PATH)→ SummarizerService 后台跑 `claude -p` 读会话日志出一句中文总结,行内展开显示。启发式 LocalSummarizer 保留但不再进 UI）。F5 宠物命名持久化 ✅（pet-names.json，01=用户本人语义）。
   - **M3-D 面板 UX** ✅（2026-07-04，见 `docs/superpowers/specs/2026-07-03-apet-panel-ux-tabs-summary-groups-design.md`）：Tab 分流取代分区（全部/收藏/进行中/已读 + 自定义分组，带计数，「等你」跨 tab 常驻）+ 可多属自定义分组（右键加入/建组/删组，删组二次确认）+ 终端真 app 图标（hook 读 `__CFBundleIdentifier`，Cursor/Warp-Preview 正确）+ 悬停收藏 + 视觉打磨（路径折叠/色盲状态形状/元数据统一/整行 hover/字号三级）+ 可缩放面板窗口（菜单栏侧，桌宠仍 popover）。现存 bug 修复：跳转失败不误标已读（FocusResult.missedButActivated 区分兜底激活）、Claude 失败弹窗给复制恢复命令、复制 HUD 反馈、搜索匹配 agent。经 **8 视角对抗评审 + 修复**（架构/交互/UI/产品/AI/用户/测试/开源）。遗留：E10 悬停 ⋯ 溢出入口未做、桌宠侧不可缩放。752 测试全绿。
   - **六视角对抗评审** ✅（架构/产品/AI/用户/测试/开源 2026-07-03，Blocker/Major 已修复：applyMetas 绕过、ProcessRunner cwd/PATH/argv0、SQLite busy 半读、时区日界、幽灵01、围栏逃逸等，见 `.superpowers/sdd/`）。
   - **M3-C+ OpenCode 接入**（2026-07-03）：opencode.db 只读轮询/内容信号优先（in-flight/completed）/无条件注册/诚实无跳转降级+复制恢复命令/OpenCodeHealth 用户可见，见 `docs/superpowers/specs/2026-07-03-apet-opencode-source-design.md`（七视角评审×3 轮 + 真机实测门七项过门,含 v1 message 表漂移发现与修复,见 `.superpowers/sdd/task-opencode-live-gate-report.md`）。
