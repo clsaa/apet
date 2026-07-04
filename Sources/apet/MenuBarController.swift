@@ -20,7 +20,7 @@ private struct PanelRootView: View {
     let onToggleFavorite: (String) -> Void
     let onCopyId: (String) -> Void
     let onCopyResume: (String) -> Void
-    let onLocalSummary: (String) -> Void
+    var onSummarize: (String) async -> SummaryResult = { _ in .error("未接入") }
     let onTogglePet: () -> Void
     let onOpenPreferences: () -> Void
     let onQuit: () -> Void
@@ -49,7 +49,7 @@ private struct PanelRootView: View {
             SessionPanel(sessions: sessions, now: now, onTap: onTap,
                          onToggleFavorite: onToggleFavorite,
                          onCopyId: onCopyId, onCopyResume: onCopyResume,
-                         onLocalSummary: onLocalSummary,
+                         onSummarize: onSummarize,
                          hotkeyHint: hotkeyHint, palette: palette,
                          selectedTab: selectedTab, onSelectTab: onSelectTab,
                          groups: groups, onToggleGroup: onToggleGroup,
@@ -281,13 +281,13 @@ final class MenuBarController: NSObject {
             onToggleFavorite: { [weak self] id in self?.handleToggleFavorite(id: id) },
             onCopyId: { [weak self] id in self?.handleCopyId(id: id) },
             onCopyResume: { [weak self] id in self?.handleCopyResume(id: id) },
-            onLocalSummary: { [weak self] id in self?.handleLocalSummary(id: id) },
+            onSummarize: { [weak self] id in await self?.summarize(id: id) ?? .error("面板已关闭") },
             onTogglePet: { [weak self] in
                 self?.onTogglePet?()
                 self?.panelHosting?.rootView = self?.makePanelRootView() ?? PanelRootView(
                     sessions: [], now: 0, palette: .system, petVisible: false, hookInstalled: false, hotkeyHint: nil,
                     onTap: { _ in }, onToggleFavorite: { _ in },
-                    onCopyId: { _ in }, onCopyResume: { _ in }, onLocalSummary: { _ in },
+                    onCopyId: { _ in }, onCopyResume: { _ in },
                     onTogglePet: {}, onOpenPreferences: {}, onQuit: {}, onAcknowledgeAll: {}
                 )
             },
@@ -303,7 +303,7 @@ final class MenuBarController: NSObject {
                 self?.panelHosting?.rootView = self?.makePanelRootView() ?? PanelRootView(
                     sessions: [], now: 0, palette: .system, petVisible: false, hookInstalled: false, hotkeyHint: nil,
                     onTap: { _ in }, onToggleFavorite: { _ in },
-                    onCopyId: { _ in }, onCopyResume: { _ in }, onLocalSummary: { _ in },
+                    onCopyId: { _ in }, onCopyResume: { _ in },
                     onTogglePet: {}, onOpenPreferences: {}, onQuit: {}, onAcknowledgeAll: {})
             },
             groups: sessionGroupsProvider?() ?? [],
@@ -338,6 +338,12 @@ final class MenuBarController: NSObject {
         currentSessions.first { "\($0.key.agent)|\($0.key.root)|\($0.key.sessionId)" == id }
     }
 
+    func summarize(id: String) async -> SummaryResult {
+        guard let s = sessionForId(id) else { return .error("会话不存在") }
+        return await SessionRowActions.aiSummary(s)
+    }
+
+
     private func handleToggleFavorite(id: String) {
         guard let s = sessionForId(id) else { return }
         onToggleFavorite?(s.key)
@@ -352,9 +358,6 @@ final class MenuBarController: NSObject {
         sessionForId(id).map(SessionRowActions.copyResume)
     }
 
-    private func handleLocalSummary(id: String) {
-        sessionForId(id).map(SessionRowActions.showLocalSummary)
-    }
 
     /// 以编程方式打开/切换会话面板 popover（供全局热键在 menuBarOnly 模式下调用）。
     func showPanel() {

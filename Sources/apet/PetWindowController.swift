@@ -384,7 +384,6 @@ final class PetWindowController: NSObject {
             onToggleFavorite: { [weak self] id in self?.handleToggleFavorite(id: id) },
             onCopyId: { [weak self] id in self?.handleCopyId(id: id) },
             onCopyResume: { [weak self] id in self?.handleCopyResume(id: id) },
-            onLocalSummary: { [weak self] id in self?.handleLocalSummary(id: id) },
             onOpenPreferences: { [weak self] in self?.onOpenPreferences?() },
             onAcknowledgeAll: { [weak self] in self?.onAcknowledgeAll?() }
         )
@@ -437,19 +436,11 @@ final class PetWindowController: NSObject {
     }
     private func handleCopyId(id: String) { sessionForId(id).map(SessionRowActions.copyId) }
     private func handleCopyResume(id: String) { sessionForId(id).map(SessionRowActions.copyResume) }
-    private func handleLocalSummary(id: String) { sessionForId(id).map(SessionRowActions.showLocalSummary) }
 }
 
 // MARK: - ApeFloatingWindow
 
-/// Borderless floating NSWindow subclass.
-///
-/// Overrides `canBecomeKey` and `canBecomeMain` so that:
-/// - NSPopover can anchor to this window (requires a key-capable window).
-/// - The window can receive keyboard events if needed in future.
-///
-/// A plain `.borderless` NSWindow returns `false` for both properties by default,
-/// which prevents `makeKeyAndOrderFront` from working in an LSUIElement app.
+/// Borderless floating NSWindow subclass.（canBecomeKey/Main=true 供 NSPopover 锚定 + 未来键盘事件）
 private final class ApeFloatingWindow: NSWindow {
     override var canBecomeKey: Bool { true }
     override var canBecomeMain: Bool { true }
@@ -466,9 +457,7 @@ private final class DragDetectorView: NSView {
 
     private var dragStartLocation: NSPoint = .zero
     private var windowOriginAtDragStart: NSPoint = .zero
-    // 累积两轴最大绝对位移并判定点击/拖动（纯逻辑下沉 AgentPetCore，可单测）。
     private var dragAccumulator = DragAccumulator()
-    // 8pt：4pt 太小，正常点击（尤其触控板）的微小抖动会被误判成拖动→保存位置而不弹面板（点击修复）。
     private let dragThreshold: Double = 8
 
     override init(frame: NSRect) {
@@ -522,7 +511,7 @@ private struct PetPanelRootView: View {
     let onToggleFavorite: (String) -> Void
     let onCopyId: (String) -> Void
     let onCopyResume: (String) -> Void
-    let onLocalSummary: (String) -> Void
+    var onSummarize: (String) async -> SummaryResult = { _ in .error("未接入") }
     let onOpenPreferences: () -> Void
     let onAcknowledgeAll: () -> Void
     var selectedTab: SessionTab = .all
@@ -547,7 +536,7 @@ private struct PetPanelRootView: View {
             SessionPanel(sessions: sessions, now: now, onTap: onTap,
                          onToggleFavorite: onToggleFavorite,
                          onCopyId: onCopyId, onCopyResume: onCopyResume,
-                         onLocalSummary: onLocalSummary,
+                         onSummarize: onSummarize,
                          hotkeyHint: hotkeyHint, palette: palette,
                          showsTabBar: true,
                          selectedTab: selectedTab, onSelectTab: onSelectTab,
@@ -581,7 +570,6 @@ private final class SessionPanelHostController: NSViewController {
     private let onToggleFavorite: (String) -> Void
     private let onCopyId: (String) -> Void
     private let onCopyResume: (String) -> Void
-    private let onLocalSummary: (String) -> Void
     private let onOpenPreferences: () -> Void
     private let onAcknowledgeAll: () -> Void
     private var hostingController: NSHostingController<PetPanelRootView>?
@@ -602,7 +590,6 @@ private final class SessionPanelHostController: NSViewController {
         onToggleFavorite: @escaping (String) -> Void,
         onCopyId: @escaping (String) -> Void,
         onCopyResume: @escaping (String) -> Void,
-        onLocalSummary: @escaping (String) -> Void,
         onOpenPreferences: @escaping () -> Void,
         onAcknowledgeAll: @escaping () -> Void
     ) {
@@ -613,7 +600,6 @@ private final class SessionPanelHostController: NSViewController {
         self.onToggleFavorite = onToggleFavorite
         self.onCopyId = onCopyId
         self.onCopyResume = onCopyResume
-        self.onLocalSummary = onLocalSummary
         self.onOpenPreferences = onOpenPreferences
         self.onAcknowledgeAll = onAcknowledgeAll
         super.init(nibName: nil, bundle: nil)
@@ -625,13 +611,19 @@ private final class SessionPanelHostController: NSViewController {
         sessions.first { "\($0.key.agent)|\($0.key.root)|\($0.key.sessionId)" == id }
     }
 
+    func summarize(id: String) async -> SummaryResult {
+        guard let s = petSessionForId(id) else { return .error("会话不存在") }
+        return await SessionRowActions.aiSummary(s)
+    }
+
+
     private func makeRoot() -> PetPanelRootView {
         PetPanelRootView(sessions: sessions, now: Date().timeIntervalSince1970,
                          palette: palette,
                          hotkeyHint: hotkeyHint, onTap: onTap,
                          onToggleFavorite: onToggleFavorite,
                          onCopyId: onCopyId, onCopyResume: onCopyResume,
-                         onLocalSummary: onLocalSummary,
+                         onSummarize: { [weak self] id in await self?.summarize(id: id) ?? .error("面板已关闭") },
                          onOpenPreferences: onOpenPreferences, onAcknowledgeAll: onAcknowledgeAll,
                          selectedTab: selectedTabProvider?() ?? .all,
                          onSelectTab: { [weak self] tab in

@@ -2,6 +2,9 @@ import SwiftUI
 import AgentPetCore
 import AppShellKit
 
+/// AI 摘要异步结果(跨面板层传递)。
+enum SummaryResult { case text(String), error(String) }
+
 // MARK: - SessionPanel
 
 /// SwiftUI 会话面板：顶部搜索框 + 「等你」置顶高亮区 + 按状态分组。
@@ -24,7 +27,8 @@ struct SessionPanel: View {
     /// 复制恢复命令（claude --resume <id>）。
     var onCopyResume: (String) -> Void = { _ in }
     /// M3-D①：免费本地摘要（一句话概括最近进展）。
-    var onLocalSummary: (String) -> Void = { _ in }
+    /// AI 摘要:异步跑 claude -p 读会话日志出一句总结。返回摘要文本或错误提示。
+    var onSummarize: (String) async -> SummaryResult = { _ in .error("未接入") }
     /// 面板顶部快捷键提示，如 "⌥⌘P 打开/关闭"。为 nil 不显示。
     var hotkeyHint: String? = nil
     /// 状态圆点配色（F3）。默认系统色。
@@ -52,6 +56,8 @@ struct SessionPanel: View {
     @State private var renamingId: String? = nil
     @State private var renameText = ""
     @State private var confirmDeleteGroup: String? = nil
+    @State private var summaryRowId: String? = nil
+    @State private var summaryOutcome: SummaryOutcome? = nil
     @FocusState private var inlineFieldFocused: Bool
 
     private var organizedFlat: OrganizedFlat {
@@ -304,7 +310,10 @@ struct SessionPanel: View {
         }
         if !AgentManifest.dbBackedAgents.contains(row.agent) {
             Divider()
-            Button("本地摘要") { onLocalSummary(row.id) }
+            Button("AI 摘要") {
+                summaryOutcome = .loading
+                summaryRowId = row.id
+            }
         }
         Divider()
         Button("复制 sessionID") { onCopyId(row.id) }
@@ -313,7 +322,26 @@ struct SessionPanel: View {
         }
     }
 
+    @ViewBuilder
     private func rowCell(_ row: SessionRowModel) -> some View {
+        VStack(spacing: 0) {
+            rowCellCore(row)
+            if summaryRowId == row.id, let outcome = summaryOutcome {
+                summaryBanner(outcome)
+            }
+        }
+        .task(id: summaryRowId == row.id ? row.id : nil) {
+            guard summaryRowId == row.id, case .loading? = summaryOutcome else { return }
+            let result = await onSummarize(row.id)
+            guard summaryRowId == row.id else { return }   // 期间用户切走则丢弃
+            switch result {
+            case .text(let t): summaryOutcome = .text(t)
+            case .error(let e): summaryOutcome = .error(e)
+            }
+        }
+    }
+
+    private func rowCellCore(_ row: SessionRowModel) -> some View {
         SessionRowCell(
             row: row, palette: palette,
             onFavorite: { onToggleFavorite(row.id) },
@@ -335,6 +363,42 @@ struct SessionPanel: View {
             .contentShape(Rectangle())
             .onTapGesture { onTap(row.id) }
             .contextMenu { rowMenuItems(row) }
+    }
+
+    enum SummaryOutcome { case loading, text(String), error(String) }
+
+    @ViewBuilder
+    private func summaryBanner(_ outcome: SummaryOutcome) -> some View {
+        HStack(alignment: .top, spacing: 6) {
+            Image(systemName: "sparkles").font(.system(size: 10)).foregroundStyle(.secondary)
+            switch outcome {
+            case .loading:
+                HStack(spacing: 6) {
+                    ProgressView().controlSize(.small)
+                    Text("AI 生成中…").font(.system(size: 11)).foregroundStyle(.secondary)
+                }
+            case .text(let t):
+                Text(t).font(.system(size: 11)).foregroundStyle(.primary)
+                    .textSelection(.enabled).fixedSize(horizontal: false, vertical: true)
+            case .error(let e):
+                Text(e).font(.system(size: 11)).foregroundStyle(.secondary)
+            }
+            Spacer(minLength: 4)
+            if case .text(let t) = outcome {
+                Button { copyText(t) } label: { Image(systemName: "doc.on.doc").font(.system(size: 10)) }
+                    .buttonStyle(.plain).foregroundStyle(.secondary).help("复制摘要")
+            }
+            Button { summaryRowId = nil; summaryOutcome = nil } label: {
+                Image(systemName: "xmark").font(.system(size: 10))
+            }.buttonStyle(.plain).foregroundStyle(.tertiary)
+        }
+        .padding(.horizontal, 12).padding(.vertical, 7)
+        .background(Color.secondary.opacity(0.06))
+    }
+
+    private func copyText(_ t: String) {
+        NSPasteboard.general.clearContents()
+        NSPasteboard.general.setString(t, forType: .string)
     }
 
     // MARK: - Header / empty

@@ -51,24 +51,39 @@ enum SessionRowActions {
     }
 
     /// M3-D①：免费本地摘要——定位 jsonl → 读尾部 → 提取对话 → 启发式一句话，弹窗展示。
-    /// 全程本地零网络零成本；找不到文件/无内容时如实提示。
-    static func showLocalSummary(_ s: Session) {
-        let summary: String
-        if let path = SessionTranscriptLocator.find(root: s.key.root, sessionId: s.key.sessionId),
-           case .ok(let lines) = TailLineReader.lastLines(path: path, maxLines: 100, maxBytes: 524_288) {
-            summary = LocalSummarizer.summarize(turns: ConversationTailParser.turns(lines: lines))
-        } else {
-            summary = "（找不到该会话的记录文件，无法生成摘要）"
+    /// AI 摘要:定位会话转录 → 读 tail → 后台跑 `claude -p` 出一句中文总结。
+    /// 用本机已装 claude CLI(无额外 key);找不到文件/无 claude/失败均如实提示。
+    static func aiSummary(_ s: Session) async -> SummaryResult {
+        guard let path = SessionTranscriptLocator.find(root: s.key.root, sessionId: s.key.sessionId),
+              case .ok(let lines) = TailLineReader.lastLines(path: path, maxLines: 200, maxBytes: 524_288) else {
+            return .error("找不到该会话的记录文件,无法生成 AI 摘要")
         }
-        let alert = NSAlert()
-        alert.messageText = "会话摘要（本地）"
-        alert.informativeText = summary
-        alert.alertStyle = .informational
-        alert.addButton(withTitle: "好")
-        alert.addButton(withTitle: "复制")
-        NSApp.activate(ignoringOtherApps: true)   // LSUIElement：不激活则弹窗可能不在最前（用户评审 M5）
-        if alert.runModal() == .alertSecondButtonReturn {
-            copyToPasteboard(summary)
+        let turns = ConversationTailParser.turns(lines: lines)
+        guard !turns.isEmpty else { return .error("会话暂无可总结内容") }
+        let tail = turns.map { "\($0.role): \($0.text)" }.joined(separator: "\n")
+        let cwd = s.cwd ?? NSHomeDirectory()
+        return await withCheckedContinuation { cont in
+            DispatchQueue.global(qos: .userInitiated).async {
+                let svc = SummarizerService(runner: RealProcessRunner(),
+                                            resolveExecutable: ExecutableLocator.resolve)
+                switch svc.summarize(tail: tail, cwd: cwd, timeout: 45) {
+                case .success(let text):
+                    cont.resume(returning: .text(text))
+                case .failure(let err):
+                    let msg: String
+                    switch err {
+                    case SummarizerService.SummaryError.executableNotFound:
+                        msg = "未找到 claude 命令(需装 Claude Code CLI 才能生成 AI 摘要)"
+                    case SummarizerService.SummaryError.emptyOutput:
+                        msg = "AI 未返回摘要,稍后再试"
+                    case SummarizerService.SummaryError.nonZeroExit(let e):
+                        msg = "生成失败:\(e.prefix(80))"
+                    default:
+                        msg = "生成失败:\(err.localizedDescription)"
+                    }
+                    cont.resume(returning: .error(msg))
+                }
+            }
         }
     }
 
