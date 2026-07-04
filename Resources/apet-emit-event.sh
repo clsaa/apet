@@ -26,6 +26,10 @@ HOOK_JSON="$(cat)"
 AGENTPET_OUT="${AGENTPET_OUT:-}"
 [ -z "$AGENTPET_OUT" ] && exit 0
 
+# apet 自己 spawn 的子进程(如 AI 摘要的 `claude -p`)带此标记:直接跳过,
+# 否则会为一次性 -p 调用凭空造一个无 jsonl 的幽灵会话进面板(反馈回路)。
+[ -n "${AGENTPET_INTERNAL:-}" ] && exit 0
+
 # Export config for the python3 subprocess (avoids shell-quoting issues with
 # cwd/title values that may contain spaces, quotes, or backslashes)
 export _APET_HOOK_JSON="$HOOK_JSON"

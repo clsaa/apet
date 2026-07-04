@@ -55,7 +55,7 @@ enum SessionRowActions {
     /// 「这个会话在做什么」的近似答案,一句话/几个字。找不到文件如实提示。
     static func quickSummary(_ s: Session) -> SummaryResult {
         guard let path = SessionTranscriptLocator.find(root: s.key.root, sessionId: s.key.sessionId) else {
-            return .error("找不到该会话的记录文件")
+            return .error("该会话没有本地对话记录,无法摘要")
         }
         let headLines = TailLineReader.firstLines(path: path, maxLines: 80)
         guard !headLines.isEmpty else { return .error("会话暂无可总结内容") }
@@ -68,7 +68,7 @@ enum SessionRowActions {
     /// 用本机已装 claude CLI(无额外 key);找不到文件/无 claude/失败均如实提示。
     static func aiSummary(_ s: Session) async -> SummaryResult {
         guard let path = SessionTranscriptLocator.find(root: s.key.root, sessionId: s.key.sessionId) else {
-            return .error("找不到该会话的记录文件,无法生成 AI 摘要")
+            return .error("该会话没有本地对话记录(可能是极短会话或 -p 模式),无法摘要")
         }
         // 会话主题最强信号是开场任务;近期给一点上下文。喂「开头 + 结尾」两段。
         let headLines = TailLineReader.firstLines(path: path, maxLines: 60)

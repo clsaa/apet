@@ -73,6 +73,10 @@ public struct RealProcessRunner: ProcessRunner {
         p.executableURL = URL(fileURLWithPath: executable)
         p.arguments = arguments
         p.currentDirectoryURL = URL(fileURLWithPath: cwd)
+        // 标记 apet 自己 spawn 的子进程:防 `claude -p`(摘要)触发 apet hook 反造幽灵会话(反馈回路)。
+        var childEnv = ProcessInfo.processInfo.environment
+        childEnv["AGENTPET_INTERNAL"] = "1"
+        p.environment = childEnv
         let outPipe = Pipe(), errPipe = Pipe(), inPipe = Pipe()
         p.standardOutput = outPipe; p.standardError = errPipe; p.standardInput = inPipe
 
