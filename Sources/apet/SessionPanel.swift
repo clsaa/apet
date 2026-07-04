@@ -361,7 +361,7 @@ struct SessionPanel: View {
             onRenameCancel: { renamingId = nil }
         )
             .contentShape(Rectangle())
-            .onTapGesture { onTap(row.id) }
+            .onTapGesture { if renamingId != row.id { onTap(row.id) } }   // 编辑中不跳转
             .contextMenu { rowMenuItems(row) }
     }
 
@@ -461,7 +461,7 @@ private struct SessionRowCell: View {
                             .focused($renameFocused)
                             .onSubmit { onRenameCommit() }
                             .onExitCommand { onRenameCancel() }
-                            .onAppear { renameFocused = true }
+                            .onAppear { DispatchQueue.main.async { renameFocused = true } }
                             .padding(.horizontal, 3).padding(.vertical, 1)
                             .background(Color.accentColor.opacity(0.08))
                             .overlay(RoundedRectangle(cornerRadius: 4)
