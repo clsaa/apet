@@ -449,14 +449,17 @@ private struct SessionRowCell: View {
                 .foregroundStyle(dotColor)
                 .frame(width: 12)
 
-            // D3:终端真 app 图标(未知→不显)。
-            if let bid = row.terminalBundleId {
-                if let icon = AppIconCache.icon(bundleId: bid) {
+            // D3:终端真 app 图标;无终端信息(opencode/codex CLI)→ 通用终端占位
+            //(TUI 跑在某个终端里只是不知道哪个;占位保持图标列对齐,空位看着像坏了)。
+            Group {
+                if let bid = row.terminalBundleId, let icon = AppIconCache.icon(bundleId: bid) {
                     Image(nsImage: icon).resizable().frame(width: 14, height: 14)
                 } else {
-                    Image(systemName: "terminal").font(.system(size: 11)).foregroundStyle(.secondary)
+                    Image(systemName: "terminal")
+                        .font(.system(size: 11)).foregroundStyle(.tertiary)
                 }
             }
+            .frame(width: 14)
 
             VStack(alignment: .leading, spacing: 2) {
                 HStack(spacing: 5) {
