@@ -264,21 +264,6 @@ struct SessionPanel: View {
         .help(tabHelp(tab))
     }
 
-    private func agentHelp(_ agent: String) -> String {
-        switch agent {
-        case "claude", "claude-code":
-            return "来自 Claude Code(装 hook 后精确跳转+可靠通知;未装则按 jsonl 内容信号推断)"
-        case "opencode":
-            return "来自 opencode:仅面板可见,无通知(插件增强规划中);状态按内容信号+活动时间推断;长时间无活动会灰显(会话仍在,活动后恢复),数小时后自动清理"
-        case "codex":
-            return "来自 Codex CLI(开启 notify 钩子后精确跳转+通知;未开则按 rollout 内容信号推断)"
-        case "codex-desktop":
-            return "来自 Codex 桌面端(点击激活 Codex.app)"
-        default:
-            return "来自 \(agent)(状态按活动时间粗略推断)"
-        }
-    }
-
     private func tabHelp(_ tab: SessionTab) -> String {
         switch tab {
         case .read: return "你看过,但会话可能仍在等你(E11 消歧)"
@@ -646,5 +631,21 @@ private struct SessionRowCell: View {
             return ("推断", "状态由文件扫描推得,非实时 hook,可能已过时")
         }
         return nil
+    }
+}
+
+/// agent 徽标的 hover 帮助文案(SessionRowCell 用,按 agent 专属)。
+fileprivate func agentHelp(_ agent: String) -> String {
+    switch agent {
+    case "claude", "claude-code":
+        return "来自 Claude Code(装 hook 后精确跳转+可靠通知;未装则按 jsonl 内容信号推断)"
+    case "opencode":
+        return "来自 opencode:仅面板可见,无通知(插件增强规划中);状态按内容信号+活动时间推断;长时间无活动会灰显(会话仍在,活动后恢复),数小时后自动清理"
+    case "codex":
+        return "来自 Codex CLI(开启 notify 钩子后精确跳转+通知;未开则按 rollout 内容信号推断)"
+    case "codex-desktop":
+        return "来自 Codex 桌面端(点击激活 Codex.app)"
+    default:
+        return "来自 \(agent)(状态按活动时间粗略推断)"
     }
 }
