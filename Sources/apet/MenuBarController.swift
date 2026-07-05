@@ -532,6 +532,11 @@ final class MenuBarController: NSObject {
                     SessionRowActions.showOpenCodeNoJumpAlert(session)
                     return
                 }
+                if session.key.agent == "codex" {
+                    // 诚实降级(架构评审 Major-2):codex rollout 无终端信息,不是"可能已关闭"。
+                    SessionRowActions.showCodexNoJumpAlert(session)
+                    return
+                }
                 let alert = NSAlert()
                 alert.messageText = "无法跳转到会话"
                 var infoText = "无法跳转到会话终端（可能已关闭，或终端信息不可用）。"

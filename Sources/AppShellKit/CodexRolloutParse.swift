@@ -61,7 +61,9 @@ public enum CodexRolloutParse {
               (meta["type"] as? String) == "session_meta",
               let mp = meta["payload"] as? [String: Any],
               let sessionId = (mp["id"] as? String) ?? (mp["session_id"] as? String),
-              !sessionId.isEmpty else { return nil }
+              !sessionId.isEmpty,
+              // 白名单:uuid 形态(hex+dash),防伪 id 进 store/「复制 sessionID」剪贴板(架构评审 Minor-2)
+              sessionId.allSatisfy({ $0.isHexDigit || $0 == "-" }) else { return nil }
         let cwd = mp["cwd"] as? String
 
         // 2. mtime
@@ -76,18 +78,36 @@ public enum CodexRolloutParse {
         var lastCompleteTs: Double? = nil
         var lastUserMessage: String? = nil
         var lastConversationTs: Double? = nil
+        // assistant 侧活动(response_item/agent_message/token_count 等):长轮次 >maxLines 行时
+        // task_started 会被挤出尾窗,(nil,nil) 需用活动 ts 兜底,否则热文件误判 stale(测试评审 M3)。
+        var lastActivityTs: Double? = nil
+        // resume/每轮追加的 session_meta/turn_context 带最新 cwd(换目录 resume 后首行 cwd 过期,AI 评审 Minor-3)。
+        var latestCwd: String? = nil
 
         for line in lines {
             guard let obj = decode(line) else { continue }
             let ts = epoch(obj["timestamp"] as? String)
             if let ts { lastConversationTs = ts }   // 行序即时间序,末次赋值 = 末行
-            guard let payload = obj["payload"] as? [String: Any],
-                  let pt = payload["type"] as? String else { continue }
+            let type = obj["type"] as? String
+            guard let payload = obj["payload"] as? [String: Any] else { continue }
+            if type == "session_meta" || type == "turn_context",
+               let c = payload["cwd"] as? String, !c.isEmpty { latestCwd = c }
+            let pt = payload["type"] as? String
+            if type == "response_item" { lastActivityTs = ts ?? lastActivityTs }
             switch pt {
             case "task_started":  lastStartedTs = ts ?? lastStartedTs
             case "task_complete": lastCompleteTs = ts ?? lastCompleteTs
+            // 用户 Esc 中断轮次:盘上是 turn_aborted 而非 task_complete(上游 policy.rs 实证)。
+            // 视作轮次终结,否则中断后 ≤runningWindow 误显 running(AI 评审 Major-1)。
+            // 注:error 事件不持久化(同 policy 实证),流错误只能窗口兜底——数据源固有局限。
+            case "turn_aborted": lastCompleteTs = ts ?? lastCompleteTs
+            case "agent_message", "token_count": lastActivityTs = ts ?? lastActivityTs
             case "user_message":
-                if let m = payload["message"] as? String, !m.isEmpty { lastUserMessage = m }
+                if let m = payload["message"] as? String, !m.isEmpty,
+                   !m.trimmingCharacters(in: .whitespacesAndNewlines)
+                     .hasPrefix("# Files mentioned by the user") {   // CLI 粘贴附件清单注入,非用户正文
+                    lastUserMessage = m
+                }
             default: break
             }
         }
@@ -97,7 +117,9 @@ public enum CodexRolloutParse {
         var lastAssistantTs: Double? = nil
         switch (lastStartedTs, lastCompleteTs) {
         case (nil, nil):
-            break   // 无轮次信号(尾窗太短/会话刚建):mtime 兜底,scanner 判 stale/窗口
+            // 双信号掉出尾窗(长轮次)→ 用 assistant 侧活动 ts 兜底判 running/窗口;
+            // 真·刚建会话(只有 meta,无任何活动)→ nil → scanner 判 stale(不误报等你)。
+            lastAssistantTs = lastActivityTs
         case (let s?, nil):
             lastAssistantTs = s        // 跑到一半(complete 不在尾窗):按窗口判 running
         case (nil, let c?):
@@ -110,7 +132,7 @@ public enum CodexRolloutParse {
         return ScannedFile(
             sessionId: sessionId,
             root: root,
-            cwd: cwd,
+            cwd: latestCwd ?? cwd,
             title: titleLookup(sessionId),
             lastPrompt: lastUserMessage,
             mtime: mtime,

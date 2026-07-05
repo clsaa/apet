@@ -237,6 +237,11 @@ final class PetWindowController: NSObject {
                     SessionRowActions.showOpenCodeNoJumpAlert(session)
                     return
                 }
+                if session.key.agent == "codex" {
+                    // 诚实降级(架构评审 Major-2):codex rollout 无终端信息,不是"可能已关闭"。
+                    SessionRowActions.showCodexNoJumpAlert(session)
+                    return
+                }
                 NSApp.activate(ignoringOtherApps: true)
                 let alert = NSAlert()
                 alert.messageText = "无法跳转到会话"

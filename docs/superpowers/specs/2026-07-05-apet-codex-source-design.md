@@ -6,7 +6,7 @@
 
 **目标**:面板/桌宠零配置看到 OpenAI Codex CLI 的会话(标题/状态/目录),与 Claude/Qoder/OpenCode 并列。
 **非目标(遗留)**:
-- resume 命令:`codex resume <id>` 无法核实(本机 codex 二进制损坏、README 无记载)→ **不提供**(红线:不复制未核实命令),核实后补 `resumeArgvTemplate`。
+- ~~resume 不提供~~ → **已核实并提供**(评审更新 2026-07-05):AI 专家用 Codex.app 内置 codex-cli 0.142.5 实跑 `resume --help` 核实 `codex resume [SESSION_ID]`(UUID 直传不走 picker);`resumeArgvTemplate=["codex","resume","{id}"]`,id 过 uuid 白名单。npm 0.118 损坏根因:arm64 机装了 x64 平台包且缺主程序。
 - 快速/AI 摘要:rollout 行 schema 与 Claude 不同,`ConversationTailParser` 不适用 → 摘要菜单对 codex 隐藏(新 `claudeStyleTranscriptAgents` 集合门控),后续可写 codex tail 解析。
 - 精确跳转:rollout 无终端信息 → 无跳转(诚实降级,与 OpenCode 同)。
 
@@ -16,7 +16,8 @@
 - 索引:`~/.codex/session_index.jsonl`:`{id, thread_name(现成标题), updated_at}` 每会话一行
 - rollout 行:`{timestamp: ISO8601, type, payload}`
   - 首行 `session_meta`:payload `{id(sessionId), cwd, originator("Codex Desktop"/cli), cli_version…}`(resume 会追加多条 meta,**取首行**)
-  - `event_msg` payload.type:`task_started` / `task_complete`(含 last_agent_message)/ `user_message`(payload.message 纯文本)/ token_count / agent_message
+  - `event_msg` payload.type:`task_started` / `task_complete`(含 last_agent_message)/ **`turn_aborted`**(Esc 中断,视作轮次终结;上游 policy.rs 实证 error 不持久化)/ `user_message`(payload.message 纯文本;`# Files mentioned by the user` 前缀是 CLI 附件注入需跳过)/ token_count / agent_message
+  - 0.142.5(Codex Desktop)**每轮**追加一条 session_meta+turn_context:id 恒一致(取首行对),cwd 取**最新**(换目录 resume)
   - `response_item`:message/function_call/reasoning(user message 的 content 含注入的 `<environment_context>`,**标题回退用 event_msg user_message 而非它**)
 
 ## 2. 架构:复用 JSONLDirectoryWatcher 全套
@@ -37,7 +38,13 @@
 
 ## 3. 硬约束继承
 
-seq 唯一序、(agent,root,sessionId) 归一键、jsonl 源不发 OS 通知、markStale 跳过 jsonl 源、sessionId 白名单(uuid hex+dash 通过现有校验)、注入消毒(thread_name/message 展示层已有 sanitize 链)。
+seq 唯一序、(agent,root,sessionId) 归一键、jsonl 源不发 OS 通知、markStale 跳过 jsonl 源、sessionId 白名单(uuid hex+dash 通过现有校验)、注入消毒:**DisplaySanitizer**(评审后新增)在 SessionRowMapper 展示边界剥 bidi/控制字符——thread_name/ai-title 等模型生成标题是半可信输入,所有源统一受益。
+
+## 3.5 评审记录(2026-07-05,架构/AI/测试三视角)
+
+Major 全修:①长轮次尾窗截断误 stale(assistant 活动 ts 兜底)②turn_aborted 漏判 ③无跳转诚实降级(noJumpAgents + showCodexNoJumpAlert)④title 消毒链落地(DisplaySanitizer)。
+Minor 修:sessionId uuid 白名单、hasStateRules=true、cwd 取最新、附件前缀跳过、index 缓存/四象限/集成链补测(30 用例)。
+遗留:resume 若新建同 id 文件的差分互踢(真机门待验证)、全历史尾读 mtime 预过滤(共性优化)、>2min shell 命令执行期无写盘误翻 waitingStop(数据源固有)。
 
 ## 4. 测试
 

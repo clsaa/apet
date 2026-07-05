@@ -100,16 +100,18 @@ public enum SessionRowMapper {
         let id = "\(key.agent)|\(key.root)|\(key.sessionId)"
 
         // Title fallback chain: 自定义名(F7) → explicit title → cwd basename → sessionId
-        let title: String
+        let rawTitle: String
         if let name = session.customName, !name.isEmpty {
-            title = name
+            rawTitle = name
         } else if let t = session.title, !t.isEmpty {
-            title = t
+            rawTitle = t
         } else if let cwd = session.cwd, !cwd.isEmpty {
-            title = URL(fileURLWithPath: cwd).lastPathComponent
+            rawTitle = URL(fileURLWithPath: cwd).lastPathComponent
         } else {
-            title = key.sessionId
+            rawTitle = key.sessionId
         }
+        // 半可信输入(模型生成的 ai-title/thread_name)→ 展示边界消毒(bidi/控制字符,评审 M4)。
+        let title = DisplaySanitizer.sanitize(rawTitle)
 
         // Subtitle: full cwd (empty string if not available)
         // E1:路径折叠(home→~,超长→…/父/叶),消除满屏重复前缀。
@@ -147,9 +149,9 @@ public enum SessionRowMapper {
         if case .waiting = session.state { isWaiting = true } else { isWaiting = false }
         let isInferred = session.source == .jsonl && isWaiting
 
-        // opencode 等 DB 源无 terminal 且无 hook 升级路径 → 行内「无跳转」(M3-C+ 评审 B3)。
+        // opencode/codex 等无 terminal 且无 hook 升级路径 → 行内「无跳转」(M3-C+ 评审 B3/架构评审 Major-2)。
         let noJumpHint = session.terminal == nil
-            && AgentManifest.dbBackedAgents.contains(key.agent)
+            && AgentManifest.noJumpAgents.contains(key.agent)
         // M3-D-D:终端 bundleId(ref 自带优先,否则 kind 映射;未知→nil)。
         let terminalBundleId = session.terminal?.bundleId ?? session.terminal?.kind.bundleId
 

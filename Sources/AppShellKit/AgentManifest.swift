@@ -168,14 +168,15 @@ public struct AgentManifest: Equatable {
     /// - 会话 `~/.codex/sessions/YYYY/MM/DD/rollout-<ts>-<uuidv7>.jsonl`(首行 session_meta 含 id/cwd)
     /// - 标题白送:`~/.codex/session_index.jsonl` 的 thread_name(CodexSessionIndex)
     /// - 轮次信号:event_msg task_started/task_complete → CodexRolloutParse 映射 end_turn
-    /// - resume 未核实(本机 codex 二进制损坏、README 无记载)→ nil(红线:不复制未核实命令)
-    /// - 无终端信息 → 无跳转诚实降级(与 OpenCode 同)
+    /// - **resume 已核实**(2026-07-05,Codex.app 内置 codex-cli 0.142.5 `resume --help` 实跑):
+    ///   `codex resume [SESSION_ID]`,UUID 直传不走 picker
+    /// - 无终端信息 → 无跳转诚实降级(与 OpenCode 同,见 noJumpAgents)
     public static let codex = AgentManifest(
         id: "codex",
         rootsGlobs: ["~/.codex/sessions/**"],
         tsDialect: .iso,
-        resumeArgvTemplate: nil,
-        hasStateRules: false
+        resumeArgvTemplate: ["codex", "resume", "{id}"],
+        hasStateRules: true   // task_started/complete/aborted 内容信号(评审 Minor-4:非纯 mtime)
     )
 
     public static let builtins: [AgentManifest] = [.claude, .qoderWork, .qoderCli, .qoderIDE, .openCode, .codex]
@@ -186,6 +187,10 @@ public struct AgentManifest: Equatable {
     /// ⚠️ M4 公开契约前的**内部注册表**，非第三方接入面——M4 时应改为 manifest 字段
     ///（如 sourceKind），第三方 DB 型 agent 才能经契约声明获得同等语义（开源评审）。
     public static let dbBackedAgents: Set<String> = ["qoder-work", "opencode"]
+
+    /// 无终端信息(点击无法跳转)的 agent:行内「无跳转」提示 + 点击诚实降级弹窗。
+    /// dbBacked(SQLite 源)之外,codex 是 jsonl 源但 rollout 不含终端信息。
+    public static let noJumpAgents: Set<String> = dbBackedAgents.union(["codex"])
 
     /// 转录为 Claude 同构 jsonl 的 agent(快速/AI 摘要可用:SessionTranscriptLocator +
     /// ConversationTailParser 直接兼容)。codex 的 rollout schema 不同 → 摘要菜单隐藏(遗留:codex tail 解析)。

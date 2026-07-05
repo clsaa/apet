@@ -39,6 +39,25 @@ enum SessionRowActions {
     /// opencode 点击弹窗(M3-C+ 评审 B3:诚实降级 + 把死路变恢复路径)。@MainActor 调用。
     /// 返回 true = 用户点了主按钮并已复制。
     /// 评审:复制按钮继承右键菜单的 hasResumeCommand 门控(产品 M3「不静默复制假命令」)——
+    /// Codex 无跳转诚实降级(架构评审 Major-2):rollout 无终端信息,给真话+恢复命令。
+    @discardableResult
+    static func showCodexNoJumpAlert(_ s: Session) -> Bool {
+        let hasCmd = ResumeCommand.display(agent: s.key.agent, sessionId: s.key.sessionId) != nil
+        let alert = NSAlert()
+        alert.messageText = "Codex 会话无终端信息"
+        alert.informativeText = hasCmd
+            ? "Codex 的会话记录不含终端信息,apet 暂不支持跳转。可复制恢复命令,粘贴到任意终端打开该会话。"
+            : "Codex 的会话记录不含终端信息,apet 暂不支持跳转(该会话 ID 格式无法核实,可复制会话 ID 自行处理)。"
+        alert.alertStyle = .informational
+        alert.addButton(withTitle: hasCmd ? "复制恢复命令" : "复制会话 ID")
+        let cancel = alert.addButton(withTitle: "取消")
+        cancel.keyEquivalent = "\u{1b}"
+        NSApp.activate(ignoringOtherApps: true)
+        guard alert.runModal() == .alertFirstButtonReturn else { return false }
+        if hasCmd { copyResume(s) } else { copyId(s) }
+        return true
+    }
+
     /// 异形 id(旧迁移/SDK 自带)拿不到恢复命令时按钮如实降级为「复制会话 ID」。
     @discardableResult
     static func showOpenCodeNoJumpAlert(_ s: Session) -> Bool {
