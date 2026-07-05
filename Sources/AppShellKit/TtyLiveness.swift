@@ -1,26 +1,30 @@
 import Foundation
+import Darwin
 
-/// tty 存活探测(P2:终端还开着的闲置会话不被 reap 老化)。
+/// 会话存活探测(P2:终端还开着的闲置会话不被 reap 老化)。
 ///
-/// hook 采集父进程 tty(`ps -o tty=` → 如 "ttys001"),终端窗口/tab 关闭后对应
-/// `/dev/ttysNNN` 消失——以此区分「终端开着(保留会话)」vs「终端已关(按窗口老化)」。
+/// 判定 = **pid 活着(kill-0)且 tty 设备存在**,双重匹配:
+/// - 单靠 tty 存在会被 macOS tty 编号复用严重误判(真机实锤 2026-07-05:昨天死会话的
+///   ttys002/003 被今天新 tab 占用 → 全部误判存活永不清理,低编号几乎总被占用)。
+/// - pid(hook 采集的 claude 进程 $PPID)在 claude 退出/终端关闭时即消失;pid 复用 + tty
+///   复用同时撞上同一会话几乎不可能。
+/// - 无 pid(旧事件/第三方 agent)→ **不保护**,按窗口正常老化(宁可老化,不留僵尸)。
 ///
-/// 安全:tty 字符串来自**不可信事件**,先经严格白名单(`ttys` + 数字)才允许拼路径,
-/// 非法格式直接判死且不触达文件系统(防 `../` 穿越/任意路径探测)。
-///
-/// 已知局限:macOS 会复用 tty 号——旧终端关闭后新终端可能占用同号,导致已死会话被误判
-/// 存活而多保留一阵(直到该 tty 再次空闲)。P2 精度可接受,不引入 pid 校验复杂度。
+/// 安全:tty 来自不可信事件,严格白名单(ttys+数字,兼容 /dev/ 前缀)才触达文件系统;
+/// pid 只用于 kill(pid, 0) 存在性探测(信号 0 不发送任何信号)。
 public enum TtyLiveness {
-    /// 白名单:ttys + 1~4 位数字(macOS 伪终端命名)。
     private static func isValidTtyName(_ t: String) -> Bool {
         guard t.hasPrefix("ttys"), t.count > 4, t.count <= 8 else { return false }
         return t.dropFirst(4).allSatisfy { $0.isASCII && $0.isNumber }
     }
 
-    /// tty 对应的 /dev 设备是否存在。`fileExists` 注入便于测试;默认走真实文件系统。
-    /// wire 形态兼容:裸名 "ttys002" 或完整路径 "/dev/ttys002"(hook 在部分环境采到后者)。
-    public static func isAlive(tty: String?,
-                               fileExists: (String) -> Bool = { FileManager.default.fileExists(atPath: $0) }) -> Bool {
+    public static func isAlive(
+        tty: String?,
+        pid: Int?,
+        processAlive: (Int) -> Bool = { kill(pid_t($0), 0) == 0 },
+        fileExists: (String) -> Bool = { FileManager.default.fileExists(atPath: $0) }
+    ) -> Bool {
+        guard let pid, pid > 0, processAlive(pid) else { return false }
         guard var t = tty, !t.isEmpty else { return false }
         if t.hasPrefix("/dev/") { t = String(t.dropFirst(5)) }
         guard isValidTtyName(t) else { return false }

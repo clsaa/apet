@@ -43,6 +43,8 @@ export _APET_CFBUNDLE="${__CFBundleIdentifier:-}"
 # payload (not a tty), so we read the parent's tty via ps. Yields e.g. "ttys001"
 # or "??"/empty when detached; python validates before use.
 export _APET_TTY="$(ps -o tty= -p "$PPID" 2>/dev/null | tr -d '[:space:]')"
+# claude 进程 pid:存活探测用(pid 活着+tty 匹配 → 终端还开着;单靠 tty 会被编号复用误判)。
+export _APET_PPID="$PPID"
 
 # python3 ships on macOS dev machines; use json.dumps for injection-safe JSON building
 # and fcntl.flock for atomic append under concurrent hook invocations.
@@ -57,6 +59,10 @@ def main():
     iterm_id  = os.environ.get("_APET_ITERM", "")
     term_prog = os.environ.get("_APET_TERM_PROG", "")
     raw_tty   = os.environ.get("_APET_TTY", "")
+    try:
+        parent_pid = int(os.environ.get("_APET_PPID", "0"))
+    except ValueError:
+        parent_pid = 0
     # macOS 给 GUI 启动的 app 设的真 bundleId——Cursor(vscode fork)/Warp-Preview 靠它区分,
     # 否则会被硬编码成 VS Code / Warp-Stable(AI 评审:错图标+错激活+错标已读)。
     real_bundle = os.environ.get("_APET_CFBUNDLE", "").strip()
@@ -135,6 +141,9 @@ def main():
         # tty enables Terminal.app window-level focus; harmless extra field for others.
         if tty:
             terminal["tty"] = tty
+        # pid(claude 进程):存活探测(kill-0 + tty 匹配),防 tty 编号复用误判。
+        if parent_pid > 0:
+            terminal["pid"] = parent_pid
         obj["terminal"] = terminal
 
     line = json.dumps(obj, ensure_ascii=False, separators=(',', ':'))
