@@ -594,19 +594,21 @@ private struct SessionRowCell: View {
     }
 
     // E2:每状态一个 SF Symbol(形状+色可区分)。
+    // 推断态(jsonl 无 hook)用**空心**轮廓、确认态实心——形状编码替代降透明:
+    // 半透明暗点混排像脏斑(用户实锤"灰色阴影"),且与「推断」文字标签双重编码。
     private var dotSymbol: String {
+        let filled = !row.isInferred
         switch row.dot {
-        case .running:     return "circle.fill"
-        case .attention:   return "exclamationmark.circle.fill"
-        case .doneWaiting: return "stop.circle.fill"
-        case .read:        return "checkmark.circle.fill"
+        case .running:     return filled ? "circle.fill" : "circle"
+        case .attention:   return filled ? "exclamationmark.circle.fill" : "exclamationmark.circle"
+        case .doneWaiting: return filled ? "stop.circle.fill" : "stop.circle"
+        case .read:        return filled ? "checkmark.circle.fill" : "checkmark.circle"
         case .stale:       return "minus.circle"
         }
     }
 
     private var dotColor: Color {
-        let base = palette.color(for: row.dot)
-        return row.isInferred ? base.opacity(0.45) : base
+        palette.color(for: row.dot)   // 满亮度;推断态由空心形状表达,不再降透明
     }
 
     // E7:三个可靠性词收敛为单一标记(优先级:无跳转 > 仅切到App > 推断)。
