@@ -109,8 +109,11 @@ public struct ITerm2Locator: TerminalLocator {
     public func focusInvocation(for ref: TerminalRef) throws -> ScriptInvocation {
         guard let id = ref.itermSessionId else { throw LocatorError.missingRef }
         guard ITermSessionId.isValid(id) else { throw LocatorError.invalidRef }
-        // osascript -  <id>   ：脚本读 stdin，id 作为 argv（"-" 表示从 stdin 读脚本）
+        // 真机实测:环境变量 ITERM_SESSION_ID 形如 "w0t0p0:UUID",但 iTerm2 AppleScript 的
+        // `id of session` 只返回 UUID——传完整形态永远 not found(误报会话已关闭)。剥前缀取 UUID。
+        let uuid = id.contains(":") ? String(id.split(separator: ":").last ?? "") : id
+        guard !uuid.isEmpty else { throw LocatorError.invalidRef }
         return ScriptInvocation(executable: "/usr/bin/osascript",
-                                arguments: [Self.script, id])
+                                arguments: [Self.script, uuid])
     }
 }

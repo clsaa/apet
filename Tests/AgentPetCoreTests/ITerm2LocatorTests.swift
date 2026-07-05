@@ -9,10 +9,12 @@ final class ITerm2LocatorTests: XCTestCase {
         XCTAssertEqual(inv.executable, "/usr/bin/osascript")
         // id 必须在 argv[1]，不是泛 contains（P0 精确断言）
         XCTAssertEqual(inv.arguments.count, 2)
-        XCTAssertEqual(inv.arguments[1], "w0t1p0:ABCD-1234")
+        // 真机实测:iTerm2 AppleScript 的 `id of session` 返回纯 UUID,不含 wXtYpZ: 前缀;
+        // 传完整环境变量形态永远匹配不上 → 误报「会话已关闭」。必须剥前缀取 UUID。
+        XCTAssertEqual(inv.arguments[1], "ABCD-1234")
         // 脚本本体里不得出现被内插的 id
         let script = inv.arguments.first ?? ""
-        XCTAssertFalse(script.contains("w0t1p0:ABCD-1234"))
+        XCTAssertFalse(script.contains("ABCD-1234"), "id 不得内插进脚本")
         XCTAssertTrue(script.contains("on run argv"))
     }
 
@@ -70,5 +72,12 @@ final class ITerm2LocatorTests: XCTestCase {
         XCTAssertFalse(ITermSessionId.isValid("a(b)"))
         XCTAssertFalse(ITermSessionId.isValid("a/b"))
         XCTAssertFalse(ITermSessionId.isValid("é"))   // 非 ASCII 字母现在也应被拒
+    }
+
+    func test_plainUUID_passedThrough() {
+        // 无前缀(直接 UUID)也合法直通。
+        let ref = TerminalRef(kind: .iterm2, itermSessionId: "ABCD-1234")
+        let inv = try! ITerm2Locator().focusInvocation(for: ref)
+        XCTAssertEqual(inv.arguments[1], "ABCD-1234")
     }
 }

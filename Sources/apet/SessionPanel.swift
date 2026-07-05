@@ -16,6 +16,8 @@ struct SessionPanel: View {
     let sessions: [Session]
     /// 当前时间（Unix 秒），用于相对时间与日期分组。
     let now: Double
+    /// UI 触发状态:控制器持有,跨 rootView 替换存活(菜单闭包写 @State 会落进废弃存储,见 PanelUIState)。
+    @ObservedObject var ui: PanelUIState
     /// 点击某行（跳转终端）。参数为行的稳定 id。
     let onTap: (String) -> Void
     /// 收藏/取消收藏。
@@ -49,17 +51,6 @@ struct SessionPanel: View {
     var onCommitRename: (String, String) -> Void = { _, _ in }
 
     @State private var filter: String = ""
-    // 内联轻量弹层状态(放 @State：rootView 每 8s 重设 value,identity 存活保草稿/焦点不丢)。
-    @State private var creatingGroupAttachId: String? = nil   // "" = 建空组(tab+);非空=建并加入该行
-    @State private var isCreatingGroup = false
-    @State private var newGroupText = ""
-    @State private var renamingId: String? = nil
-    @State private var renameText = ""
-    @State private var confirmDeleteGroup: String? = nil
-    @State private var summaryRowId: String? = nil
-    @State private var summaryOutcome: SummaryOutcome? = nil
-    @State private var summaryUseAI = false
-    @State private var summaryNonce = 0
     @FocusState private var inlineFieldFocused: Bool
 
     private var organizedFlat: OrganizedFlat {
@@ -162,18 +153,18 @@ struct SessionPanel: View {
                 tabChip(.running, "进行中")
                 tabChip(.read, "已读")
                 ForEach(groups, id: \.self) { g in
-                    if confirmDeleteGroup == g {
+                    if ui.confirmDeleteGroup == g {
                         deleteConfirmChip(g)
                     } else {
                         tabChip(.group(g), "#\(g)")
                             .contextMenu {
                                 Button("删除分组「\(g)」", role: .destructive) {
-                                    withAnimation(.spring(response: 0.25, dampingFraction: 0.85)) { confirmDeleteGroup = g }
+                                    withAnimation(.spring(response: 0.25, dampingFraction: 0.85)) { ui.confirmDeleteGroup = g }
                                 }
                             }
                     }
                 }
-                if isCreatingGroup {
+                if ui.isCreatingGroup {
                     newGroupInputChip
                 } else {
                     Button { startCreateGroup(attach: nil) } label: {
@@ -190,18 +181,18 @@ struct SessionPanel: View {
 
     // 建组内联输入 chip(就地把 + 展成输入框;回车确认/Esc 取消/失焦取消)。
     private var newGroupInputChip: some View {
-        let trimmed = newGroupText.trimmingCharacters(in: .whitespacesAndNewlines)
-        let valid = GroupMembership.isValidName(newGroupText) && !groups.contains(trimmed)
+        let trimmed = ui.newGroupText.trimmingCharacters(in: .whitespacesAndNewlines)
+        let valid = GroupMembership.isValidName(ui.newGroupText) && !groups.contains(trimmed)
         let dupe = !trimmed.isEmpty && groups.contains(trimmed)
         return HStack(spacing: 4) {
-            TextField("分组名", text: $newGroupText)
+            TextField("分组名", text: $ui.newGroupText)
                 .textFieldStyle(.plain).font(.system(size: 11))
                 .frame(width: 110)
                 .focused($inlineFieldFocused)
                 .onSubmit { commitNewGroup(valid: valid) }
                 .onExitCommand { cancelCreateGroup() }
-            if !newGroupText.isEmpty {
-                Text(dupe ? "已存在" : "\(newGroupText.count)/30")
+            if !ui.newGroupText.isEmpty {
+                Text(dupe ? "已存在" : "\(ui.newGroupText.count)/30")
                     .font(.system(size: 9))
                     .foregroundStyle(valid ? Color.secondary : Color.red)
             }
@@ -225,10 +216,10 @@ struct SessionPanel: View {
     private func deleteConfirmChip(_ g: String) -> some View {
         HStack(spacing: 4) {
             Text("删「\(g)」?").font(.system(size: 11)).foregroundStyle(.red)
-            Button { onDeleteGroup(g); confirmDeleteGroup = nil } label: {
+            Button { onDeleteGroup(g); ui.confirmDeleteGroup = nil } label: {
                 Image(systemName: "checkmark").font(.system(size: 9))
             }.buttonStyle(.plain).foregroundStyle(.red).help("确认删除,不可撤销")
-            Button { confirmDeleteGroup = nil } label: {
+            Button { ui.confirmDeleteGroup = nil } label: {
                 Image(systemName: "xmark").font(.system(size: 9))
             }.buttonStyle(.plain).foregroundStyle(.secondary)
         }
@@ -237,17 +228,17 @@ struct SessionPanel: View {
     }
 
     private func startCreateGroup(attach id: String?) {
-        newGroupText = ""; creatingGroupAttachId = id
-        withAnimation(.spring(response: 0.25, dampingFraction: 0.85)) { isCreatingGroup = true }
+        ui.newGroupText = ""; ui.creatingGroupAttachId = id
+        withAnimation(.spring(response: 0.25, dampingFraction: 0.85)) { ui.isCreatingGroup = true }
     }
     private func commitNewGroup(valid: Bool) {
         guard valid else { return }
-        let name = newGroupText.trimmingCharacters(in: .whitespacesAndNewlines)
-        onCommitNewGroup(name, creatingGroupAttachId)
-        isCreatingGroup = false; newGroupText = ""; creatingGroupAttachId = nil
+        let name = ui.newGroupText.trimmingCharacters(in: .whitespacesAndNewlines)
+        onCommitNewGroup(name, ui.creatingGroupAttachId)
+        ui.isCreatingGroup = false; ui.newGroupText = ""; ui.creatingGroupAttachId = nil
     }
     private func cancelCreateGroup() {
-        isCreatingGroup = false; newGroupText = ""; creatingGroupAttachId = nil
+        ui.isCreatingGroup = false; ui.newGroupText = ""; ui.creatingGroupAttachId = nil
     }
 
     @ViewBuilder
@@ -299,7 +290,7 @@ struct SessionPanel: View {
     private func rowMenuItems(_ row: SessionRowModel) -> some View {
         Button(row.favorite ? "取消收藏" : "收藏") { onToggleFavorite(row.id) }
         Button("重命名…") {
-            renameText = row.title; renamingId = row.id
+            ui.renameText = row.title; ui.renamingId = row.id
         }
         Menu("加入分组") {
             ForEach(groups, id: \.self) { g in
@@ -314,13 +305,13 @@ struct SessionPanel: View {
             Divider()
             Button("快速摘要") {
                 SessionRowActions.summaryDebug("[ui] menu quick clicked row=\(row.id)")
-                summaryUseAI = false; summaryNonce += 1
-                summaryOutcome = .loading; summaryRowId = row.id
+                ui.summaryUseAI = false; ui.summaryNonce += 1
+                ui.summaryOutcome = .loading; ui.summaryRowId = row.id
             }
             Button("AI 摘要") {
                 SessionRowActions.summaryDebug("[ui] menu ai clicked row=\(row.id)")
-                summaryUseAI = true; summaryNonce += 1
-                summaryOutcome = .loading; summaryRowId = row.id
+                ui.summaryUseAI = true; ui.summaryNonce += 1
+                ui.summaryOutcome = .loading; ui.summaryRowId = row.id
             }
         }
         Divider()
@@ -334,19 +325,19 @@ struct SessionPanel: View {
     private func rowCell(_ row: SessionRowModel) -> some View {
         VStack(spacing: 0) {
             rowCellCore(row)
-            if summaryRowId == row.id, let outcome = summaryOutcome {
+            if ui.summaryRowId == row.id, let outcome = ui.summaryOutcome {
                 summaryBanner(outcome)
             }
         }
-        .task(id: summaryRowId == row.id ? "\(row.id)#\(summaryNonce)" : nil) {
-            guard summaryRowId == row.id, case .loading? = summaryOutcome else { return }
-            SessionRowActions.summaryDebug("[ui] task fired row=\(row.id) useAI=\(summaryUseAI)")
-            let useAI = summaryUseAI
+        .task(id: ui.summaryRowId == row.id ? "\(row.id)#\(ui.summaryNonce)" : nil) {
+            guard ui.summaryRowId == row.id, case .loading? = ui.summaryOutcome else { return }
+            SessionRowActions.summaryDebug("[ui] task fired row=\(row.id) useAI=\(ui.summaryUseAI)")
+            let useAI = ui.summaryUseAI
             let result = await onSummarize(row.id, useAI)
-            guard summaryRowId == row.id else { return }   // 期间用户切走则丢弃
+            guard ui.summaryRowId == row.id else { return }   // 期间用户切走则丢弃
             switch result {
-            case .text(let t): summaryOutcome = .text(t)
-            case .error(let e): summaryOutcome = .error(e)
+            case .text(let t): ui.summaryOutcome = .text(t)
+            case .error(let e): ui.summaryOutcome = .error(e)
             }
         }
     }
@@ -362,20 +353,19 @@ struct SessionPanel: View {
                 .menuStyle(.borderlessButton).menuIndicator(.hidden)
                 .frame(width: 18)
             ),
-            renaming: renamingId == row.id,
-            renameText: renamingId == row.id ? $renameText : nil,
+            renaming: ui.renamingId == row.id,
+            renameText: ui.renamingId == row.id ? $ui.renameText : nil,
             onRenameCommit: {
-                onCommitRename(row.id, renameText.trimmingCharacters(in: .whitespacesAndNewlines))
-                renamingId = nil
+                onCommitRename(row.id, ui.renameText.trimmingCharacters(in: .whitespacesAndNewlines))
+                ui.renamingId = nil
             },
-            onRenameCancel: { renamingId = nil }
+            onRenameCancel: { ui.renamingId = nil }
         )
             .contentShape(Rectangle())
-            .onTapGesture { if renamingId != row.id { onTap(row.id) } }   // 编辑中不跳转
+            .onTapGesture { if ui.renamingId != row.id { onTap(row.id) } }   // 编辑中不跳转
             .contextMenu { rowMenuItems(row) }
     }
 
-    enum SummaryOutcome { case loading, text(String), error(String) }
 
     @ViewBuilder
     private func summaryBanner(_ outcome: SummaryOutcome) -> some View {
@@ -385,7 +375,7 @@ struct SessionPanel: View {
             case .loading:
                 HStack(spacing: 6) {
                     ProgressView().controlSize(.small)
-                    Text(summaryUseAI ? "AI 生成中…" : "生成中…").font(.system(size: 11)).foregroundStyle(.secondary)
+                    Text(ui.summaryUseAI ? "AI 生成中…" : "生成中…").font(.system(size: 11)).foregroundStyle(.secondary)
                 }
             case .text(let t):
                 Text(t).font(.system(size: 11)).foregroundStyle(.primary)
@@ -398,7 +388,7 @@ struct SessionPanel: View {
                 Button { copyText(t) } label: { Image(systemName: "doc.on.doc").font(.system(size: 10)) }
                     .buttonStyle(.plain).foregroundStyle(.secondary).help("复制摘要")
             }
-            Button { summaryRowId = nil; summaryOutcome = nil } label: {
+            Button { ui.summaryRowId = nil; ui.summaryOutcome = nil } label: {
                 Image(systemName: "xmark").font(.system(size: 10))
             }.buttonStyle(.plain).foregroundStyle(.tertiary)
         }

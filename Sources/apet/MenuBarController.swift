@@ -16,6 +16,7 @@ private struct PanelRootView: View {
     let hookInstalled: Bool
     /// 面板顶部快捷键提示，如 "⌥⌘P 打开/关闭"。
     let hotkeyHint: String?
+    let ui: PanelUIState
     let onTap: (String) -> Void
     let onToggleFavorite: (String) -> Void
     let onCopyId: (String) -> Void
@@ -46,7 +47,7 @@ private struct PanelRootView: View {
 
     var body: some View {
         VStack(spacing: 0) {
-            SessionPanel(sessions: sessions, now: now, onTap: onTap,
+            SessionPanel(sessions: sessions, now: now, ui: ui, onTap: onTap,
                          onToggleFavorite: onToggleFavorite,
                          onCopyId: onCopyId, onCopyResume: onCopyResume,
                          onSummarize: onSummarize,
@@ -168,6 +169,8 @@ final class MenuBarController: NSObject {
     var onPanelFrameChange: ((NSRect) -> Void)?
     var panelPinnedProvider: (() -> Bool)?
     var onTogglePin: (() -> Void)?
+    /// 面板 UI 触发状态:跨 rootView 替换存活(菜单闭包写 @State 会丢,见 PanelUIState)。
+    let panelUI = PanelUIState()
 
     // MARK: - State
 
@@ -277,6 +280,7 @@ final class MenuBarController: NSObject {
             petVisible: petVisibilityProvider?() ?? false,
             hookInstalled: hookInstalledProvider?() ?? false,
             hotkeyHint: hotkeyHint,
+            ui: panelUI,
             onTap: { [weak self] id in self?.handleSessionTap(id: id) },
             onToggleFavorite: { [weak self] id in self?.handleToggleFavorite(id: id) },
             onCopyId: { [weak self] id in self?.handleCopyId(id: id) },
@@ -286,6 +290,7 @@ final class MenuBarController: NSObject {
                 self?.onTogglePet?()
                 self?.panelHosting?.rootView = self?.makePanelRootView() ?? PanelRootView(
                     sessions: [], now: 0, palette: .system, petVisible: false, hookInstalled: false, hotkeyHint: nil,
+                    ui: PanelUIState(),
                     onTap: { _ in }, onToggleFavorite: { _ in },
                     onCopyId: { _ in }, onCopyResume: { _ in },
                     onTogglePet: {}, onOpenPreferences: {}, onQuit: {}, onAcknowledgeAll: {}
@@ -302,6 +307,7 @@ final class MenuBarController: NSObject {
                 self?.onSelectTab?(tab)
                 self?.panelHosting?.rootView = self?.makePanelRootView() ?? PanelRootView(
                     sessions: [], now: 0, palette: .system, petVisible: false, hookInstalled: false, hotkeyHint: nil,
+                    ui: PanelUIState(),
                     onTap: { _ in }, onToggleFavorite: { _ in },
                     onCopyId: { _ in }, onCopyResume: { _ in },
                     onTogglePet: {}, onOpenPreferences: {}, onQuit: {}, onAcknowledgeAll: {})

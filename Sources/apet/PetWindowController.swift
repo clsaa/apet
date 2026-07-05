@@ -505,6 +505,7 @@ private final class DragDetectorView: NSView {
 private struct PetPanelRootView: View {
     let sessions: [Session]
     let now: Double
+    let ui: PanelUIState
     let palette: DotPalette
     let hotkeyHint: String?
     let onTap: (String) -> Void
@@ -533,7 +534,7 @@ private struct PetPanelRootView: View {
 
     var body: some View {
         VStack(spacing: 0) {
-            SessionPanel(sessions: sessions, now: now, onTap: onTap,
+            SessionPanel(sessions: sessions, now: now, ui: ui, onTap: onTap,
                          onToggleFavorite: onToggleFavorite,
                          onCopyId: onCopyId, onCopyResume: onCopyResume,
                          onSummarize: onSummarize,
@@ -573,6 +574,8 @@ private final class SessionPanelHostController: NSViewController {
     private let onOpenPreferences: () -> Void
     private let onAcknowledgeAll: () -> Void
     private var hostingController: NSHostingController<PetPanelRootView>?
+    /// 面板 UI 触发状态:跨 rootView 替换存活(见 PanelUIState)。
+    let panelUI = PanelUIState()
     // M3-D-B/C:tab + 分组(由 PetWindowController 注入,读 config/写回)。
     var selectedTabProvider: (() -> SessionTab)?
     var sessionGroupsProvider: (() -> [String])?
@@ -623,6 +626,7 @@ private final class SessionPanelHostController: NSViewController {
 
     private func makeRoot() -> PetPanelRootView {
         PetPanelRootView(sessions: sessions, now: Date().timeIntervalSince1970,
+                         ui: panelUI,
                          palette: palette,
                          hotkeyHint: hotkeyHint, onTap: onTap,
                          onToggleFavorite: onToggleFavorite,
