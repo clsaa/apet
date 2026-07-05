@@ -301,7 +301,7 @@ struct SessionPanel: View {
             if !groups.isEmpty { Divider() }
             Button("新建分组…") { startCreateGroup(attach: row.id) }
         }
-        if !AgentManifest.dbBackedAgents.contains(row.agent) {
+        if AgentManifest.claudeStyleTranscriptAgents.contains(row.agent) {
             Divider()
             Button("快速摘要") {
                 SessionRowActions.summaryDebug("[ui] menu quick clicked row=\(row.id)")

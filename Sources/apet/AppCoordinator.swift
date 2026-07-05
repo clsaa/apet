@@ -196,6 +196,27 @@ final class AppCoordinator {
             appendToLog("[info] 发现 ~/.qoder，已挂 Qoder CLI 会话监控（agent=qoder-cli）\n")
         }
 
+        // ─── 2a-1b'. Codex CLI 数据根(M3-C++,2026-07-05 实测):~/.codex/sessions 存在即挂 ──
+        // rollout jsonl 首行 session_meta;标题用 session_index.jsonl 的 thread_name(白送);
+        // task_started/complete 轮次信号 → CodexRolloutParse 映射,复用 scanner 状态派生。
+        let codexRoot = (NSHomeDirectory() as NSString).appendingPathComponent(".codex")
+        let codexSessions = (codexRoot as NSString).appendingPathComponent("sessions")
+        if FileManager.default.fileExists(atPath: codexSessions) {
+            let codexIndex = CodexSessionIndex(
+                path: (codexRoot as NSString).appendingPathComponent("session_index.jsonl"))
+            let cw = JSONLDirectoryWatcher(
+                projectsDir: codexSessions,
+                root: codexRoot,
+                now: { Date().timeIntervalSince1970 },
+                parse: { CodexRolloutParse.parse(path: $0, root: codexRoot,
+                                                 titleLookup: { sid in codexIndex.title(for: sid) }) },
+                emit: { [weak self] result in self?.applyScanResult(result) },
+                agent: "codex"
+            )
+            jsonlWatchers.append(cw)
+            appendToLog("[info] 发现 ~/.codex/sessions，已挂 Codex 会话监控（agent=codex）\n")
+        }
+
         // ─── 2a-1c. Qoder IDE 数据根（M3-C）：SharedClientCache/cli/projects 存在即挂 ──
         // 实测（2026-07-02）：`task-<id>.session.execution.jsonl`，user/assistant 行 + ISO 时间戳
         // + sessionId/cwd/isSidechain，与 Claude 格式同构，现有 JSONLParse 直接兼容。

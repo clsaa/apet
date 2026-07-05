@@ -164,7 +164,21 @@ public struct AgentManifest: Equatable {
     )
 
     /// 内置注册表（无 glob 重叠——评审修复 AI M4：废弃 stub 已移出）。
-    public static let builtins: [AgentManifest] = [.claude, .qoderWork, .qoderCli, .qoderIDE, .openCode]
+    /// OpenAI Codex CLI(**实测接入**,2026-07-05,codex 0.118.0 真实会话解剖):
+    /// - 会话 `~/.codex/sessions/YYYY/MM/DD/rollout-<ts>-<uuidv7>.jsonl`(首行 session_meta 含 id/cwd)
+    /// - 标题白送:`~/.codex/session_index.jsonl` 的 thread_name(CodexSessionIndex)
+    /// - 轮次信号:event_msg task_started/task_complete → CodexRolloutParse 映射 end_turn
+    /// - resume 未核实(本机 codex 二进制损坏、README 无记载)→ nil(红线:不复制未核实命令)
+    /// - 无终端信息 → 无跳转诚实降级(与 OpenCode 同)
+    public static let codex = AgentManifest(
+        id: "codex",
+        rootsGlobs: ["~/.codex/sessions/**"],
+        tsDialect: .iso,
+        resumeArgvTemplate: nil,
+        hasStateRules: false
+    )
+
+    public static let builtins: [AgentManifest] = [.claude, .qoderWork, .qoderCli, .qoderIDE, .openCode, .codex]
 
     /// DB 型 agent（会话在 SQLite 而非 jsonl 转录）：
     /// 用于 ① 轮询源 waitingStop 预置已读（架构 m6 收敛，评审 B2：别再加 agent 字符串 if）；
@@ -172,4 +186,8 @@ public struct AgentManifest: Equatable {
     /// ⚠️ M4 公开契约前的**内部注册表**，非第三方接入面——M4 时应改为 manifest 字段
     ///（如 sourceKind），第三方 DB 型 agent 才能经契约声明获得同等语义（开源评审）。
     public static let dbBackedAgents: Set<String> = ["qoder-work", "opencode"]
+
+    /// 转录为 Claude 同构 jsonl 的 agent(快速/AI 摘要可用:SessionTranscriptLocator +
+    /// ConversationTailParser 直接兼容)。codex 的 rollout schema 不同 → 摘要菜单隐藏(遗留:codex tail 解析)。
+    public static let claudeStyleTranscriptAgents: Set<String> = ["claude-code", "qoder-cli", "qoder-ide"]
 }
