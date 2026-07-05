@@ -54,7 +54,10 @@ seq 唯一序、(agent,root,sessionId) 归一键、jsonl 源不发 OS 通知、m
 
 Major 全修:①长轮次尾窗截断误 stale(assistant 活动 ts 兜底)②turn_aborted 漏判 ③无跳转诚实降级(noJumpAgents + showCodexNoJumpAlert)④title 消毒链落地(DisplaySanitizer)。
 Minor 修:sessionId uuid 白名单、hasStateRules=true、cwd 取最新、附件前缀跳过、index 缓存/四象限/集成链补测(30 用例)。
-遗留:resume 若新建同 id 文件的差分互踢(真机门待验证)、全历史尾读 mtime 预过滤(共性优化)、>2min shell 命令执行期无写盘误翻 waitingStop(数据源固有)。
+遗留更新(2026-07-05 二轮):
+- ~~resume 多文件同 id 互踢~~ → **关闭**:上游 recorder.rs 实证 `Resume → OpenOptions::append(true)` 追加原文件(与真机混用会话单文件多 meta 观察一致),无多文件风险。
+- ~~全历史尾读~~ → **已修**:StaleDirPrefilter 按会话桶 stat 预过滤(codex/qoder 100% 跳过;claude 受批量 mtime touch 影响保守放行,宁少跳不错跳)。
+- >2min shell 命令执行期无写盘误翻 waitingStop(数据源固有,记录在案)。
 
 ## 4. 测试
 
