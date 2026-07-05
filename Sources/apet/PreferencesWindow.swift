@@ -370,7 +370,7 @@ struct PreferencesView: View {
                 .tabItem { Label("外观", systemImage: "paintbrush") }
             tabPage { notifyGroup }
                 .tabItem { Label("通知", systemImage: "bell") }
-            tabPage { configHealthSection; Divider(); dataRootsSection; Divider(); qoderCliHookSection; Divider(); codexNotifySection; Divider(); thresholdsSection }
+            tabPage { configHealthSection; Divider(); dataRootsSection; Divider(); qoderCliHookSection; Divider(); codexNotifySection; Divider(); openCodePluginSection; Divider(); thresholdsSection }
                 .tabItem { Label("会话", systemImage: "list.bullet.rectangle") }
             tabPage { hotkeyGroup; Divider(); startupSection; Divider(); saveSection }
                 .tabItem { Label("通用", systemImage: "gearshape") }
@@ -529,6 +529,65 @@ struct PreferencesView: View {
             }
             .id(qoderHookRefresh)
             if let err = qoderHookError {
+                Text(err).font(.caption).foregroundStyle(.red)
+            }
+        }
+    }
+
+    // ── OpenCode 精确跳转+通知(P1:全局插件订阅 session.idle,门控文件级安装) ──
+    @State private var ocPluginRefresh = UUID()
+    @State private var ocPluginError: String? = nil
+    private var ocPluginDir: String { NSHomeDirectory() + "/.config/opencode/plugins" }
+    private var ocPluginPath: String { ocPluginDir + "/" + OpenCodePluginInstaller.fileName }
+    private var ocRootForPlugin: String {
+        // 与 OpenCode DB watcher 同键:dirname(opencode.db)。
+        let db = OpenCodeDBReader.defaultDBPath(env: ProcessInfo.processInfo.environment)
+        return (db as NSString).deletingLastPathComponent
+    }
+
+    private var openCodePluginSection: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Label("OpenCode 精确跳转/通知", systemImage: "bolt.badge.a")
+                .font(.headline)
+            Text("开启后 apet 在 ~/.config/opencode/plugins 放置一个插件(订阅 session.idle)——OpenCode 会话即可精确跳回终端、收到完成通知、终端开着不被清理。不改动任何既有文件,关闭即删除。")
+                .font(.caption).foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+            HStack {
+                let st = OpenCodePluginInstaller.status(pluginPath: ocPluginPath)
+                switch st {
+                case .installed:
+                    Text("✅ 已开启").font(.caption)
+                    Spacer()
+                    Button("关闭") {
+                        ocPluginError = OpenCodePluginInstaller.uninstall(pluginDir: ocPluginDir)
+                        ocPluginRefresh = UUID()
+                    }.buttonStyle(.bordered).controlSize(.small)
+                case .notInstalled:
+                    Text("未开启").font(.caption).foregroundStyle(.secondary)
+                    Spacer()
+                    Button("开启…") {
+                        let tpl = Bundle.main.path(forResource: "apet-opencode-notify", ofType: "js")
+                            ?? (Bundle.main.resourcePath ?? "") + "/apet-opencode-notify.js"
+                        let preview = OpenCodePluginInstaller.previewLines(pluginPath: ocPluginPath, root: ocRootForPlugin)
+                        let alert = NSAlert()
+                        alert.messageText = "安装 OpenCode 插件?"
+                        alert.informativeText = preview.joined(separator: "\n")
+                        alert.addButton(withTitle: "确认写入")
+                        alert.addButton(withTitle: "取消")
+                        if alert.runModal() == .alertFirstButtonReturn {
+                            ocPluginError = OpenCodePluginInstaller.install(
+                                pluginDir: ocPluginDir, templatePath: tpl,
+                                eventsPath: AppPaths.eventsFile, root: ocRootForPlugin)
+                        }
+                        ocPluginRefresh = UUID()
+                    }.buttonStyle(.borderedProminent).controlSize(.small)
+                case .occupiedByForeignFile:
+                    Text("⚠️ 存在同名非 apet 插件,拒绝改动").font(.caption).foregroundStyle(.orange)
+                    Spacer()
+                }
+            }
+            .id(ocPluginRefresh)
+            if let err = ocPluginError {
                 Text(err).font(.caption).foregroundStyle(.red)
             }
         }
