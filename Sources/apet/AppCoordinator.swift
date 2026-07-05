@@ -499,13 +499,15 @@ final class AppCoordinator {
         do {
             let result = try reader.readNewLines(path: eventsPath, from: nil)
             for line in result.lines {
-                ingestor.ingest(line: Substring(line), now: replayNow, replay: true)
+                // 重放用事件自身 ts 当 now(否则 lastActiveAt 被刷成启动时刻,
+                // 旧会话每次重启都"复活"、永不老化)。排序仍由 seq 保证。
+                guard let event = AgentEvent.decode(line: Substring(line)) else { continue }
+                let eventNow = EventTsParser.epoch(event.ts, fallback: replayNow)
+                ingestor.ingest(event: event, now: eventNow, replay: true)
                 // replay: true — NotificationGate suppresses all; call for correct flag propagation.
-                if let event = AgentEvent.decode(line: Substring(line)) {
-                    let key = SessionKey(event: event)
-                    ns.consider(event: event, session: sessionStore.sessions[key],
-                                mode: replayMode, replay: true)
-                }
+                let key = SessionKey(event: event)
+                ns.consider(event: event, session: sessionStore.sessions[key],
+                            mode: replayMode, replay: true)
             }
             checkpoint = result.next
             appendToLog("[start] replay done, lines=\(result.lines.count), offset=\(result.next.offset)\n")
