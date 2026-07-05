@@ -48,6 +48,8 @@ PLIST
 # Copy hook script if it exists
 if [ -f "$REPO_ROOT/Resources/apet-emit-event.sh" ]; then
     cp "$REPO_ROOT/Resources/apet-emit-event.sh" "$APP_DIR/Contents/Resources/"
+    cp "$REPO_ROOT/Resources/apet-codex-notify.sh" "$APP_DIR/Contents/Resources/" 2>/dev/null || true
+    chmod +x "$APP_DIR/Contents/Resources/apet-codex-notify.sh" 2>/dev/null || true
 fi
 
 # Copy pet assets

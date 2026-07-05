@@ -12,7 +12,13 @@
   首条 meta `source=="vscode"` → agent=`codex-desktop`,点击**激活 Codex.app**(com.openai.codex,仅切到 App 档);
   `source=="cli"`/未知 → agent=`codex`,诚实无跳转+恢复命令(未知默认 CLI:宁少跳转不乱激活)。
   身份取首条 meta(真机实锤有会话 Desktop/CLI 混用,摇摆会致 SessionKey 分裂)。
-  CLI 精确跳转的可能路径(P2 遗留):codex config.toml 的 `notify` 钩子可像 claude hook 一样采集 tty。
+  **CLI 精确跳转已实现**(2026-07-05):`apet-codex-notify.sh` 链式包装 config.toml 的 notify——
+  payload(上游 legacy_notify.rs 实证:`{"type":"agent-turn-complete","thread-id"=sessionId,"cwd"…}`)
+  先原样转发给原 notify 程序(真机实锤该位被 Codex Desktop 的 SkyComputerUseClient 占用,直接覆盖会弄坏它),
+  再采集 tty/$PPID/ITERM_SESSION_ID 发 stop 事件(agent="codex" 与 rollout CLI 分类同键;无 tty=Desktop 端跳过防混键;
+  AGENTPET_INTERNAL 防回路;thread-id uuid 白名单)。安装走 `CodexNotifyInstaller` **门控**(硬约束 12:
+  预览确认+备份 config.toml.apet.bak+一键卸载;单行 TOML 行级改写,多行形态诚实拒绝),入口在首选项「Codex CLI 精确跳转」。
+  开启后 CLI 会话获得:精确跳转(与 claude hook 同矩阵)+ 真 OS 通知(hook 源)+ pid 存活保护。
 
 ## 1. 数据形态(2026-07-05 实测,codex 0.118.0)
 

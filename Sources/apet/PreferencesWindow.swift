@@ -370,7 +370,7 @@ struct PreferencesView: View {
                 .tabItem { Label("外观", systemImage: "paintbrush") }
             tabPage { notifyGroup }
                 .tabItem { Label("通知", systemImage: "bell") }
-            tabPage { configHealthSection; Divider(); dataRootsSection; Divider(); thresholdsSection }
+            tabPage { configHealthSection; Divider(); dataRootsSection; Divider(); codexNotifySection; Divider(); thresholdsSection }
                 .tabItem { Label("会话", systemImage: "list.bullet.rectangle") }
             tabPage { hotkeyGroup; Divider(); startupSection; Divider(); saveSection }
                 .tabItem { Label("通用", systemImage: "gearshape") }
@@ -470,6 +470,66 @@ struct PreferencesView: View {
             }
         }
     }
+
+    // ── Codex CLI 精确跳转(M3-C++,门控 notify 链式安装) ──
+    @State private var codexNotifyRefresh = UUID()
+    private var codexConfigPath: String { NSHomeDirectory() + "/.codex/config.toml" }
+    private var codexScriptPath: String {
+        Bundle.main.path(forResource: "apet-codex-notify", ofType: "sh")
+            ?? (Bundle.main.resourcePath ?? "") + "/apet-codex-notify.sh"
+    }
+
+    private var codexNotifySection: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Label("Codex CLI 精确跳转", systemImage: "bolt.badge.a")
+                .font(.headline)
+            Text("Codex 的会话记录不含终端信息。开启后 apet 会在 ~/.codex/config.toml 配置 notify 钩子采集终端坐标——CLI 会话即可精确跳回终端并收到完成通知。已有的 notify 程序会被链式保留,写入前自动备份、可一键关闭。")
+                .font(.caption).foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+            HStack {
+                let text = (try? String(contentsOfFile: codexConfigPath, encoding: .utf8)) ?? ""
+                let st = CodexNotifyInstaller.status(configText: text, scriptPath: codexScriptPath)
+                switch st {
+                case .installed:
+                    Text("✅ 已开启").font(.caption)
+                    Spacer()
+                    Button("关闭") {
+                        if let err = CodexNotifyInstaller.uninstall(configPath: codexConfigPath, scriptPath: codexScriptPath) {
+                            codexNotifyError = err
+                        } else { codexNotifyError = nil }
+                        codexNotifyRefresh = UUID()
+                    }.buttonStyle(.bordered).controlSize(.small)
+                case .notInstalled:
+                    Text(FileManager.default.fileExists(atPath: NSHomeDirectory() + "/.codex") ? "未开启" : "未发现 ~/.codex")
+                        .font(.caption).foregroundStyle(.secondary)
+                    Spacer()
+                    Button("开启…") {
+                        // 门控(硬约束 12):预览确认后才写。
+                        let preview = CodexNotifyInstaller.previewLines(configText: text, scriptPath: codexScriptPath)
+                        let alert = NSAlert()
+                        alert.messageText = "配置 Codex notify 钩子?"
+                        alert.informativeText = "将改写 ~/.codex/config.toml 的 notify 配置(自动备份 .apet.bak):\n\n" + preview.joined(separator: "\n")
+                        alert.addButton(withTitle: "确认写入")
+                        alert.addButton(withTitle: "取消")
+                        if alert.runModal() == .alertFirstButtonReturn {
+                            codexNotifyError = CodexNotifyInstaller.install(configPath: codexConfigPath, scriptPath: codexScriptPath)
+                        }
+                        codexNotifyRefresh = UUID()
+                    }
+                    .buttonStyle(.borderedProminent).controlSize(.small)
+                    .disabled(!FileManager.default.fileExists(atPath: NSHomeDirectory() + "/.codex"))
+                case .unsupported(let reason):
+                    Text("⚠️ \(reason)").font(.caption).foregroundStyle(.orange)
+                    Spacer()
+                }
+            }
+            .id(codexNotifyRefresh)
+            if let err = codexNotifyError {
+                Text(err).font(.caption).foregroundStyle(.red)
+            }
+        }
+    }
+    @State private var codexNotifyError: String? = nil
 
     private var startupSection: some View {
         VStack(alignment: .leading, spacing: 8) {
