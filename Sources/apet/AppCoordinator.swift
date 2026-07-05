@@ -559,8 +559,10 @@ final class AppCoordinator {
             store.reap(now: now,
                        endedAfter: self.config.endedAfterSec,
                        waitingEndedAfter: self.config.waitingEndedAfterSec,
-                       // P2:终端还开着(/dev/tty 存在)的闲置会话不老化驱逐,用户随时回来。
-                       isAlive: { TtyLiveness.isAlive(tty: $0.terminal?.tty, pid: $0.terminal?.pid) })
+                       // 存活三态:alive(pid活+tty在)保护;dead(pid已死)30分钟快清——
+                       // 程序化批量测试会话/退出的claude不再占位8h(幂等清理);unknown 正常窗口。
+                       deadAfter: 1800,
+                       liveness: { TtyLiveness.classify(tty: $0.terminal?.tty, pid: $0.terminal?.pid) })
             let timerSessions = self.applyMetas(store.activeSessions())
             self.menuBar?.update(summary: store.summary(), sessions: timerSessions)
             self.petWindow?.update(summary: store.summary(), sessions: timerSessions)

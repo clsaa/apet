@@ -5,6 +5,9 @@ public enum StoreChange: Equatable { case upserted(SessionKey); case removed(Ses
 /// 会话单一事实源。
 /// ⚠️ **非线程安全**：所有访问（apply / markStale / 读 sessions）必须由 owner 串行化。
 /// Plan B 在 @MainActor 上持有本类；FSEvents 等后台回调须先 hop 到该串行上下文再调用。
+/// 会话终端存活三态(reap 注入判定)。
+public enum SessionLiveness: Equatable { case alive, dead, unknown }
+
 public final class SessionStore {
     public private(set) var sessions: [SessionKey: Session] = [:]
     private var seenEventIds: Set<String> = []
@@ -239,21 +242,30 @@ extension SessionStore {
     /// 回收：STALE 超过 endedAfter / WAITING 超过 waitingEndedAfter 的会话转 ENDED，并从 sessions 驱逐。
     /// 返回被移除会话的 .removed 变更。纯计时，不依赖 hook（面板 H3-3）。
     ///
-    /// `isAlive`:终端存活探测缝(注入,Core 不做 IO)。返回 true = 该会话的终端窗口还开着
-    /// (如 /dev/tty 存在)→ waiting/stale 不老化驱逐(用户随时回来);ended 是终态不受保护。
-    /// 默认恒 false = 与旧行为一致。已知局限:macOS 复用 tty 号,新终端占用同号会误判存活。
+    /// `liveness`:会话存活三态(注入,Core 不做 IO):
+    /// - `.alive`(pid 活+tty 在)→ waiting/stale **不老化**(终端开着,用户随时回来)
+    /// - `.dead`(有 pid 且进程已死)→ **短窗口 deadAfter 快清**——claude 确定退出了,
+    ///   还按 8h 挂着就是面板噪声(程序化批量测试会话/用户退出的 claude,幂等清理)
+    /// - `.unknown`(无 pid 信息)→ 正常窗口
+    /// ended 是终态,一律直接驱逐。默认恒 .unknown = 与旧行为一致。
     @discardableResult
     public func reap(now: Double, endedAfter: Double, waitingEndedAfter: Double,
-                     isAlive: (Session) -> Bool = { _ in false }) -> [StoreChange] {
+                     deadAfter: Double = .infinity,
+                     liveness: (Session) -> SessionLiveness = { _ in .unknown }) -> [StoreChange] {
         var removed: [StoreChange] = []
         for (key, session) in sessions {
             let idle = now - session.lastActiveAt
             let shouldEnd: Bool
             switch session.state {
-            case .stale:   shouldEnd = idle > endedAfter && !isAlive(session)
-            case .waiting: shouldEnd = idle > waitingEndedAfter && !isAlive(session)
-            case .ended:   shouldEnd = true   // 已 ended 直接驱逐(终态,tty 保护不适用)
+            case .ended:   shouldEnd = true   // 终态直接驱逐
             case .running: shouldEnd = false
+            case .stale, .waiting:
+                let window: Double = (session.state == .stale) ? endedAfter : waitingEndedAfter
+                switch liveness(session) {
+                case .alive:   shouldEnd = false
+                case .dead:    shouldEnd = idle > min(window, deadAfter)
+                case .unknown: shouldEnd = idle > window
+                }
             }
             if shouldEnd {
                 sessions.removeValue(forKey: key)

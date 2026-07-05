@@ -88,6 +88,48 @@ final class SessionStoreReapTests: XCTestCase {
         XCTAssertEqual(capturedChanges, [.removed(key)])
     }
 
+    // MARK: - 存活三态(alive 保护 / dead 快清 / unknown 正常窗口)
+
+    /// pid 已死 = claude 进程确定退出 → 短窗口(deadAfter)快速清除,不占 8 小时。
+    /// 场景:程序化批量拉起的测试会话/用户退出的 claude,确定死了还挂 8h 是面板噪声。
+    func test_deadPid_reapedAfterShortWindow() {
+        let store = SessionStore()
+        let key = SessionKey(agent: "a", root: "r", sessionId: "S")
+        _ = store.apply(AgentEvent(v: 1, eventId: "E", agent: "a", kind: .stop,
+                        sessionId: "S", root: "r",
+                        terminal: TerminalRef(kind: .warp, tty: "ttys001", pid: 42),
+                        ts: "t"), seq: 1, now: 0, replay: false)
+        let removed = store.reap(now: 1801, endedAfter: 14400, waitingEndedAfter: 28800,
+                                 deadAfter: 1800, liveness: { _ in .dead })
+        XCTAssertEqual(removed, [.removed(key)], "pid 已死 → 短窗口清除")
+    }
+
+    func test_deadPid_withinShortWindow_survives() {
+        let store = SessionStore()
+        let key = SessionKey(agent: "a", root: "r", sessionId: "S")
+        _ = store.apply(AgentEvent(v: 1, eventId: "E", agent: "a", kind: .stop,
+                        sessionId: "S", root: "r",
+                        terminal: TerminalRef(kind: .warp, tty: "ttys001", pid: 42),
+                        ts: "t"), seq: 1, now: 0, replay: false)
+        let removed = store.reap(now: 900, endedAfter: 14400, waitingEndedAfter: 28800,
+                                 deadAfter: 1800, liveness: { _ in .dead })
+        XCTAssertEqual(removed, [], "刚结束的会话保留一阵(可见近况)")
+        XCTAssertNotNil(store.sessions[key])
+    }
+
+    func test_unknownLiveness_normalWindows() {
+        let store = SessionStore()
+        let key = SessionKey(agent: "a", root: "r", sessionId: "S")
+        _ = store.apply(AgentEvent(v: 1, eventId: "E", agent: "a", kind: .stop,
+                        sessionId: "S", root: "r", ts: "t"), seq: 1, now: 0, replay: false)
+        var removed = store.reap(now: 10_000, endedAfter: 14400, waitingEndedAfter: 28800,
+                                 deadAfter: 1800, liveness: { _ in .unknown })
+        XCTAssertEqual(removed, [], "unknown 不适用短窗口")
+        removed = store.reap(now: 28_801, endedAfter: 14400, waitingEndedAfter: 28800,
+                             deadAfter: 1800, liveness: { _ in .unknown })
+        XCTAssertEqual(removed, [.removed(key)], "unknown 走正常 waiting 窗口")
+    }
+
     // MARK: - tty 存活保护(终端还开着的闲置会话不被 reap)
 
     /// 带存活 tty 的 waiting 会话,即使闲置超过 waitingEndedAfter 也保留——
@@ -100,7 +142,7 @@ final class SessionStoreReapTests: XCTestCase {
                         terminal: TerminalRef(kind: .warp, tty: "ttys001"),
                         ts: "t"), seq: 1, now: 0, replay: false)
         let removed = store.reap(now: 999_999, endedAfter: 3600, waitingEndedAfter: 28800,
-                                 isAlive: { s in s.terminal?.tty == "ttys001" })
+                                 liveness: { s in s.terminal?.tty == "ttys001" ? .alive : .unknown })
         XCTAssertEqual(removed, [])
         XCTAssertNotNil(store.sessions[key], "tty 存活 → 保留")
     }
@@ -113,7 +155,7 @@ final class SessionStoreReapTests: XCTestCase {
                         terminal: TerminalRef(kind: .warp, tty: "ttys001"),
                         ts: "t"), seq: 1, now: 0, replay: false)
         let removed = store.reap(now: 999_999, endedAfter: 3600, waitingEndedAfter: 28800,
-                                 isAlive: { _ in false })
+                                 liveness: { _ in .unknown })
         XCTAssertEqual(removed, [.removed(key)])
         XCTAssertNil(store.sessions[key], "tty 已死 → 按窗口正常回收")
     }
@@ -129,7 +171,7 @@ final class SessionStoreReapTests: XCTestCase {
         _ = store.apply(AgentEvent(v: 1, eventId: "E2", agent: "a", kind: .sessionEnd,
                         sessionId: "S", root: "r", ts: "t"), seq: 2, now: 0, replay: false)
         let removed = store.reap(now: 100, endedAfter: 3600, waitingEndedAfter: 28800,
-                                 isAlive: { _ in true })
+                                 liveness: { _ in .alive })
         XCTAssertEqual(removed, [.removed(key)])
         XCTAssertNil(store.sessions[key], "ended 是终态,tty 保护不适用")
     }
