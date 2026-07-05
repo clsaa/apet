@@ -95,7 +95,14 @@ public final class JSONLDirectoryWatcher {
 
     /// 执行一次扫描：枚举文件 → parse → scan → 滞回 → 差分 emit。
     public func scanOnce() {
-        let paths = scanner.jsonlFiles(under: projectsDir)
+        // 预过滤(StaleDirPrefilter):整目录桶 idle ≥ idleWindow 才跳过 parse——
+        // 纯 stat 决策,免去对海量历史文件的每轮 firstLine+尾窗读。
+        let allPaths = scanner.jsonlFiles(under: projectsDir)
+        let paths = StaleDirPrefilter.freshPaths(allPaths, now: now(), idleWindow: idleWindow,
+                                                 mtime: { p in
+            (try? FileManager.default.attributesOfItem(atPath: p)[.modificationDate] as? Date)?
+                .flatMap { $0.timeIntervalSince1970 } ?? nil
+        })
         // Fix 3: 记录本轮真正产生 .observe 的 key，用于扫尾对账幽灵会话。
         var observedKeys: Set<SessionKey> = []
         for path in paths {
