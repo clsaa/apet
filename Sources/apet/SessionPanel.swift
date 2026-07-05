@@ -394,13 +394,13 @@ struct SessionPanel: View {
                     // 一键把摘要设为会话名称(≤40 字,与重命名同上限)。
                     onCommitRename(row.id, String(t.prefix(40)))
                     ui.summaryRowId = nil; ui.summaryOutcome = nil
-                } label: { Image(systemName: "square.and.pencil").font(.system(size: 10)) }
+                } label: { hitPad(Image(systemName: "square.and.pencil").font(.system(size: 10))) }
                     .buttonStyle(.plain).foregroundStyle(.secondary).help("设为会话名称")
-                Button { copyText(t) } label: { Image(systemName: "doc.on.doc").font(.system(size: 10)) }
+                Button { copyText(t) } label: { hitPad(Image(systemName: "doc.on.doc").font(.system(size: 10))) }
                     .buttonStyle(.plain).foregroundStyle(.secondary).help("复制摘要")
             }
             Button { ui.summaryRowId = nil; ui.summaryOutcome = nil } label: {
-                Image(systemName: "xmark").font(.system(size: 10))
+                hitPad(Image(systemName: "xmark").font(.system(size: 10)))
             }.buttonStyle(.plain).foregroundStyle(.tertiary)
         }
         .padding(.horizontal, 12).padding(.vertical, 7)
@@ -426,6 +426,8 @@ struct SessionPanel: View {
                 } label: {
                     Text(noticeCopied ? "已复制 ✓" : c.label)
                         .font(.system(size: 10, weight: .medium))
+                        .padding(.horizontal, 4).frame(height: 22)
+                        .contentShape(Rectangle())
                 }
                 .buttonStyle(.plain)
                 .foregroundStyle(noticeCopied ? Color.secondary : Color.accentColor)
@@ -433,16 +435,23 @@ struct SessionPanel: View {
             if n.showHookHint {
                 Button { onOpenHookSetup() } label: {
                     Text("开启精确跳转…").font(.system(size: 10, weight: .medium))
+                        .padding(.horizontal, 4).frame(height: 22)
+                        .contentShape(Rectangle())
                 }
                 .buttonStyle(.plain).foregroundStyle(Color.accentColor)
             }
             Button { ui.noticeRowId = nil; ui.notice = nil } label: {
-                Image(systemName: "xmark").font(.system(size: 9))
+                hitPad(Image(systemName: "xmark").font(.system(size: 9)))
             }.buttonStyle(.plain).foregroundStyle(.tertiary)
         }
-        .padding(.horizontal, 12).padding(.vertical, 6)
+        .padding(.leading, 12).padding(.trailing, 8).padding(.vertical, 6)
         .background(Color.orange.opacity(0.08))
         .onAppear { noticeCopied = false }
+    }
+
+    /// banner 小图标按钮的可点热区:视觉 9-10pt 但命中 22pt(拇指法则,9pt 根本点不中)。
+    private func hitPad<V: View>(_ v: V) -> some View {
+        v.frame(width: 22, height: 22).contentShape(Rectangle())
     }
 
     private func copyText(_ t: String) {
