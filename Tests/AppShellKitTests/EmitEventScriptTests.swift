@@ -87,7 +87,9 @@ final class EmitEventScriptTests: XCTestCase {
         XCTAssertEqual(event.kind,                      .stop)
         XCTAssertEqual(event.sessionId,                 "S1")
         XCTAssertEqual(event.cwd,                       "/Users/x/proj a")
-        XCTAssertEqual(event.title,                     "proj a")
+        // title 故意不发(nil):hook 若带 basename(cwd) 会经 last-non-nil 合并反复覆盖
+        // jsonl 真标题(ai-title/lastPrompt),面板全变目录名。显示层有 cwd basename 兜底。
+        XCTAssertNil(event.title, "hook 不得发 title,否则覆盖 jsonl 真标题")
         XCTAssertEqual(event.agent,                     "claude-code")
         XCTAssertEqual(event.v,                         1)
         XCTAssertFalse(event.eventId.isEmpty,           "eventId must be non-empty")
