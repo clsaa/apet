@@ -51,6 +51,7 @@ private struct PanelRootView: View {
                          onToggleFavorite: onToggleFavorite,
                          onCopyId: onCopyId, onCopyResume: onCopyResume,
                          onSummarize: onSummarize,
+                         onOpenHookSetup: onOpenPreferences,
                          hotkeyHint: hotkeyHint, palette: palette,
                          selectedTab: selectedTab, onSelectTab: onSelectTab,
                          groups: groups, onToggleGroup: onToggleGroup,
@@ -181,7 +182,6 @@ final class MenuBarController: NSObject {
     /// Hosting controller retained for rootView live-updates.
     private var panelHosting: NSHostingController<PanelRootView>?
     /// Guard: only one "无法跳转" alert at a time (prevents rapid-click alert stacking).
-    private var isShowingTapAlert = false
     /// Part C: throttles just-in-time hook hints to at most once per session, capped globally.
     private var hookHintThrottle = HookHintThrottle()
 
@@ -383,6 +383,7 @@ final class MenuBarController: NSObject {
             return
         }
 
+        panelUI.noticeRowId = nil; panelUI.notice = nil   // 开面板清旧提示条
         let savedFrame = panelFrameProvider?()   // 已保存的完整 frame(位置+尺寸)
         let size = clampPanelSize(panelSizeProvider?() ?? CGSize(width: 360, height: 480))
         let win: PanelResizeWindow
@@ -525,37 +526,12 @@ final class MenuBarController: NSObject {
                 return
             }
             await MainActor.run { [weak self] in
-                guard let self, !self.isShowingTapAlert else { return } // 防连击叠加阻塞弹窗（Task9 评审 Important）
-                self.isShowingTapAlert = true
-                defer { self.isShowingTapAlert = false }
-                if isOpenCode {
-                    SessionRowActions.showOpenCodeNoJumpAlert(session)
-                    return
-                }
-                if session.key.agent.hasPrefix("codex") {
-                    // 诚实降级(架构评审 Major-2):codex rollout 无终端信息,不是"可能已关闭"。
-                    SessionRowActions.showCodexNoJumpAlert(session)
-                    return
-                }
-                let alert = NSAlert()
-                alert.messageText = "无法跳转到会话"
-                var infoText = "无法跳转到会话终端（可能已关闭，或终端信息不可用）。"
-                if isJsonlSession && isClaude && self.hookHintThrottle.shouldHint(sessionKey: id) {
-                    infoText += "\n\n💡 安装 Hook 可精确跳到这个 tab（会改 settings.json，自动备份/一键卸载）→ 在「首选项」中开启。"
-                }
-                alert.informativeText = infoText
-                alert.alertStyle = .informational
-                // B2 修复(交互评审 P1-4):有已核实恢复命令时给「复制恢复命令」按钮,
-                // 与 OpenCode 失败弹窗对齐——同样终端没了,别让 Claude 用户撞死墙。
-                let hasResume = SessionRowActions.hasResumeCommand(agent: session.key.agent, sessionId: session.key.sessionId)
-                if hasResume {
-                    alert.addButton(withTitle: "复制恢复命令")
-                    alert.addButton(withTitle: "好的")
-                    if alert.runModal() == .alertFirstButtonReturn { SessionRowActions.copyResume(session) }
-                } else {
-                    alert.addButton(withTitle: "好的")
-                    alert.runModal()
-                }
+                guard let self else { return }
+                // 跳转失败 → 行内提示条(取代全屏 NSAlert,零打断;UI/交互:优雅克制)。
+                let hookHint = isJsonlSession && isClaude && self.hookHintThrottle.shouldHint(sessionKey: id)
+                self.panelUI.notice = SessionRowActions.jumpFailureNotice(session, hookHint: hookHint)
+                self.panelUI.noticeRowId = id
+                self.panelHosting?.rootView = self.makePanelRootView()
             }
         }
     }

@@ -31,6 +31,8 @@ struct SessionPanel: View {
     /// M3-D①：免费本地摘要（一句话概括最近进展）。
     /// 摘要:useAI=false 走本地即时快速摘要(开场任务);true 走 claude -p 深度短标题。
     var onSummarize: (String, Bool) async -> SummaryResult = { _, _ in .error("未接入") }
+    /// 行内提示条的「开启精确跳转…」入口(打开首选项)。
+    var onOpenHookSetup: () -> Void = {}
     /// 面板顶部快捷键提示，如 "⌥⌘P 打开/关闭"。为 nil 不显示。
     var hotkeyHint: String? = nil
     /// 状态圆点配色（F3）。默认系统色。
@@ -328,6 +330,9 @@ struct SessionPanel: View {
             if ui.summaryRowId == row.id, let outcome = ui.summaryOutcome {
                 summaryBanner(outcome, row: row)
             }
+            if ui.noticeRowId == row.id, let n = ui.notice {
+                noticeBanner(n)
+            }
         }
         .task(id: ui.summaryRowId == row.id ? "\(row.id)#\(ui.summaryNonce)" : nil) {
             guard ui.summaryRowId == row.id, case .loading? = ui.summaryOutcome else { return }
@@ -400,6 +405,44 @@ struct SessionPanel: View {
         }
         .padding(.horizontal, 12).padding(.vertical, 7)
         .background(Color.secondary.opacity(0.06))
+    }
+
+    /// 行内提示条(跳转失败等):一句话 + 行内动作,取代全屏 NSAlert(优雅克制)。
+    @State private var noticeCopied = false
+    @ViewBuilder
+    private func noticeBanner(_ n: RowNotice) -> some View {
+        HStack(alignment: .center, spacing: 6) {
+            Image(systemName: "exclamationmark.triangle")
+                .font(.system(size: 10)).foregroundStyle(.orange)
+            Text(n.text)
+                .font(.system(size: 11)).foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+            Spacer(minLength: 4)
+            if let c = n.copyAction {
+                Button {
+                    copyText(c.payload)
+                    noticeCopied = true
+                    DispatchQueue.main.asyncAfter(deadline: .now() + 1.4) { noticeCopied = false }
+                } label: {
+                    Text(noticeCopied ? "已复制 ✓" : c.label)
+                        .font(.system(size: 10, weight: .medium))
+                }
+                .buttonStyle(.plain)
+                .foregroundStyle(noticeCopied ? Color.secondary : Color.accentColor)
+            }
+            if n.showHookHint {
+                Button { onOpenHookSetup() } label: {
+                    Text("开启精确跳转…").font(.system(size: 10, weight: .medium))
+                }
+                .buttonStyle(.plain).foregroundStyle(Color.accentColor)
+            }
+            Button { ui.noticeRowId = nil; ui.notice = nil } label: {
+                Image(systemName: "xmark").font(.system(size: 9))
+            }.buttonStyle(.plain).foregroundStyle(.tertiary)
+        }
+        .padding(.horizontal, 12).padding(.vertical, 6)
+        .background(Color.orange.opacity(0.08))
+        .onAppear { noticeCopied = false }
     }
 
     private func copyText(_ t: String) {

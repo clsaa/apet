@@ -24,6 +24,23 @@ final class PanelUIState: ObservableObject {
     @Published var creatingGroupAttachId: String? = nil
     // 删组二段式确认
     @Published var confirmDeleteGroup: String? = nil
+    // 行内提示条(跳转失败等):取代全屏 NSAlert,零打断(UI/交互:优雅克制)。
+    @Published var noticeRowId: String? = nil
+    @Published var notice: RowNotice? = nil
+}
+
+/// 行内提示条内容:一句话 + 可选动作(数据化,渲染层出按钮)。
+struct RowNotice: Equatable {
+    var text: String
+    /// 复制类动作:(按钮文案, 要复制的内容)。点击复制后按钮原地变「已复制 ✓」。
+    var copyAction: (label: String, payload: String)? = nil
+    /// 是否附「开启精确跳转…」入口(claude jsonl 无 hook 场景,节流后)。
+    var showHookHint: Bool = false
+
+    static func == (l: RowNotice, r: RowNotice) -> Bool {
+        l.text == r.text && l.copyAction?.label == r.copyAction?.label
+            && l.copyAction?.payload == r.copyAction?.payload && l.showHookHint == r.showHookHint
+    }
 }
 
 /// 摘要展示态(loading/结果/错误)。

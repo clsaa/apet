@@ -26,7 +26,6 @@ final class PetWindowController: NSObject {
     private var window: NSWindow?
     private var hostingView: NSHostingView<PetView>?
     /// 防连击叠加阻塞弹窗(实现评审:与 MenuBarController 同款守卫)。
-    private var isShowingTapAlert = false
     private var popover: NSPopover?
     private var currentPresentation: PetPresentation
     private var currentSessions: [Session] = []
@@ -223,42 +222,26 @@ final class PetWindowController: NSObject {
         let terminal = session.terminal
         let fs = focusService
         let isOpenCode = (session.key.agent == "opencode")
+        _ = isOpenCode
         Task.detached { [weak self] in
             let result = fs.focus(terminal)
             if result == .focused || result == .activatedOnly {   // 到达(含计划内仅激活)→标已读
-                await MainActor.run { [weak self] in self?.onAcknowledge?(sessionKey) }
+                await MainActor.run { [weak self] in
+                    self?.onAcknowledge?(sessionKey)
+                    self?.popover?.performClose(nil)   // 成功才关面板(用户去终端了)
+                }
                 return
             }
             await MainActor.run { [weak self] in
-                guard let self, !self.isShowingTapAlert else { return }
-                self.isShowingTapAlert = true
-                defer { self.isShowingTapAlert = false }
-                if isOpenCode {
-                    SessionRowActions.showOpenCodeNoJumpAlert(session)
-                    return
-                }
-                if session.key.agent.hasPrefix("codex") {
-                    // 诚实降级(架构评审 Major-2):codex rollout 无终端信息,不是"可能已关闭"。
-                    SessionRowActions.showCodexNoJumpAlert(session)
-                    return
-                }
-                NSApp.activate(ignoringOtherApps: true)
-                let alert = NSAlert()
-                alert.messageText = "无法跳转到会话"
-                alert.informativeText = "无法跳转到会话终端（可能已关闭，或终端信息不可用）。"
-                alert.alertStyle = .informational
-                // B2:有恢复命令给复制按钮(与 MenuBar/OpenCode 对齐)。
-                if SessionRowActions.hasResumeCommand(agent: session.key.agent, sessionId: session.key.sessionId) {
-                    alert.addButton(withTitle: "复制恢复命令")
-                    alert.addButton(withTitle: "好的")
-                    if alert.runModal() == .alertFirstButtonReturn { SessionRowActions.copyResume(session) }
-                } else {
-                    alert.addButton(withTitle: "好的")
-                    alert.runModal()
+                guard let self else { return }
+                // 跳转失败 → 行内提示条,面板留着(取代全屏 NSAlert;UI/交互:优雅克制)。
+                // panelUI 是 ObservableObject,设值即驱动重渲染。
+                if let host = self.popover?.contentViewController as? SessionPanelHostController {
+                    host.panelUI.notice = SessionRowActions.jumpFailureNotice(session, hookHint: false)
+                    host.panelUI.noticeRowId = id
                 }
             }
         }
-        popover?.performClose(nil)
     }
 
     // MARK: - Private: window setup
@@ -543,6 +526,7 @@ private struct PetPanelRootView: View {
                          onToggleFavorite: onToggleFavorite,
                          onCopyId: onCopyId, onCopyResume: onCopyResume,
                          onSummarize: onSummarize,
+                         onOpenHookSetup: onOpenPreferences,
                          hotkeyHint: hotkeyHint, palette: palette,
                          showsTabBar: true,
                          selectedTab: selectedTab, onSelectTab: onSelectTab,
