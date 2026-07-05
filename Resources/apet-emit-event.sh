@@ -35,6 +35,8 @@ AGENTPET_OUT="${AGENTPET_OUT:-}"
 export _APET_HOOK_JSON="$HOOK_JSON"
 export _APET_OUT="$AGENTPET_OUT"
 export _APET_ROOT="${AGENTPET_ROOT:-$HOME/.claude}"
+# agent 参数化(默认 claude-code):qoder-cli 官方 hooks migrate 自认 Claude 兼容,同脚本复用。
+export _APET_AGENT="${AGENTPET_AGENT:-claude-code}"
 export _APET_ITERM="${ITERM_SESSION_ID:-}"
 export _APET_TERM_PROG="${TERM_PROGRAM:-}"
 # 真 bundleId(macOS LaunchServices 给 GUI app 设,children 继承):区分 Cursor/Warp-Preview。
@@ -106,7 +108,7 @@ def main():
     obj = {
         "v":         1,
         "eventId":   event_id,
-        "agent":     "claude-code",
+        "agent":     os.environ.get("_APET_AGENT", "claude-code"),
         "event":     apet_event,
         "sessionId": session_id,
         "root":      root,

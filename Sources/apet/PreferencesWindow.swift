@@ -370,7 +370,7 @@ struct PreferencesView: View {
                 .tabItem { Label("外观", systemImage: "paintbrush") }
             tabPage { notifyGroup }
                 .tabItem { Label("通知", systemImage: "bell") }
-            tabPage { configHealthSection; Divider(); dataRootsSection; Divider(); codexNotifySection; Divider(); thresholdsSection }
+            tabPage { configHealthSection; Divider(); dataRootsSection; Divider(); qoderCliHookSection; Divider(); codexNotifySection; Divider(); thresholdsSection }
                 .tabItem { Label("会话", systemImage: "list.bullet.rectangle") }
             tabPage { hotkeyGroup; Divider(); startupSection; Divider(); saveSection }
                 .tabItem { Label("通用", systemImage: "gearshape") }
@@ -467,6 +467,69 @@ struct PreferencesView: View {
                 }
                 .disabled(newRootPath.trimmingCharacters(in: .whitespaces).isEmpty)
                 .help("添加新数据根")
+            }
+        }
+    }
+
+    // ── Qoder CLI 精确跳转(hook 与 Claude 同构:官方 hooks migrate 自认兼容) ──
+    @State private var qoderHookRefresh = UUID()
+    @State private var qoderHookError: String? = nil
+    private var qoderRoot: String { NSHomeDirectory() + "/.qoder" }
+    private var qoderSettingsURL: URL { URL(fileURLWithPath: qoderRoot + "/settings.json") }
+
+    private var qoderCliHookSection: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Label("Qoder CLI 精确跳转", systemImage: "bolt.badge.a")
+                .font(.headline)
+            Text("Qoder CLI 的 hook 与 Claude Code 同构。开启后 apet 在 ~/.qoder/settings.json 写入 hook(与 Claude 同一脚本,agent=qoder-cli)——会话即可精确跳回终端并收到完成通知。写入前预览确认、自动备份、可一键关闭。")
+                .font(.caption).foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+            HStack {
+                let installer = HookInstaller()
+                let installed = (try? installer.isInstalled(settingsURL: qoderSettingsURL, marker: HookConstants.marker)) ?? false
+                if installed {
+                    Text("✅ 已开启").font(.caption)
+                    Spacer()
+                    Button("关闭") {
+                        do {
+                            try HookInstaller().uninstall(from: qoderSettingsURL, marker: HookConstants.marker)
+                            qoderHookError = nil
+                        } catch { qoderHookError = "卸载失败:\(error.localizedDescription)" }
+                        qoderHookRefresh = UUID()
+                    }.buttonStyle(.bordered).controlSize(.small)
+                } else {
+                    Text(FileManager.default.fileExists(atPath: qoderRoot) ? "未开启" : "未发现 ~/.qoder")
+                        .font(.caption).foregroundStyle(.secondary)
+                    Spacer()
+                    Button("开启…") {
+                        let runner = Bundle.main.path(forResource: "apet-emit-event", ofType: "sh")
+                            ?? (Bundle.main.resourcePath ?? "") + "/apet-emit-event.sh"
+                        let preview = HookInstaller.previewLines(
+                            scriptPath: runner, eventsPath: AppPaths.eventsFile, rootPath: qoderRoot)
+                        let alert = NSAlert()
+                        alert.messageText = "在 ~/.qoder/settings.json 安装 hook?"
+                        alert.informativeText = "自动备份 .apet.bak,可一键关闭。\n\n" + preview
+                        alert.addButton(withTitle: "确认写入")
+                        alert.addButton(withTitle: "取消")
+                        if alert.runModal() == .alertFirstButtonReturn {
+                            let cmd = HookInstaller.hookCommand(
+                                scriptPath: runner, eventsPath: AppPaths.eventsFile,
+                                rootPath: qoderRoot, agent: "qoder-cli")
+                            do {
+                                try HookInstaller().install(into: qoderSettingsURL,
+                                                            runnerPath: cmd, marker: HookConstants.marker)
+                                qoderHookError = nil
+                            } catch { qoderHookError = "安装失败:\(error.localizedDescription)" }
+                        }
+                        qoderHookRefresh = UUID()
+                    }
+                    .buttonStyle(.borderedProminent).controlSize(.small)
+                    .disabled(!FileManager.default.fileExists(atPath: qoderRoot))
+                }
+            }
+            .id(qoderHookRefresh)
+            if let err = qoderHookError {
+                Text(err).font(.caption).foregroundStyle(.red)
             }
         }
     }

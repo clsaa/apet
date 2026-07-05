@@ -1,6 +1,7 @@
 import XCTest
 import Foundation
 @testable import AgentPetCore
+@testable import AppShellKit
 
 // MARK: - EmitEventScriptTests
 // Drives apet-emit-event.sh via Process and verifies the emitted NDJSON event.
@@ -32,7 +33,8 @@ final class EmitEventScriptTests: XCTestCase {
         hookJSON: String,
         outURL: URL,
         itermSessionId: String? = nil,
-        termProgram: String? = nil
+        termProgram: String? = nil,
+        agentOverride: String? = nil
     ) throws -> Int32 {
         let process = Process()
         process.executableURL = URL(fileURLWithPath: "/bin/bash")
@@ -46,6 +48,7 @@ final class EmitEventScriptTests: XCTestCase {
         ]
         if let s = itermSessionId { env["ITERM_SESSION_ID"] = s }
         if let t = termProgram    { env["TERM_PROGRAM"]     = t }
+        if let a = agentOverride  { env["AGENTPET_AGENT"]   = a }
         process.environment = env
 
         // Pipe hook payload to stdin; close write-end so bash's `cat` sees EOF
@@ -249,5 +252,27 @@ final class EmitEventScriptTests: XCTestCase {
         // Verify no output file was created
         let exists = FileManager.default.fileExists(atPath: outURL.path)
         XCTAssertFalse(exists, "No output file should be created when AGENTPET_OUT is unset")
+    }
+
+    // qoder-cli 复用(官方 hooks migrate 自认 Claude 兼容):agent 经 AGENTPET_AGENT 参数化。
+    func testAgentEnvOverride_qoderCli() throws {
+        let outURL = makeTempURL()
+        defer { try? FileManager.default.removeItem(at: outURL) }
+        let status = try runScript(
+            hookJSON: #"{"hook_event_name": "Stop", "session_id": "S1", "cwd": "/x"}"#,
+            outURL: outURL, agentOverride: "qoder-cli")
+        XCTAssertEqual(status, 0)
+        let content = try String(contentsOfFile: outURL.path, encoding: .utf8)
+        let event = AgentEvent.decode(line: Substring(content.split(separator: "\n").first ?? ""))
+        XCTAssertEqual(event?.agent, "qoder-cli", "AGENTPET_AGENT 覆盖默认 claude-code")
+    }
+
+    func testHookCommand_withAgent() {
+        let cmd = HookInstaller.hookCommand(scriptPath: "/s.sh", eventsPath: "/e.ndjson",
+                                            rootPath: "/r", agent: "qoder-cli")
+        XCTAssertTrue(cmd.contains("AGENTPET_AGENT=qoder-cli"), cmd)
+        // 默认(claude)不带 agent 变量,向后兼容已有安装
+        let plain = HookInstaller.hookCommand(scriptPath: "/s.sh", eventsPath: "/e.ndjson", rootPath: "/r")
+        XCTAssertFalse(plain.contains("AGENTPET_AGENT"), plain)
     }
 }
