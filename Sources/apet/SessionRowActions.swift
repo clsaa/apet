@@ -5,6 +5,16 @@ import AppShellKit
 /// 会话行操作的共享执行（F7 重命名、F11 复制 ID/恢复命令）。菜单栏 popover 与宠物 popover 共用。
 /// 收藏/重命名的**持久化**由 AppCoordinator 经 SessionMetaStore 完成；这里只管剪贴板与输入弹窗。
 enum SessionRowActions {
+    /// 临时诊断:摘要路径写日志到 apet.log,便于定位「点了没反应」。
+    static func summaryDebug(_ msg: String) {
+        let dir = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first!
+            .appendingPathComponent("AgentPet")
+        let url = dir.appendingPathComponent("apet.log")
+        let line = "[summary] \(msg)\n"
+        if let h = try? FileHandle(forWritingTo: url) {
+            h.seekToEndOfFile(); h.write(Data(line.utf8)); try? h.close()
+        }
+    }
 
 
     static func copyToPasteboard(_ text: String, hud: String? = "已复制") {
@@ -54,9 +64,12 @@ enum SessionRowActions {
     /// 快速摘要(本地即时零成本):读转录**开头**若干轮 → 第一条真实用户指令 = 会话主题。
     /// 「这个会话在做什么」的近似答案,一句话/几个字。找不到文件如实提示。
     static func quickSummary(_ s: Session) -> SummaryResult {
+        summaryDebug("quick 入口 agent=\(s.key.agent) root=\(s.key.root) sid=\(s.key.sessionId) cwd=\(s.cwd ?? "nil")")
         guard let path = SessionTranscriptLocator.find(root: s.key.root, sessionId: s.key.sessionId) else {
+            summaryDebug("quick 找不到转录 sid=\(s.key.sessionId)")
             return .error("该会话没有本地对话记录,无法摘要")
         }
+        summaryDebug("quick 命中转录 path=\(path)")
         let headLines = TailLineReader.firstLines(path: path, maxLines: 80)
         guard !headLines.isEmpty else { return .error("会话暂无可总结内容") }
         let turns = ConversationTailParser.turns(lines: headLines)
@@ -67,7 +80,9 @@ enum SessionRowActions {
     /// AI 摘要:定位会话转录 → 读**开头(开场任务)+结尾(近期)** → 后台跑 `claude -p` 出一句短标题。
     /// 用本机已装 claude CLI(无额外 key);找不到文件/无 claude/失败均如实提示。
     static func aiSummary(_ s: Session) async -> SummaryResult {
+        summaryDebug("ai 入口 agent=\(s.key.agent) root=\(s.key.root) sid=\(s.key.sessionId)")
         guard let path = SessionTranscriptLocator.find(root: s.key.root, sessionId: s.key.sessionId) else {
+            summaryDebug("ai 找不到转录 sid=\(s.key.sessionId)")
             return .error("该会话没有本地对话记录(可能是极短会话或 -p 模式),无法摘要")
         }
         // 会话主题最强信号是开场任务;近期给一点上下文。喂「开头 + 结尾」两段。

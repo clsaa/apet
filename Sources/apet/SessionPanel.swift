@@ -313,10 +313,12 @@ struct SessionPanel: View {
         if !AgentManifest.dbBackedAgents.contains(row.agent) {
             Divider()
             Button("快速摘要") {
+                SessionRowActions.summaryDebug("[ui] menu quick clicked row=\(row.id)")
                 summaryUseAI = false; summaryNonce += 1
                 summaryOutcome = .loading; summaryRowId = row.id
             }
             Button("AI 摘要") {
+                SessionRowActions.summaryDebug("[ui] menu ai clicked row=\(row.id)")
                 summaryUseAI = true; summaryNonce += 1
                 summaryOutcome = .loading; summaryRowId = row.id
             }
@@ -338,6 +340,7 @@ struct SessionPanel: View {
         }
         .task(id: summaryRowId == row.id ? "\(row.id)#\(summaryNonce)" : nil) {
             guard summaryRowId == row.id, case .loading? = summaryOutcome else { return }
+            SessionRowActions.summaryDebug("[ui] task fired row=\(row.id) useAI=\(summaryUseAI)")
             let useAI = summaryUseAI
             let result = await onSummarize(row.id, useAI)
             guard summaryRowId == row.id else { return }   // 期间用户切走则丢弃

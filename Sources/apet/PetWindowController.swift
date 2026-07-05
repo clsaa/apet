@@ -612,7 +612,11 @@ private final class SessionPanelHostController: NSViewController {
     }
 
     func summarize(id: String, useAI: Bool) async -> SummaryResult {
-        guard let s = petSessionForId(id) else { return .error("会话不存在") }
+        SessionRowActions.summaryDebug("[pet] summarize called id=\(id) useAI=\(useAI)")
+        guard let s = petSessionForId(id) else {
+            SessionRowActions.summaryDebug("[pet] petSessionForId 未命中 id=\(id)")
+            return .error("会话不存在")
+        }
         return useAI ? await SessionRowActions.aiSummary(s) : SessionRowActions.quickSummary(s)
     }
 

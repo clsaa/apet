@@ -339,7 +339,11 @@ final class MenuBarController: NSObject {
     }
 
     func summarize(id: String, useAI: Bool) async -> SummaryResult {
-        guard let s = sessionForId(id) else { return .error("会话不存在") }
+        SessionRowActions.summaryDebug("[menubar] summarize called id=\(id) useAI=\(useAI)")
+        guard let s = sessionForId(id) else {
+            SessionRowActions.summaryDebug("[menubar] sessionForId 未命中 id=\(id)")
+            return .error("会话不存在")
+        }
         return useAI ? await SessionRowActions.aiSummary(s) : SessionRowActions.quickSummary(s)
     }
 

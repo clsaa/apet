@@ -94,7 +94,6 @@ def main():
 
     session_id = hook.get("session_id", "")
     cwd        = hook.get("cwd", "")
-    title      = os.path.basename(cwd) if cwd else ""
     event_id   = str(uuid.uuid4())
     ts         = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%S.000Z")
 
@@ -106,7 +105,8 @@ def main():
         "sessionId": session_id,
         "root":      root,
         "cwd":       cwd,
-        "title":     title,
+        # title 故意不发:显示层有 cwd basename 兜底;发 basename 会经 last-non-nil 合并
+        # 反复覆盖 jsonl 的真标题(ai-title/lastPrompt),面板就全变目录名了。
         "ts":        ts,
     }
 
