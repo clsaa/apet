@@ -238,16 +238,21 @@ extension SessionStore {
 
     /// 回收：STALE 超过 endedAfter / WAITING 超过 waitingEndedAfter 的会话转 ENDED，并从 sessions 驱逐。
     /// 返回被移除会话的 .removed 变更。纯计时，不依赖 hook（面板 H3-3）。
+    ///
+    /// `isAlive`:终端存活探测缝(注入,Core 不做 IO)。返回 true = 该会话的终端窗口还开着
+    /// (如 /dev/tty 存在)→ waiting/stale 不老化驱逐(用户随时回来);ended 是终态不受保护。
+    /// 默认恒 false = 与旧行为一致。已知局限:macOS 复用 tty 号,新终端占用同号会误判存活。
     @discardableResult
-    public func reap(now: Double, endedAfter: Double, waitingEndedAfter: Double) -> [StoreChange] {
+    public func reap(now: Double, endedAfter: Double, waitingEndedAfter: Double,
+                     isAlive: (Session) -> Bool = { _ in false }) -> [StoreChange] {
         var removed: [StoreChange] = []
         for (key, session) in sessions {
             let idle = now - session.lastActiveAt
             let shouldEnd: Bool
             switch session.state {
-            case .stale:   shouldEnd = idle > endedAfter
-            case .waiting: shouldEnd = idle > waitingEndedAfter
-            case .ended:   shouldEnd = true   // 已 ended 直接驱逐
+            case .stale:   shouldEnd = idle > endedAfter && !isAlive(session)
+            case .waiting: shouldEnd = idle > waitingEndedAfter && !isAlive(session)
+            case .ended:   shouldEnd = true   // 已 ended 直接驱逐(终态,tty 保护不适用)
             case .running: shouldEnd = false
             }
             if shouldEnd {

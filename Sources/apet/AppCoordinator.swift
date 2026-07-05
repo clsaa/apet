@@ -537,7 +537,9 @@ final class AppCoordinator {
             _ = store.ageReadToStale(now: now, readGrayAfter: self.config.readGrayAfterSec)
             store.reap(now: now,
                        endedAfter: self.config.endedAfterSec,
-                       waitingEndedAfter: self.config.waitingEndedAfterSec)
+                       waitingEndedAfter: self.config.waitingEndedAfterSec,
+                       // P2:终端还开着(/dev/tty 存在)的闲置会话不老化驱逐,用户随时回来。
+                       isAlive: { TtyLiveness.isAlive(tty: $0.terminal?.tty) })
             let timerSessions = self.applyMetas(store.activeSessions())
             self.menuBar?.update(summary: store.summary(), sessions: timerSessions)
             self.petWindow?.update(summary: store.summary(), sessions: timerSessions)
