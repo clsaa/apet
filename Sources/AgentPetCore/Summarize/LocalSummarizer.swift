@@ -34,7 +34,7 @@ public enum LocalSummarizer {
         let t = text.drop { $0 == " " || $0 == "\n" || $0 == "\r" || $0 == "\t" }
         let markers = [
             "<task-notification>", "<system-reminder>",
-            "<local-command-stdout>", "<local-command-stderr>", "<command-name>",
+            "<local-command-stdout>", "<local-command-stderr>", "<local-command-caveat>", "<command-name>",
             "<command-message>", "<command-args>", "<bash-stdout>", "<bash-stderr>",
             "[SYSTEM NOTIFICATION", "Caveat: The messages below",
         ]

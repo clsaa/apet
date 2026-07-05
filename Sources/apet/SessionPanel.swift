@@ -326,7 +326,7 @@ struct SessionPanel: View {
         VStack(spacing: 0) {
             rowCellCore(row)
             if ui.summaryRowId == row.id, let outcome = ui.summaryOutcome {
-                summaryBanner(outcome)
+                summaryBanner(outcome, row: row)
             }
         }
         .task(id: ui.summaryRowId == row.id ? "\(row.id)#\(ui.summaryNonce)" : nil) {
@@ -368,7 +368,7 @@ struct SessionPanel: View {
 
 
     @ViewBuilder
-    private func summaryBanner(_ outcome: SummaryOutcome) -> some View {
+    private func summaryBanner(_ outcome: SummaryOutcome, row: SessionRowModel) -> some View {
         HStack(alignment: .top, spacing: 6) {
             Image(systemName: "sparkles").font(.system(size: 10)).foregroundStyle(.secondary)
             switch outcome {
@@ -385,6 +385,12 @@ struct SessionPanel: View {
             }
             Spacer(minLength: 4)
             if case .text(let t) = outcome {
+                Button {
+                    // 一键把摘要设为会话名称(≤40 字,与重命名同上限)。
+                    onCommitRename(row.id, String(t.prefix(40)))
+                    ui.summaryRowId = nil; ui.summaryOutcome = nil
+                } label: { Image(systemName: "square.and.pencil").font(.system(size: 10)) }
+                    .buttonStyle(.plain).foregroundStyle(.secondary).help("设为会话名称")
                 Button { copyText(t) } label: { Image(systemName: "doc.on.doc").font(.system(size: 10)) }
                     .buttonStyle(.plain).foregroundStyle(.secondary).help("复制摘要")
             }
