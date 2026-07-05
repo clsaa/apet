@@ -532,7 +532,7 @@ final class MenuBarController: NSObject {
                     SessionRowActions.showOpenCodeNoJumpAlert(session)
                     return
                 }
-                if session.key.agent == "codex" {
+                if session.key.agent.hasPrefix("codex") {
                     // 诚实降级(架构评审 Major-2):codex rollout 无终端信息,不是"可能已关闭"。
                     SessionRowActions.showCodexNoJumpAlert(session)
                     return

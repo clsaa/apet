@@ -65,6 +65,15 @@ public enum CodexRolloutParse {
               // 白名单:uuid 形态(hex+dash),防伪 id 进 store/「复制 sessionID」剪贴板(架构评审 Minor-2)
               sessionId.allSatisfy({ $0.isHexDigit || $0 == "-" }) else { return nil }
         let cwd = mp["cwd"] as? String
+        // Desktop vs CLI 分流(用户需求:区分两端)。取**首条** meta——真机实锤有会话先 Desktop
+        // 后 CLI 混用,身份摇摆会导致 SessionKey 漂移会话分裂。
+        // 明确 Desktop 信号(source=="vscode" / originator 含 Desktop)→ codex-desktop(激活 App);
+        // 其余(source=="cli"/originator=codex-tui/老版本无 source)→ codex(CLI,诚实无跳转)——
+        // 未知默认 CLI:宁可少给跳转,不乱激活 App(false-jump 会误标已读)。
+        let source = (mp["source"] as? String) ?? ""
+        let originator = (mp["originator"] as? String) ?? ""
+        let isDesktop = source == "vscode" || originator.localizedCaseInsensitiveContains("desktop")
+        let agentOverride: String? = isDesktop ? "codex-desktop" : nil
 
         // 2. mtime
         let attrs = try? FileManager.default.attributesOfItem(atPath: path)
@@ -140,7 +149,8 @@ public enum CodexRolloutParse {
             lastAssistantTs: lastAssistantTs,
             lastConversationTs: lastConversationTs,
             isSidechain: false,
-            isSubagentPath: false
+            isSubagentPath: false,
+            agentOverride: agentOverride
         )
     }
 

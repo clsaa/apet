@@ -764,6 +764,9 @@ final class AppCoordinator {
                     ev.terminal = TerminalRef(kind: .other, bundleId: "com.qoder.work")
                 } else if key.agent == "qoder-ide" {
                     ev.terminal = TerminalRef(kind: .other, bundleId: "com.qoder.ide")
+                } else if key.agent == "codex-desktop" {
+                    // Codex 桌面端会话:点击激活 Codex.app(仅切到 App 档);CLI 端(codex)无终端信息不注入。
+                    ev.terminal = TerminalRef(kind: .other, bundleId: "com.openai.codex")
                 }
                 jsonlSeqCounter += 1
                 _ = ingestor.ingest(event: ev, now: now, replay: false)

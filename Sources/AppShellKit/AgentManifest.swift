@@ -179,7 +179,16 @@ public struct AgentManifest: Equatable {
         hasStateRules: true   // task_started/complete/aborted 内容信号(评审 Minor-4:非纯 mtime)
     )
 
-    public static let builtins: [AgentManifest] = [.claude, .qoderWork, .qoderCli, .qoderIDE, .openCode, .codex]
+    /// Codex 桌面端(source=="vscode" 的 rollout;与 CLI 同存储同 resume,点击激活 Codex.app)。
+    public static let codexDesktop = AgentManifest(
+        id: "codex-desktop",
+        rootsGlobs: ["~/.codex/sessions/**"],
+        tsDialect: .iso,
+        resumeArgvTemplate: ["codex", "resume", "{id}"],
+        hasStateRules: true
+    )
+
+    public static let builtins: [AgentManifest] = [.claude, .qoderWork, .qoderCli, .qoderIDE, .openCode, .codex, .codexDesktop]
 
     /// DB 型 agent（会话在 SQLite 而非 jsonl 转录）：
     /// 用于 ① 轮询源 waitingStop 预置已读（架构 m6 收敛，评审 B2：别再加 agent 字符串 if）；
@@ -190,7 +199,7 @@ public struct AgentManifest: Equatable {
 
     /// 无终端信息(点击无法跳转)的 agent:行内「无跳转」提示 + 点击诚实降级弹窗。
     /// dbBacked(SQLite 源)之外,codex 是 jsonl 源但 rollout 不含终端信息。
-    public static let noJumpAgents: Set<String> = dbBackedAgents.union(["codex"])
+    public static let noJumpAgents: Set<String> = dbBackedAgents.union(["codex", "codex-desktop"])   // desktop 通常有 terminal 注入,此为 belt
 
     /// 转录为 Claude 同构 jsonl 的 agent(快速/AI 摘要可用:SessionTranscriptLocator +
     /// ConversationTailParser 直接兼容)。codex 的 rollout schema 不同 → 摘要菜单隐藏(遗留:codex tail 解析)。

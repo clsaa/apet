@@ -47,10 +47,16 @@ final class AgentManifestTests: XCTestCase {
         XCTAssertEqual(m.tsDialect, .iso)
     }
 
-    // 评审修复（AI M4）：builtins 无 glob 重叠（废弃的 qoder stub 已移出注册表）。
-    func test_builtins_noGlobOverlap() {
-        let allGlobs = AgentManifest.builtins.flatMap { $0.rootsGlobs }
-        XCTAssertEqual(allGlobs.count, Set(allGlobs).count, "builtins 各 manifest 的 roots glob 不得重叠")
+    // 评审修复（AI M4）：builtins 无 glob 重叠(废弃的 qoder stub 已移出注册表)。
+    // 例外:codex 与 codex-desktop **有意**共享 ~/.codex/sessions/**——同一存储按 rollout 内容
+    // (首条 meta 的 source)分流,不是按目录;单一 watcher 挂载,无重复扫描。
+    func test_builtins_noGlobOverlap_exceptCodexPair() {
+        let allGlobs = AgentManifest.builtins
+            .filter { !$0.id.hasPrefix("codex") }
+            .flatMap { $0.rootsGlobs }
+        XCTAssertEqual(allGlobs.count, Set(allGlobs).count, "非 codex 的 manifest glob 不得重叠")
+        XCTAssertEqual(AgentManifest.codex.rootsGlobs, AgentManifest.codexDesktop.rootsGlobs,
+                       "codex 双端共享同一存储(内容分流)")
         XCTAssertFalse(AgentManifest.builtins.contains { $0.id == "qoder" }, "废弃 stub 不进注册表")
     }
 

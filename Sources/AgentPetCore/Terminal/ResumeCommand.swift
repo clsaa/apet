@@ -7,7 +7,7 @@ public enum ResumeCommand {
     /// agent → id 白名单规则。未知 agent → nil（无恢复命令）。
     private static func idRule(agent: String) -> SessionIdRule? {
         switch agent {
-        case "claude", "claude-code", "qoder-cli", "codex": return .uuid
+        case "claude", "claude-code", "qoder-cli", "codex", "codex-desktop": return .uuid
         case "opencode": return .prefixedBase62(prefix: "ses_", length: 26)
         default: return nil
         }
@@ -24,8 +24,9 @@ public enum ResumeCommand {
         case "qoder-cli":
             // 实测确认（qodercli v1.0.36 --help）：`-r, --resume [id]`。
             return ["qodercli", "--resume", sessionId]
-        case "codex":
+        case "codex", "codex-desktop":
             // 实测确认(codex-cli 0.142.5 `resume --help`):`codex resume [SESSION_ID]`,UUID 直传不走 picker。
+            // 桌面端与 CLI 同存储,resume 通用。
             return ["codex", "resume", sessionId]
         case "opencode":
             if let dir = directory, !dir.isEmpty {

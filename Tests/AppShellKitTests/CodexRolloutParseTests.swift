@@ -300,4 +300,33 @@ final class CodexRolloutParseTests: XCTestCase {
         let bad = #"{"timestamp":"2026-07-03T14:36:12.000Z","type":"session_meta","payload":{"id":"$(rm -rf ~)","cwd":"/x"}}"#
         XCTAssertNil(CodexRolloutParse.parse(path: write("r.jsonl", [bad]), root: "/r"))
     }
+
+    // MARK: - Desktop vs CLI 分流(用户需求:区分两端)
+
+    func test_desktopMeta_classifiedAsCodexDesktop() {
+        let dm = #"{"timestamp":"2026-07-03T14:36:12.000Z","type":"session_meta","payload":{"id":"019f2868-9cf2-71a3-a941-9214c8231711","cwd":"/x","originator":"Codex Desktop","source":"vscode"}}"#
+        let f = CodexRolloutParse.parse(path: write("r.jsonl", [dm, started, complete]), root: "/r")!
+        XCTAssertEqual(f.agentOverride, "codex-desktop")
+        guard case .observe(_, let key, _, _) = JSONLSessionScanner.scan(f, now: f.lastAssistantTs! + 60, agent: "codex") else { return XCTFail() }
+        XCTAssertEqual(key.agent, "codex-desktop", "scan key 用 override")
+    }
+
+    func test_cliMeta_staysCodex() {
+        let cm = #"{"timestamp":"2026-07-03T14:36:12.000Z","type":"session_meta","payload":{"id":"019f2868-9cf2-71a3-a941-9214c8231711","cwd":"/x","originator":"codex-tui","source":"cli"}}"#
+        XCTAssertNil(CodexRolloutParse.parse(path: write("r.jsonl", [cm, started]), root: "/r")?.agentOverride)
+    }
+
+    func test_unknownSource_defaultsToCli() {
+        // 老版本无 source/originator → 默认 CLI(宁少跳转,不乱激活 App)
+        XCTAssertNil(CodexRolloutParse.parse(path: write("r.jsonl", [meta, started]), root: "/r")?.agentOverride,
+                     "fixture originator=cli 无 source → CLI")
+    }
+
+    func test_mixedOriginators_identityFromFirstMeta() {
+        // 真机实锤:会话先 Desktop 后 CLI 混用 → 身份取首条,不漂移
+        let dm = #"{"timestamp":"2026-07-03T14:36:12.000Z","type":"session_meta","payload":{"id":"019f2868-9cf2-71a3-a941-9214c8231711","cwd":"/x","source":"vscode"}}"#
+        let cm2 = #"{"timestamp":"2026-07-03T15:00:00.000Z","type":"session_meta","payload":{"id":"019f2868-9cf2-71a3-a941-9214c8231711","cwd":"/x","source":"cli"}}"#
+        let f = CodexRolloutParse.parse(path: write("r.jsonl", [dm, started, complete, cm2]), root: "/r")
+        XCTAssertEqual(f?.agentOverride, "codex-desktop", "首条 Desktop → 恒 desktop,后续 CLI meta 不改身份")
+    }
 }

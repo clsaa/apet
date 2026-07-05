@@ -8,7 +8,11 @@
 **非目标(遗留)**:
 - ~~resume 不提供~~ → **已核实并提供**(评审更新 2026-07-05):AI 专家用 Codex.app 内置 codex-cli 0.142.5 实跑 `resume --help` 核实 `codex resume [SESSION_ID]`(UUID 直传不走 picker);`resumeArgvTemplate=["codex","resume","{id}"]`,id 过 uuid 白名单。npm 0.118 损坏根因:arm64 机装了 x64 平台包且缺主程序。
 - 快速/AI 摘要:rollout 行 schema 与 Claude 不同,`ConversationTailParser` 不适用 → 摘要菜单对 codex 隐藏(新 `claudeStyleTranscriptAgents` 集合门控),后续可写 codex tail 解析。
-- 精确跳转:rollout 无终端信息 → 无跳转(诚实降级,与 OpenCode 同)。
+- 精确跳转:rollout 无终端信息(Codex 不像 apet hook 会采集 tty)。**Desktop/CLI 分流**(2026-07-05 用户需求):
+  首条 meta `source=="vscode"` → agent=`codex-desktop`,点击**激活 Codex.app**(com.openai.codex,仅切到 App 档);
+  `source=="cli"`/未知 → agent=`codex`,诚实无跳转+恢复命令(未知默认 CLI:宁少跳转不乱激活)。
+  身份取首条 meta(真机实锤有会话 Desktop/CLI 混用,摇摆会致 SessionKey 分裂)。
+  CLI 精确跳转的可能路径(P2 遗留):codex config.toml 的 `notify` 钩子可像 claude hook 一样采集 tty。
 
 ## 1. 数据形态(2026-07-05 实测,codex 0.118.0)
 

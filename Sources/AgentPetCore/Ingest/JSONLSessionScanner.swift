@@ -26,6 +26,9 @@ public struct ScannedFile: Equatable {
     /// 该会话所有 subagent 文件（agent-*.jsonl）中最新的 mtime（epoch 秒）。
     /// 无 subagent 文件时为 nil。
     public var latestSubagentMtime: Double?
+    /// 覆盖 scan(agent:) 的归属(如 codex 按首条 meta 的 source 分流 codex/codex-desktop)。
+    /// 必须由**稳定**信号决定(首条 meta),否则 SessionKey 漂移会话分裂。
+    public var agentOverride: String?
 
     public init(
         sessionId: String,
@@ -43,7 +46,8 @@ public struct ScannedFile: Equatable {
         promptSource: String? = nil,
         isSidechain: Bool = false,
         isSubagentPath: Bool = false,
-        latestSubagentMtime: Double? = nil
+        latestSubagentMtime: Double? = nil,
+        agentOverride: String? = nil
     ) {
         self.sessionId = sessionId
         self.root = root
@@ -61,6 +65,7 @@ public struct ScannedFile: Equatable {
         self.isSidechain = isSidechain
         self.isSubagentPath = isSubagentPath
         self.latestSubagentMtime = latestSubagentMtime
+        self.agentOverride = agentOverride
     }
 }
 
@@ -147,7 +152,7 @@ public enum JSONLSessionScanner {
         }
 
         // 过滤全未命中 → 状态派生（内容信号优先 + away 时间感知 + effectiveTs 兜底）
-        let key = SessionKey(agent: agent, root: f.root, sessionId: f.sessionId)
+        let key = SessionKey(agent: f.agentOverride ?? agent, root: f.root, sessionId: f.sessionId)
         let displayTitle = f.title ?? f.lastPrompt
 
         // I1 修复：queue-operation 时间窗口判断（在有 now 的 scanner 侧做）
