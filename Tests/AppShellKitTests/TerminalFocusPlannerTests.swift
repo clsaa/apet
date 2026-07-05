@@ -24,7 +24,7 @@ final class TerminalFocusPlannerTests: XCTestCase {
         }
         // arguments[0] = script body, arguments[1] = session id
         XCTAssertGreaterThanOrEqual(inv.arguments.count, 2, "ScriptInvocation must have at least 2 arguments")
-        XCTAssertEqual(inv.arguments[1], "w0t1p0:ABC", "arguments[1] must be the session id")
+        XCTAssertEqual(inv.arguments[1], "ABC", "iTerm2 AppleScript id 是纯 UUID,须剥 wXtYpZ: 前缀")
     }
 
     // MARK: - 3. iTerm2 + empty (invalid) id → .activateBundle default
