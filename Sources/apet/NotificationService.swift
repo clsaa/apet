@@ -111,6 +111,7 @@ final class NotificationService: NSObject {
         let un = UNMutableNotificationContent()
         un.title = content.title
         un.body  = content.body
+        if !content.subtitle.isEmpty { un.subtitle = content.subtitle }
         un.sound = decision.withSound ? .default : nil
         // 归入会话 category，使"划掉通知"也触发 didReceive → 标已读。
         un.categoryIdentifier = Self.sessionCategoryId

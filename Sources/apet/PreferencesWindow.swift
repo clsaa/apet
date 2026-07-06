@@ -335,6 +335,8 @@ struct PreferencesView: View {
     /// M3-C+(Task 8b):OpenCode 健康提供者(nil = 不展示该行;评审 Blocker:版本过新/XDG
     /// 失明必须用户可见,不能只进日志)。
     var openCodeHealthProvider: (() -> OpenCodeHealth)?
+    /// 统计(E):历史索引聚合 (agent, 总数, 近7天)。nil=隐藏区块。
+    var statsProvider: (() -> [(agent: String, total: Int, week: Int)])?
 
     init(
         config: AppConfig,
@@ -342,9 +344,11 @@ struct PreferencesView: View {
         onSave: @escaping (AppConfig) -> Void,
         uploadController: PetUploadController? = nil,
         customStore: CustomPetStore? = nil,
-        openCodeHealthProvider: (() -> OpenCodeHealth)? = nil
+        openCodeHealthProvider: (() -> OpenCodeHealth)? = nil,
+        statsProvider: (() -> [(agent: String, total: Int, week: Int)])? = nil
     ) {
         self.openCodeHealthProvider = openCodeHealthProvider
+        self.statsProvider = statsProvider
         _config = State(initialValue: config)
         // 自定义宠物名持久化：Application Support/AgentPet/pet-names.json
         let appSupport = (NSHomeDirectory() as NSString)
@@ -372,7 +376,7 @@ struct PreferencesView: View {
                 .tabItem { Label("通知", systemImage: "bell") }
             tabPage { configHealthSection; Divider(); dataRootsSection; Divider(); qoderCliHookSection; Divider(); codexNotifySection; Divider(); openCodePluginSection; Divider(); thresholdsSection }
                 .tabItem { Label("会话", systemImage: "list.bullet.rectangle") }
-            tabPage { hotkeyGroup; Divider(); startupSection; Divider(); saveSection }
+            tabPage { hotkeyGroup; Divider(); startupSection; Divider(); statsSection; Divider(); saveSection }
                 .tabItem { Label("通用", systemImage: "gearshape") }
         }
         .frame(minWidth: 520, idealWidth: 560, minHeight: 460)
@@ -652,6 +656,29 @@ struct PreferencesView: View {
         }
     }
     @State private var codexNotifyError: String? = nil
+
+    /// 统计洞察(E,轻量):历史索引聚合,零额外 IO。
+    private var statsSection: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Label("会话统计", systemImage: "chart.bar")
+                .font(.headline)
+            if let rows = statsProvider?(), !rows.isEmpty {
+                ForEach(rows, id: \.agent) { r in
+                    HStack {
+                        Text(r.agent).font(.system(size: 11, weight: .medium))
+                            .padding(.horizontal, 5).padding(.vertical, 1)
+                            .background(Color.purple.opacity(0.15)).cornerRadius(4)
+                        Spacer()
+                        Text("近 7 天 \(r.week) · 累计 \(r.total)")
+                            .font(.caption).foregroundStyle(.secondary)
+                    }
+                }
+            } else {
+                Text("历史索引构建后显示(打开面板「历史」tab 或稍候)")
+                    .font(.caption).foregroundStyle(.secondary)
+            }
+        }
+    }
 
     private var startupSection: some View {
         VStack(alignment: .leading, spacing: 8) {
@@ -1477,7 +1504,8 @@ final class PreferencesWindowController: NSWindowController {
         onSave: @escaping (AppConfig) -> Void,
         uploadController: PetUploadController? = nil,
         customStore: CustomPetStore? = nil,
-        openCodeHealthProvider: (() -> OpenCodeHealth)? = nil
+        openCodeHealthProvider: (() -> OpenCodeHealth)? = nil,
+        statsProvider: (() -> [(agent: String, total: Int, week: Int)])? = nil
     ) {
         let window = NSWindow(
             contentRect: NSRect(x: 0, y: 0, width: 520, height: 520),
@@ -1497,7 +1525,8 @@ final class PreferencesWindowController: NSWindowController {
             onSave: onSave,
             uploadController: uploadController,
             customStore: customStore,
-            openCodeHealthProvider: openCodeHealthProvider
+            openCodeHealthProvider: openCodeHealthProvider,
+            statsProvider: statsProvider
         )
         let hc = NSHostingController(rootView: view)
         hostingController = hc

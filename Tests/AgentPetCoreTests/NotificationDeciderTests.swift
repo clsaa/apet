@@ -137,4 +137,19 @@ final class NotificationDeciderTests: XCTestCase {
         XCTAssertFalse(d.content?.body.hasPrefix("[") == true,
                        "body should not have '[' prefix when session is nil")
     }
+
+    /// F 升级:通知副标题带手动摘要(与标题重复省略)。
+    func test_subtitle_carriesNote_dedupesTitle() {
+        var sess = Session(key: SessionKey(agent: "a", root: "r", sessionId: "s"),
+                           state: .running, cwd: "/x/proj", title: "修复面板",
+                           lastSeq: 1, lastActiveAt: 0)
+        sess.note = "通知重构那单"
+        let ev = AgentEvent(v: 1, eventId: "e", agent: "a", kind: .attention,
+                            sessionId: "s", root: "r", ts: "t")
+        let d = NotificationDecider.decide(event: ev, session: sess, mode: .attentionOnly, replay: false)
+        XCTAssertEqual(d.content?.subtitle, "通知重构那单")
+        sess.note = "修复面板"   // 与标题相同 → 省略
+        let d2 = NotificationDecider.decide(event: ev, session: sess, mode: .attentionOnly, replay: false)
+        XCTAssertEqual(d2.content?.subtitle, "")
+    }
 }

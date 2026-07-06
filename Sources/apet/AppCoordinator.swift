@@ -645,7 +645,18 @@ final class AppCoordinator {
             },
             uploadController: uploadController,
             customStore: customStore,
-            openCodeHealthProvider: { [weak self] in self?.openCodeHealth ?? .ok }
+            openCodeHealthProvider: { [weak self] in self?.openCodeHealth ?? .ok },
+            statsProvider: { [weak self] in
+                guard let self else { return [] }
+                let now = Date().timeIntervalSince1970
+                var total: [String: Int] = [:], week: [String: Int] = [:]
+                for s in self.historyCache {
+                    total[s.key.agent, default: 0] += 1
+                    if now - s.lastActiveAt < 7 * 86_400 { week[s.key.agent, default: 0] += 1 }
+                }
+                return total.keys.sorted { (total[$0] ?? 0) > (total[$1] ?? 0) }
+                    .map { (agent: $0, total: total[$0] ?? 0, week: week[$0] ?? 0) }
+            }
         )
         preferencesController = pc
         pc.show()

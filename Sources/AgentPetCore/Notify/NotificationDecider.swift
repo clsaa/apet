@@ -3,7 +3,11 @@ public enum NotifyMode { case attentionOnly, everyStop }
 public struct NotificationContent: Equatable {
     public let title: String
     public let body: String
-    public init(title: String, body: String) { self.title = title; self.body = body }
+    /// 副标题:会话的手动摘要(用户亲手标注的「这是哪件事」,通知里最有辨识度的一行)。
+    public let subtitle: String
+    public init(title: String, body: String, subtitle: String = "") {
+        self.title = title; self.body = body; self.subtitle = subtitle
+    }
 }
 
 public struct NotificationDecision: Equatable {
@@ -48,7 +52,9 @@ public enum NotificationDecider {
     private static func ring(_ event: AgentEvent, _ session: Session?, _ defaultBody: String) -> NotificationDecision {
         let title = event.title ?? session?.title ?? event.agent
         let body = projectTag(session) + defaultBody
+        // 副标题 = 手动摘要(F 升级):与标题重复时省略。
+        let subtitle = (session?.note).flatMap { $0 == title ? nil : $0 } ?? ""
         return NotificationDecision(shouldNotify: true,
-                                    content: NotificationContent(title: title, body: body))
+                                    content: NotificationContent(title: title, body: body, subtitle: subtitle))
     }
 }
