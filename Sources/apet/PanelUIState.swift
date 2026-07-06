@@ -30,6 +30,12 @@ final class PanelUIState: ObservableObject {
     // 行内提示条(跳转失败等):取代全屏 NSAlert,零打断(UI/交互:优雅克制)。
     @Published var noticeRowId: String? = nil
     @Published var notice: RowNotice? = nil
+    // 键盘流(B):↑↓ 选行 / 回车跳转 / ⌘F 聚焦搜索。
+    @Published var keyboardSelectedId: String? = nil
+    @Published var moveSeq = 0          // 每次 ±1 递增触发视图应用 moveDelta
+    var moveDelta = 0
+    @Published var focusSearchToken = 0
+
     /// 提示条「已复制 ✓」瞬态(收编进对象:@State 的 asyncAfter 回退会写进废弃树,巩固评审 Minor)。
     @Published var noticeCopied = false
 
@@ -41,6 +47,7 @@ final class PanelUIState: ObservableObject {
         isCreatingGroup = false; newGroupText = ""; creatingGroupAttachId = nil
         confirmDeleteGroup = nil
         noticeRowId = nil; notice = nil; noticeCopied = false
+        keyboardSelectedId = nil
     }
 }
 

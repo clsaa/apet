@@ -58,6 +58,7 @@ struct SessionPanel: View {
 
     @State private var filter: String = ""
     @FocusState private var inlineFieldFocused: Bool
+    @FocusState private var searchFocused: Bool
 
     private var organizedFlat: OrganizedFlat {
         // 历史 tab:数据源换成磁盘索引(state 全 ended/stale → 无 pinned),tab 语义按 .all 全量过。
@@ -109,6 +110,7 @@ struct SessionPanel: View {
             TextField("搜索 标题 / 目录 / ID / agent", text: $filter)
                 .textFieldStyle(.plain)
                 .font(.system(size: 12))
+                .focused($searchFocused)
             if !filter.isEmpty {
                 Button { filter = "" } label: {
                     Image(systemName: "xmark.circle.fill")
@@ -126,7 +128,9 @@ struct SessionPanel: View {
 
     private var content: some View {
         let o = organizedFlat
-        return ScrollView {
+        let visibleIds = (o.pinned + o.rest).map(\.id)
+        return ScrollViewReader { proxy in
+        ScrollView {
             LazyVStack(spacing: 0, pinnedViews: []) {
                 // U1:等你 pinned 跨 tab 常驻 + 保留「⏳N个等你」头(U2)。
                 if !o.pinned.isEmpty {
@@ -138,6 +142,18 @@ struct SessionPanel: View {
                     emptyTabHint
                 }
             }
+        }
+        // 键盘流(B):↑↓ 移动应用 + 滚动跟随 + ⌘F 聚焦搜索(令牌驱动,监视器在控制器)。
+        .onChange(of: ui.moveSeq) { _ in
+            guard !visibleIds.isEmpty else { return }
+            let cur = ui.keyboardSelectedId.flatMap { visibleIds.firstIndex(of: $0) }
+            let next: Int
+            if let c = cur { next = max(0, min(visibleIds.count - 1, c + ui.moveDelta)) }
+            else { next = ui.moveDelta >= 0 ? 0 : visibleIds.count - 1 }
+            ui.keyboardSelectedId = visibleIds[next]
+            withAnimation(.easeOut(duration: 0.12)) { proxy.scrollTo(visibleIds[next], anchor: nil) }
+        }
+        .onChange(of: ui.focusSearchToken) { _ in searchFocused = true }
         }
         .frame(minWidth: 300, maxWidth: .infinity, maxHeight: .infinity)
     }
@@ -348,6 +364,7 @@ struct SessionPanel: View {
     private func rowCell(_ row: SessionRowModel) -> some View {
         VStack(spacing: 0) {
             rowCellCore(row)
+                .background(ui.keyboardSelectedId == row.id ? Color.accentColor.opacity(0.12) : Color.clear)
             if ui.summaryRowId == row.id, let outcome = ui.summaryOutcome {
                 summaryBanner(outcome, row: row)
             }

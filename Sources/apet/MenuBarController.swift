@@ -179,6 +179,7 @@ final class MenuBarController: NSObject {
     var onHistoryTabSelected: (() -> Void)?
     /// 面板 UI 触发状态:跨 rootView 替换存活(菜单闭包写 @State 会丢,见 PanelUIState)。
     let panelUI = PanelUIState()
+    private var keyMonitor: Any?
 
     // MARK: - State
 
@@ -422,6 +423,7 @@ final class MenuBarController: NSObject {
             w.onFrameChange = { [weak self] f in self?.onPanelFrameChange?(f) }
             win = w
             panelWindow = w
+            installKeyMonitor()
         }
 
         // 定位:有保存的 frame(用户拖过)→ 精确恢复;否则首开锚到菜单栏图标下方。
@@ -436,6 +438,37 @@ final class MenuBarController: NSObject {
         }
         win.makeKeyAndOrderFront(nil)
         NSApp.activate(ignoringOtherApps: true)
+    }
+
+    /// 键盘流(B):面板为 key 窗口且焦点不在文本框时,↑↓ 选行/回车跳转/Esc 关面板/⌘F 聚焦搜索。
+    private func installKeyMonitor() {
+        guard keyMonitor == nil else { return }
+        keyMonitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { [weak self] event in
+            guard let self, let win = self.panelWindow, event.window === win else { return event }
+            // 文本编辑中(搜索/重命名/摘要/建组):除 ⌘F 外全部放行给字段编辑器。
+            let inTextField = win.firstResponder is NSTextView
+            if event.modifierFlags.contains(.command),
+               event.charactersIgnoringModifiers?.lowercased() == "f" {
+                self.panelUI.focusSearchToken += 1
+                return nil
+            }
+            guard !inTextField else { return event }
+            switch event.keyCode {
+            case 125:   // ↓
+                self.panelUI.moveDelta = 1; self.panelUI.moveSeq += 1; return nil
+            case 126:   // ↑
+                self.panelUI.moveDelta = -1; self.panelUI.moveSeq += 1; return nil
+            case 36:    // 回车:跳转选中行
+                if let id = self.panelUI.keyboardSelectedId {
+                    self.handleSessionTap(id: id); return nil
+                }
+                return event
+            case 53:    // Esc:关面板
+                win.orderOut(nil); return nil
+            default:
+                return event
+            }
+        }
     }
 
     private func clampPanelSize(_ s: CGSize) -> CGSize {
