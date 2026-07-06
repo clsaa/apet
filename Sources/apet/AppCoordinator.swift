@@ -534,6 +534,10 @@ final class AppCoordinator {
             self.petWindow?.update(summary: summary, sessions: sessions)
         }
 
+        // 3.9 事件日志压缩(技术债 A):重放前按会话压缩——只增不减的日志长期几十万行,
+        // replay 变慢磁盘白占。阈值触发(>5000 行);原子写(tmp+rename);压缩后从头重放天然一致。
+        compactEventLogIfNeeded(path: eventsPath)
+
         // 4. Replay existing file content (replay: true)
         let replayNow = Date().timeIntervalSince1970
         let replayMode = currentNotifyMode
@@ -776,6 +780,26 @@ final class AppCoordinator {
     }
 
     // MARK: - Private: JSONL watcher result handler
+
+    /// events.ndjson 启动压缩:>5000 行才动手;保留「近 72h 或 pid 存活」会话的尾部 50 条。
+    private func compactEventLogIfNeeded(path: String) {
+        guard let text = try? String(contentsOfFile: path, encoding: .utf8) else { return }
+        let lines = text.split(separator: "\n", omittingEmptySubsequences: true).map(String.init)
+        guard lines.count > 5000 else { return }
+        let now = Date().timeIntervalSince1970
+        let kept = EventLogCompactor.compact(lines: lines, now: now)
+        guard kept.count < lines.count else { return }
+        let tmp = path + ".compact.tmp"
+        do {
+            try (kept.joined(separator: "\n") + "\n").write(toFile: tmp, atomically: true, encoding: .utf8)
+            _ = try FileManager.default.replaceItemAt(URL(fileURLWithPath: path),
+                                                      withItemAt: URL(fileURLWithPath: tmp))
+            appendToLog("[info] 事件日志压缩:\(lines.count) → \(kept.count) 行\n")
+        } catch {
+            try? FileManager.default.removeItem(atPath: tmp)
+            appendToLog("[warn] 事件日志压缩失败(原文件未动):\(error.localizedDescription)\n")
+        }
+    }
 
     // MARK: - 历史档案构建(2026-07-06 spec)
 
