@@ -29,6 +29,11 @@ final class AppCoordinator {
     /// F7：会话元数据持久化（收藏/自定义名）+ 进程内镜像。
     private var sessionMetaStore: SessionMetaStore?
     private var sessionMetas: [String: SessionMeta] = [:]
+    // ── 历史档案(2026-07-06 spec)──
+    private let historyIndexer = HistoryIndexer()
+    private var historyCache: [Session] = []
+    private var historyBuilding = false
+    private var historyBuiltAt: Double = 0
     private var ingestor: NDJSONIngestor?
     private let reader = EventTailReader()
     private var checkpoint: Checkpoint?
@@ -391,6 +396,8 @@ final class AppCoordinator {
             }
             mb.onSetNote = setNote
             pw.onSetNote = setNote
+            mb.historySessionsProvider = { [weak self] in self?.historyCache ?? [] }
+            mb.onHistoryTabSelected = { [weak self] in self?.rebuildHistoryIfNeeded() }
 
             // M3-D-B/C:tab + 分组接线。
             let selTabProvider: () -> SessionTab = { [weak self] in SessionTab(encoded: self?.config.selectedTab ?? "all") }
@@ -744,6 +751,108 @@ final class AppCoordinator {
     }
 
     // MARK: - Private: JSONL watcher result handler
+
+    // MARK: - 历史档案构建(2026-07-06 spec)
+
+    /// 选中「历史」tab 时触发:后台构建全量索引((path,mtime) 缓存,冷启后增量),完成刷 UI。
+    func rebuildHistoryIfNeeded() {
+        let now = Date().timeIntervalSince1970
+        guard !historyBuilding, now - historyBuiltAt > 30 else { return }   // 30s 节流
+        historyBuilding = true
+        let indexer = historyIndexer
+        let home = NSHomeDirectory()
+        let metas = sessionMetas
+        DispatchQueue.global(qos: .userInitiated).async { [weak self] in
+            var groups: [[HistoryEntry]] = []
+
+            // claude 同构(claude / qoder-cli / qoder-ide)
+            let claudeRoots: [(agent: String, root: String)] = [
+                ("claude-code", (home as NSString).appendingPathComponent(".claude")),
+                ("qoder-cli", (home as NSString).appendingPathComponent(".qoder")),
+                ("qoder-ide", (home as NSString).appendingPathComponent(
+                    "Library/Application Support/Qoder/SharedClientCache/cli")),
+            ]
+            for src in claudeRoots {
+                let projects = (src.root as NSString).appendingPathComponent("projects")
+                guard FileManager.default.fileExists(atPath: projects) else { continue }
+                let entries = indexer.claudeStyleEntries(
+                    agent: src.agent, root: src.root,
+                    listFiles: { Self.listJsonl(under: projects, skipSubagents: true) },
+                    parse: { path in
+                        guard let f = JSONLParse.parse(path: path, root: src.root,
+                                                       maxLines: 120, maxBytes: 262_144) else { return nil }
+                        return (sessionId: f.sessionId, cwd: f.cwd, title: f.title ?? f.lastPrompt)
+                    })
+                groups.append(entries)
+            }
+
+            // codex(session_index 标题白送;meta 尾窗限 1 行提速)
+            let codexRoot = (home as NSString).appendingPathComponent(".codex")
+            let codexSessions = (codexRoot as NSString).appendingPathComponent("sessions")
+            if FileManager.default.fileExists(atPath: codexSessions) {
+                let titles = CodexSessionIndex.load(
+                    path: (codexRoot as NSString).appendingPathComponent("session_index.jsonl"))
+                let entries = indexer.codexEntries(
+                    root: codexRoot,
+                    listRollouts: { Self.listJsonl(under: codexSessions, skipSubagents: false) },
+                    titles: titles,
+                    parseMeta: { path in
+                        guard let f = CodexRolloutParse.parse(path: path, root: codexRoot, maxLines: 1) else { return nil }
+                        return (sessionId: f.sessionId, cwd: f.cwd, isDesktop: f.agentOverride == "codex-desktop")
+                    })
+                groups.append(entries)
+            }
+
+            // opencode(DB 全量顶层)
+            let ocPath = OpenCodeDBReader.defaultDBPath(env: ProcessInfo.processInfo.environment)
+            if FileManager.default.fileExists(atPath: ocPath) {
+                let ocRoot = (ocPath as NSString).deletingLastPathComponent
+                if case .ok(let payload) = OpenCodeDBReader(dbPath: ocPath).read() {
+                    groups.append(payload.rows.map {
+                        HistoryEntry(agent: "opencode", root: ocRoot, sessionId: $0.sessionId,
+                                     cwd: $0.directory, title: $0.title, lastTs: $0.lastActivity)
+                    })
+                }
+            }
+
+            let merged = HistoryIndexer.merged(groups)
+            // → Session(ended 态;meta 叠加让收藏/改名/note 生效)
+            let sessions: [Session] = merged.map { e in
+                var sess = Session(key: SessionKey(agent: e.agent, root: e.root, sessionId: e.sessionId),
+                                   state: .ended, cwd: e.cwd, title: e.title,
+                                   lastSeq: 0, lastActiveAt: e.lastTs, source: .jsonl)
+                if let meta = metas[SessionMetaMerger.metaKey(sess.key)] {
+                    sess = SessionMetaMerger.apply(into: sess, meta: meta)
+                }
+                return sess
+            }
+            DispatchQueue.main.async {
+                guard let self else { return }
+                self.historyCache = sessions
+                self.historyBuiltAt = Date().timeIntervalSince1970
+                self.historyBuilding = false
+                self.refreshSessionUI()
+            }
+        }
+    }
+
+    /// 枚举目录下 .jsonl(可跳过 subagents/agent- 文件),返回 (path, mtime)。
+    private static func listJsonl(under dir: String, skipSubagents: Bool) -> [(path: String, mtime: Double)] {
+        guard let en = FileManager.default.enumerator(atPath: dir) else { return [] }
+        var out: [(String, Double)] = []
+        while let rel = en.nextObject() as? String {
+            guard rel.hasSuffix(".jsonl") else { continue }
+            if skipSubagents,
+               rel.contains("/subagents/") || (rel as NSString).lastPathComponent.hasPrefix("agent-") {
+                continue
+            }
+            let full = (dir as NSString).appendingPathComponent(rel)
+            let m = (try? FileManager.default.attributesOfItem(atPath: full)[.modificationDate] as? Date)?
+                .timeIntervalSince1970 ?? 0
+            out.append((full, m))
+        }
+        return out
+    }
 
     /// JSONLDirectoryWatcher emit 回调——在 DispatchQueue.main 上触发（watcher timer 已 queue:.main），
     /// @MainActor 上下文安全，直接调用 ingestor.ingest / store.markStaleSession。

@@ -35,6 +35,7 @@ private struct PanelRootView: View {
     var onDeleteGroup: (String) -> Void = { _ in }
     var onCommitRename: (String, String) -> Void = { _, _ in }
     var onCommitNote: (String, String) -> Void = { _, _ in }
+    var historyProvider: (() -> [Session])? = nil
     var pinned: Bool = false
     var onTogglePin: () -> Void = {}
 
@@ -57,7 +58,8 @@ private struct PanelRootView: View {
                          selectedTab: selectedTab, onSelectTab: onSelectTab,
                          groups: groups, onToggleGroup: onToggleGroup,
                          onCommitNewGroup: onCommitNewGroup, onDeleteGroup: onDeleteGroup,
-                         onCommitRename: onCommitRename, onCommitNote: onCommitNote)
+                         onCommitRename: onCommitRename, onCommitNote: onCommitNote,
+                         historyProvider: historyProvider)
             Divider()
 
             // 未装 hook 时的 slim 开启入口；已装则完全隐藏（省空间，去掉冗余「已启用」状态行）。
@@ -172,6 +174,9 @@ final class MenuBarController: NSObject {
     var onPanelFrameChange: ((NSRect) -> Void)?
     var panelPinnedProvider: (() -> Bool)?
     var onTogglePin: (() -> Void)?
+    /// 历史档案(AppCoordinator 注入缓存快照;选历史 tab 时触发异步重建)。
+    var historySessionsProvider: (() -> [Session])?
+    var onHistoryTabSelected: (() -> Void)?
     /// 面板 UI 触发状态:跨 rootView 替换存活(菜单闭包写 @State 会丢,见 PanelUIState)。
     let panelUI = PanelUIState()
 
@@ -306,6 +311,7 @@ final class MenuBarController: NSObject {
             onAcknowledgeAll: { [weak self] in self?.onAcknowledgeAll?() },
             selectedTab: selectedTabProvider?() ?? .all,
             onSelectTab: { [weak self] tab in
+                if case .history = tab { self?.onHistoryTabSelected?() }
                 self?.onSelectTab?(tab)
                 self?.panelHosting?.rootView = self?.makePanelRootView() ?? PanelRootView(
                     sessions: [], now: 0, palette: .system, petVisible: false, hookInstalled: false, hotkeyHint: nil,
@@ -333,6 +339,7 @@ final class MenuBarController: NSObject {
                 guard let self, let s = self.sessionForId(id) else { return }
                 self.onSetNote?(s.key, note.isEmpty ? nil : note)
             },
+            historyProvider: { [weak self] in self?.historySessionsProvider?() ?? [] },
             pinned: panelPinnedProvider?() ?? false,
             onTogglePin: { [weak self] in
                 self?.onTogglePin?()
@@ -348,6 +355,8 @@ final class MenuBarController: NSObject {
 
     private func sessionForId(_ id: String) -> Session? {
         currentSessions.first { "\($0.key.agent)|\($0.key.root)|\($0.key.sessionId)" == id }
+            // 历史行不在活跃列表:回退历史索引(右键动作/摘要/点击提示条都经此查找)。
+            ?? historySessionsProvider?().first { "\($0.key.agent)|\($0.key.root)|\($0.key.sessionId)" == id }
     }
 
     func summarize(id: String, useAI: Bool) async -> SummaryResult {

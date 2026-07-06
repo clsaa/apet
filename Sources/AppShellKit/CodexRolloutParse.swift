@@ -22,7 +22,7 @@ public final class CodexSessionIndex {
         return cache[sessionId]
     }
 
-    static func load(path: String) -> [String: String] {
+    public static func load(path: String) -> [String: String] {
         guard let data = FileManager.default.contents(atPath: path),
               let text = String(data: data, encoding: .utf8) else { return [:] }
         var out: [String: String] = [:]

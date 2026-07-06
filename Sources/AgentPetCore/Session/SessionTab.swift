@@ -3,6 +3,8 @@ import Foundation
 /// 面板顶部标签页(取代分区,M3-D-B)。group 为自定义分组名。
 public enum SessionTab: Equatable {
     case all, favorites, running, read
+    /// 历史档案(2026-07-06 spec):数据源是磁盘全量索引而非活跃 store,面板特殊处理。
+    case history
     case group(String)
 
     /// config 持久化编码。group 用 "group:" 前缀(名内允许冒号,只切首个前缀)。
@@ -12,6 +14,7 @@ public enum SessionTab: Equatable {
         case .favorites: return "favorites"
         case .running: return "running"
         case .read: return "read"
+        case .history: return "history"
         case .group(let n): return "group:" + n
         }
     }
@@ -21,6 +24,7 @@ public enum SessionTab: Equatable {
         case "favorites": self = .favorites
         case "running": self = .running
         case "read": self = .read
+        case "history": self = .history
         default:
             if encoded.hasPrefix("group:") { self = .group(String(encoded.dropFirst("group:".count))) }
             else { self = .all }
@@ -34,6 +38,9 @@ public enum SessionTabFilter {
         case .all: return sessions
         case .favorites: return sessions.filter { $0.favorite }
         case .running: return sessions.filter { if case .running = $0.state { return true }; return false }
+        case .history:
+            // 历史数据源在面板侧特殊供给(HistoryIndexer),对活跃列表恒空——防误用。
+            return []
         case .read: return sessions.filter {
             guard case .waiting = $0.state else { return false }
             return $0.acknowledged

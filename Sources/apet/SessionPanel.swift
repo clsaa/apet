@@ -53,18 +53,30 @@ struct SessionPanel: View {
     var onCommitRename: (String, String) -> Void = { _, _ in }
     /// 手动摘要提交(id, note;空串=清除)。
     var onCommitNote: (String, String) -> Void = { _, _ in }
+    /// 历史档案数据源(2026-07-06 spec):选中「历史」tab 时替代 store 会话;nil=未接(隐藏 tab)。
+    var historyProvider: (() -> [Session])? = nil
 
     @State private var filter: String = ""
     @FocusState private var inlineFieldFocused: Bool
 
     private var organizedFlat: OrganizedFlat {
-        SessionListOrganizer.organizeFlat(sessions: sessions, tab: selectedTab, filter: filter, now: now,
-                                          tzOffset: Double(TimeZone.current.secondsFromGMT()))
+        // 历史 tab:数据源换成磁盘索引(state 全 ended/stale → 无 pinned),tab 语义按 .all 全量过。
+        if case .history = selectedTab, let hist = historyProvider?() {
+            return SessionListOrganizer.organizeFlat(sessions: hist, tab: .all, filter: filter, now: now,
+                                                     tzOffset: Double(TimeZone.current.secondsFromGMT()))
+        }
+        return SessionListOrganizer.organizeFlat(sessions: sessions, tab: selectedTab, filter: filter, now: now,
+                                                 tzOffset: Double(TimeZone.current.secondsFromGMT()))
     }
 
     /// U2:tab 计数。搜索激活时按过滤后集合算,与可见行一致(评审 Minor)。
     private func count(_ tab: SessionTab) -> Int {
         let needle = filter.trimmingCharacters(in: .whitespaces).lowercased()
+        if case .history = tab {
+            let hist = historyProvider?() ?? []
+            return needle.isEmpty ? hist.count
+                : hist.filter { SessionListOrganizer.matchesPublic($0, needle) }.count
+        }
         let base = needle.isEmpty ? sessions
             : sessions.filter { SessionListOrganizer.matchesPublic($0, needle) }
         return SessionTabFilter.filter(base, tab: tab).count
@@ -139,6 +151,8 @@ struct SessionPanel: View {
                     .font(.system(size: 11))
                     .foregroundStyle(.secondary)
                     .padding(.vertical, 20)
+            } else if case .history = selectedTab {
+                Text("正在构建历史索引…(首次需数秒)").foregroundStyle(.secondary).padding(.vertical, 16)
             } else if !filter.isEmpty {
                 Text("没有匹配的会话").foregroundStyle(.secondary).padding(.vertical, 16)
             } else {
@@ -156,6 +170,7 @@ struct SessionPanel: View {
                 tabChip(.favorites, "收藏")
                 tabChip(.running, "进行中")
                 tabChip(.read, "已读")
+                if historyProvider != nil { tabChip(.history, "历史") }
                 ForEach(groups, id: \.self) { g in
                     if ui.confirmDeleteGroup == g {
                         deleteConfirmChip(g)
@@ -272,6 +287,7 @@ struct SessionPanel: View {
         case .all: return "全部会话"
         case .favorites: return "已收藏"
         case .running: return "进行中"
+        case .history: return "历史档案:全量会话记录(磁盘索引),可搜索;点击行复制恢复命令"
         case .group(let n): return "分组:\(n)"
         }
     }
