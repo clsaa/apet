@@ -1,0 +1,28 @@
+name: Release
+on:
+  push:
+    tags: ['v*']
+
+jobs:
+  release:
+    name: Package & Release
+    runs-on: macos-14
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+      - name: Test
+        run: swift test
+      - name: Package app
+        run: bash scripts/package-app.sh
+      - name: Ad-hoc sign
+        # 无开发者证书时 ad-hoc 签名(用户需右键打开绕过 Gatekeeper);
+        # 正式签名+公证:配置 secrets(DEVELOPER_ID_CERT/NOTARY_*)后替换此步,见 docs/RELEASING.md。
+        run: codesign --force --deep --sign - AgentPet.app
+      - name: Zip
+        run: ditto -c -k --keepParent AgentPet.app AgentPet-${{ github.ref_name }}.zip
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: AgentPet-${{ github.ref_name }}.zip
+          generate_release_notes: true
