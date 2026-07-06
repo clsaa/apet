@@ -35,4 +35,15 @@ final class SessionTranscriptLocatorTests: XCTestCase {
         try "x".write(toFile: subDir + "/agent-abc-123.jsonl", atomically: true, encoding: .utf8)
         XCTAssertNil(SessionTranscriptLocator.find(root: root, sessionId: "abc-123"))
     }
+
+    func test_codexRollout_foundBySuffixUnderSessions() {
+        let dir = NSTemporaryDirectory() + "loc-codex-\(UUID().uuidString)"
+        let day = dir + "/sessions/2026/07/05"
+        try! FileManager.default.createDirectory(atPath: day, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(atPath: dir) }
+        let f = day + "/rollout-2026-07-05T20-18-09-019f3236-aaaa-7bbb-8ccc-ddddeeee0001.jsonl"
+        try! "x".write(toFile: f, atomically: true, encoding: .utf8)
+        XCTAssertEqual(SessionTranscriptLocator.find(root: dir, sessionId: "019f3236-aaaa-7bbb-8ccc-ddddeeee0001"), f,
+                       "codex rollout 按 -<sid>.jsonl 后缀在 sessions/ 下命中")
+    }
 }

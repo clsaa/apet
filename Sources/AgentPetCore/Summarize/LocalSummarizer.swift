@@ -48,7 +48,7 @@ public enum LocalSummarizer {
         let greetings: Set<String> = [
             "hi", "hello", "hey", "yo", "sup", "hello?", "hi there", "嗨", "嘿", "你好", "在吗", "在么",
             "ok", "okay", "好", "好的", "行", "嗯", "go", "start", "开始", "继续", "go on", "continue",
-            "test", "测试", "ping", "?", "？"
+            "test", "测试", "ping", "?", "？", "quit", "exit", "q", "退出"
         ]
         return greetings.contains(t)
     }

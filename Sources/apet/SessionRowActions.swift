@@ -48,7 +48,9 @@ enum SessionRowActions {
         summaryDebug("quick 命中转录 path=\(path)")
         let headLines = TailLineReader.firstLines(path: path, maxLines: 80)
         guard !headLines.isEmpty else { return .error("会话暂无可总结内容") }
-        let turns = ConversationTailParser.turns(lines: headLines)
+        let turns = s.key.agent.hasPrefix("codex")
+            ? CodexConversationTail.turns(lines: headLines)
+            : ConversationTailParser.turns(lines: headLines)
         let summary = LocalSummarizer.summarize(turns: turns)
         return summary.hasPrefix("（") ? .error("会话暂无可总结内容") : .text(summary)
     }
@@ -65,8 +67,11 @@ enum SessionRowActions {
         let headLines = TailLineReader.firstLines(path: path, maxLines: 60)
         let tailLines: [String]
         if case .ok(let l) = TailLineReader.lastLines(path: path, maxLines: 120, maxBytes: 262_144) { tailLines = l } else { tailLines = [] }
-        let headTurns = ConversationTailParser.turns(lines: headLines)
-        let tailTurns = ConversationTailParser.turns(lines: tailLines)
+        let isCodex = s.key.agent.hasPrefix("codex")
+        let headTurns = isCodex ? CodexConversationTail.turns(lines: headLines)
+                                : ConversationTailParser.turns(lines: headLines)
+        let tailTurns = isCodex ? CodexConversationTail.turns(lines: tailLines)
+                                : ConversationTailParser.turns(lines: tailLines)
         guard !headTurns.isEmpty || !tailTurns.isEmpty else { return .error("会话暂无可总结内容") }
         let opening = headTurns.prefix(6).map { "\($0.role): \($0.text)" }.joined(separator: "\n")
         let recent = tailTurns.suffix(8).map { "\($0.role): \($0.text)" }.joined(separator: "\n")

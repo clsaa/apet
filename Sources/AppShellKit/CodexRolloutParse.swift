@@ -171,3 +171,41 @@ public enum CodexRolloutParse {
         return iso.date(from: s)?.timeIntervalSince1970 ?? isoNoFrac.date(from: s)?.timeIntervalSince1970
     }
 }
+
+// MARK: - CodexConversationTail
+
+/// codex rollout 行 → `ConversationTurn`(解锁快速/AI 摘要;与 Claude 的 ConversationTailParser 对位)。
+/// user 回合 ← `event_msg user_message`(纯文本;跳过 `# Files mentioned` 附件注入);
+/// assistant 回合 ← `event_msg agent_message`;尾部 task_complete 后最后一条 assistant 标 end_turn。
+public enum CodexConversationTail {
+    public static func turns(lines: [String]) -> [ConversationTurn] {
+        var out: [ConversationTurn] = []
+        var sawComplete = false
+        for line in lines {
+            guard let data = line.data(using: .utf8),
+                  let obj = (try? JSONSerialization.jsonObject(with: data)) as? [String: Any],
+                  let payload = obj["payload"] as? [String: Any],
+                  let pt = payload["type"] as? String else { continue }
+            switch pt {
+            case "user_message":
+                if let m = payload["message"] as? String, !m.isEmpty,
+                   !m.trimmingCharacters(in: .whitespacesAndNewlines)
+                     .hasPrefix("# Files mentioned by the user") {
+                    out.append(ConversationTurn(role: "user", text: m))
+                }
+            case "agent_message":
+                if let m = payload["message"] as? String, !m.isEmpty {
+                    out.append(ConversationTurn(role: "assistant", text: m))
+                }
+            case "task_complete":
+                sawComplete = true
+            default: break
+            }
+        }
+        // 尾部轮次已完成 → 最后 assistant 标 end_turn(scanner/摘要语义对齐)
+        if sawComplete, let i = out.lastIndex(where: { $0.role == "assistant" }) {
+            out[i] = ConversationTurn(role: "assistant", text: out[i].text, stopReason: "end_turn")
+        }
+        return out
+    }
+}

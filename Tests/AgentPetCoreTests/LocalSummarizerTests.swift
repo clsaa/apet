@@ -99,6 +99,13 @@ final class LocalSummarizerTests: XCTestCase {
         XCTAssertTrue(out.contains("静默模式"), "应跳过 hello 取真任务,得: \(out)")
         XCTAssertFalse(out.contains("hello"), "寒暄不该是摘要: \(out)")
     }
+    func test_quitExit_areTrivial() {
+        // 真机实锤:用户在 codex 里把 quit 当消息发了——不该成为会话摘要。
+        let turns = [ConversationTurn(role: "user", text: "quit"),
+                     ConversationTurn(role: "user", text: "帮我看这个项目")]
+        XCTAssertTrue(LocalSummarizer.summarize(turns: turns).contains("看这个项目"))
+    }
+
     func test_allTrivial_fallsBackToFirstUser() {
         let turns = [ConversationTurn(role: "user", text: "hi"), ConversationTurn(role: "user", text: "ok")]
         let out = LocalSummarizer.summarize(turns: turns)
