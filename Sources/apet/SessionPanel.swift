@@ -392,7 +392,11 @@ struct SessionPanel: View {
                 onCommitNote(row.id, ui.noteText.trimmingCharacters(in: .whitespacesAndNewlines))
                 ui.editingNoteId = nil
             },
-            onNoteCancel: { ui.editingNoteId = nil }
+            onNoteCancel: { ui.editingNoteId = nil },
+            onNoteEditRequest: {
+                ui.noteText = row.note ?? ""
+                ui.editingNoteId = row.id
+            }
         )
             .contentShape(Rectangle())
             .onTapGesture { if ui.renamingId != row.id && ui.editingNoteId != row.id { onTap(row.id) } }   // 编辑中不跳转
@@ -534,6 +538,7 @@ private struct SessionRowCell: View {
     var noteText: Binding<String>? = nil
     var onNoteCommit: () -> Void = {}
     var onNoteCancel: () -> Void = {}
+    var onNoteEditRequest: () -> Void = {}   // 双击 ✎ 摘要直接编辑(可发现性,用户实锤)
     @State private var hovering = false
     @FocusState private var renameFocused: Bool
     @FocusState private var noteFocused: Bool
@@ -634,7 +639,8 @@ private struct SessionRowCell: View {
                         .font(.system(size: 11))
                         .foregroundStyle(.secondary)
                         .lineLimit(1)
-                        .help(row.subtitle.isEmpty ? note : "\(note)\n\(row.subtitle)")   // 路径退居 tooltip
+                        .help("双击编辑摘要\n\(row.subtitle.isEmpty ? note : note + "\n" + row.subtitle)")
+                        .highPriorityGesture(TapGesture(count: 2).onEnded { onNoteEditRequest() })
                 } else if !row.subtitle.isEmpty {
                     Text(row.subtitle)
                         .font(.system(size: 11))
