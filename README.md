@@ -93,3 +93,8 @@ apet 以**只读**方式（`SQLITE_OPEN_READONLY`，绝不写入）读取 OpenCo
 ## License
 
 MIT（见 [LICENSE](LICENSE)）。
+
+
+## 第三方接入
+
+见 [docs/INTEGRATING.md](docs/INTEGRATING.md) —— NDJSON 事件契约 + 三种接入模式(hook/jsonl/DB)+ 四家实测样例。
