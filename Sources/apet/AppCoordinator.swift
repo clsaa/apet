@@ -568,6 +568,9 @@ final class AppCoordinator {
         // 5. Live file watch via DispatchSource
         openWatchSource()
 
+        // 5.5 启动异步建历史索引(标题回填 + 历史 tab 秒开;(path,mtime) 缓存后续增量)。
+        rebuildHistoryIfNeeded()
+
         // 6. Reap timer: every 60 s, markStale + reap + refresh menu bar
         let timer = DispatchSource.makeTimerSource(queue: .main)
         timer.schedule(deadline: .now() + tickInterval, repeating: tickInterval)
@@ -708,11 +711,19 @@ final class AppCoordinator {
 
     // MARK: - Private: F7 会话元数据
 
-    /// 把持久化的 meta（收藏/自定义名）镜像进会话列表，供 UI 渲染。
+    /// 历史索引的真标题(ai-title/lastPrompt/thread_name):key → title。
+    /// 活跃列表 title 回填用——重启重放后 hook 事件无标题、jsonl 超窗 watcher 不再发,
+    /// 标题跌落目录名(用户实锤:满屏 workspace 看不出会话干嘛),磁盘上明明有真值。
+    private var archiveTitles: [SessionKey: String] = [:]
+
+    /// 把持久化的 meta(收藏/自定义名/摘要)镜像进会话列表,并回填缺失标题,供 UI 渲染。
     private func applyMetas(_ sessions: [Session]) -> [Session] {
-        guard !sessionMetas.isEmpty else { return sessions }
         return sessions.map { s in
-            SessionMetaMerger.apply(into: s, meta: sessionMetas[SessionMetaMerger.metaKey(s.key)])
+            var out = SessionMetaMerger.apply(into: s, meta: sessionMetas[SessionMetaMerger.metaKey(s.key)])
+            if (out.title ?? "").isEmpty, let t = archiveTitles[out.key] {
+                out.title = t
+            }
+            return out
         }
     }
 
@@ -847,6 +858,9 @@ final class AppCoordinator {
                 }
                 self.historyBuiltAt = Date().timeIntervalSince1970
                 self.historyBuilding = false
+                // 真标题回填表(活跃列表 title 兜底用)。
+                self.archiveTitles = Dictionary(uniqueKeysWithValues:
+                    bare.compactMap { s in s.title.map { (s.key, $0) } })
                 self.refreshSessionUI()
             }
         }
