@@ -386,6 +386,11 @@ final class AppCoordinator {
             pw.onToggleFavorite = toggleFav
             mb.onRenameSession = rename
             pw.onRenameSession = rename
+            let setNote: (SessionKey, String?) -> Void = { [weak self] key, note in
+                self?.updateMeta(key) { $0.note = note.map { String($0.prefix(200)) } }
+            }
+            mb.onSetNote = setNote
+            pw.onSetNote = setNote
 
             // M3-D-B/C:tab + 分组接线。
             let selTabProvider: () -> SessionTab = { [weak self] in SessionTab(encoded: self?.config.selectedTab ?? "all") }

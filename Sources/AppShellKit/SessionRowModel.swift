@@ -52,6 +52,8 @@ public struct SessionRowModel: Equatable, Identifiable {
     public let terminalBundleId: String?
     /// 所属自定义分组（M3-D-C：右键「加入分组」勾选态）。
     public let groups: [String]
+    /// 手动摘要(有则副标题显示 ✎ note,路径退居 tooltip)。
+    public let note: String?
 
     public init(
         id: String,
@@ -68,7 +70,8 @@ public struct SessionRowModel: Equatable, Identifiable {
         relativeText: String = "",
         noJumpHint: Bool = false,
         terminalBundleId: String? = nil,
-        groups: [String] = []
+        groups: [String] = [],
+        note: String? = nil
     ) {
         self.id = id
         self.title = title
@@ -85,6 +88,7 @@ public struct SessionRowModel: Equatable, Identifiable {
         self.noJumpHint = noJumpHint
         self.terminalBundleId = terminalBundleId
         self.groups = groups
+        self.note = note
     }
 }
 
@@ -172,7 +176,8 @@ public enum SessionRowMapper {
             relativeText: relativeText,
             noJumpHint: noJumpHint,
             terminalBundleId: terminalBundleId,
-            groups: session.groups
+            groups: session.groups,
+            note: session.note.map(DisplaySanitizer.sanitize)
         )
     }
 }

@@ -68,6 +68,7 @@ public enum SessionListOrganizer {
         // customName 展示时优先于 title，搜索也必须能命中（F7 × 搜索，产品评审 M5）
         if let n = s.customName, n.lowercased().contains(needle) { return true }
         if let t = s.title, t.lowercased().contains(needle) { return true }
+        if let note = s.note, note.lowercased().contains(needle) { return true }   // 手动摘要可搜(2026-07-06 spec)
         if let c = s.cwd, c.lowercased().contains(needle) { return true }
         if s.key.sessionId.lowercased().contains(needle) { return true }
         if s.key.agent.lowercased().contains(needle) { return true }   // B4:搜 agent 名

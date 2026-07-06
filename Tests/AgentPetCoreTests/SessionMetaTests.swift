@@ -108,4 +108,22 @@ final class SessionMetaTests: XCTestCase {
         let old = try JSONDecoder().decode(SessionMeta.self, from: Data(#"{"favorite":true}"#.utf8))
         XCTAssertEqual(old.groups, [])
     }
+
+    // 手动摘要(2026-07-06 spec):note 与 customName 同语义。
+    func test_note_mergeLastNonNil_andApply() {
+        let a = SessionMeta(note: "旧摘要")
+        let b = SessionMeta(note: nil)
+        XCTAssertEqual(SessionMeta.merge(a, b).note, "旧摘要", "nil 不覆盖")
+        XCTAssertEqual(SessionMeta.merge(a, SessionMeta(note: "新摘要")).note, "新摘要")
+        let s = Session(key: SessionKey(agent: "a", root: "r", sessionId: "s"),
+                        state: .running, lastSeq: 1, lastActiveAt: 0)
+        let applied = SessionMetaMerger.apply(into: s, meta: SessionMeta(note: "手写的"))
+        XCTAssertEqual(applied.note, "手写的")
+    }
+    func test_note_decodeOldJson_defaultsNil() throws {
+        let old = #"{"favorite":true}"#
+        let m = try JSONDecoder().decode(SessionMeta.self, from: Data(old.utf8))
+        XCTAssertNil(m.note)
+        XCTAssertTrue(m.favorite)
+    }
 }

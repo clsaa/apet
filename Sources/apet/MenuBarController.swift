@@ -34,6 +34,7 @@ private struct PanelRootView: View {
     var onCommitNewGroup: (String, String?) -> Void = { _, _ in }
     var onDeleteGroup: (String) -> Void = { _ in }
     var onCommitRename: (String, String) -> Void = { _, _ in }
+    var onCommitNote: (String, String) -> Void = { _, _ in }
     var pinned: Bool = false
     var onTogglePin: () -> Void = {}
 
@@ -56,7 +57,7 @@ private struct PanelRootView: View {
                          selectedTab: selectedTab, onSelectTab: onSelectTab,
                          groups: groups, onToggleGroup: onToggleGroup,
                          onCommitNewGroup: onCommitNewGroup, onDeleteGroup: onDeleteGroup,
-                         onCommitRename: onCommitRename)
+                         onCommitRename: onCommitRename, onCommitNote: onCommitNote)
             Divider()
 
             // 未装 hook 时的 slim 开启入口；已装则完全隐藏（省空间，去掉冗余「已启用」状态行）。
@@ -151,6 +152,7 @@ final class MenuBarController: NSObject {
     var onToggleFavorite: ((SessionKey) -> Void)?
     /// F7：重命名（nil=恢复默认名），由 AppCoordinator 注入。
     var onRenameSession: ((SessionKey, String?) -> Void)?
+    var onSetNote: ((SessionKey, String?) -> Void)?
     /// F3：状态圆点配色，由 AppCoordinator 从 config 注入。
     var dotPalette: DotPalette = .system
     /// 面板顶部快捷键提示字符串，如 "⌥⌘P 打开/关闭"。nil 表示不显示 header。
@@ -326,6 +328,10 @@ final class MenuBarController: NSObject {
             onCommitRename: { [weak self] id, name in
                 guard let self, let s = self.sessionForId(id) else { return }
                 self.onRenameSession?(s.key, name.isEmpty ? nil : name)
+            },
+            onCommitNote: { [weak self] id, note in
+                guard let self, let s = self.sessionForId(id) else { return }
+                self.onSetNote?(s.key, note.isEmpty ? nil : note)
             },
             pinned: panelPinnedProvider?() ?? false,
             onTogglePin: { [weak self] in

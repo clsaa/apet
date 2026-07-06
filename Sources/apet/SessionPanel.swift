@@ -51,6 +51,8 @@ struct SessionPanel: View {
     var onCommitNewGroup: (String, String?) -> Void = { _, _ in }
     var onDeleteGroup: (String) -> Void = { _ in }
     var onCommitRename: (String, String) -> Void = { _, _ in }
+    /// 手动摘要提交(id, note;空串=清除)。
+    var onCommitNote: (String, String) -> Void = { _, _ in }
 
     @State private var filter: String = ""
     @FocusState private var inlineFieldFocused: Bool
@@ -294,6 +296,9 @@ struct SessionPanel: View {
         Button("重命名…") {
             ui.renameText = row.title; ui.renamingId = row.id
         }
+        Button("编辑摘要…") {
+            ui.noteText = row.note ?? ""; ui.editingNoteId = row.id
+        }
         Menu("加入分组") {
             ForEach(groups, id: \.self) { g in
                 Button { onToggleGroup(row.id, g) } label: {
@@ -364,10 +369,17 @@ struct SessionPanel: View {
                 onCommitRename(row.id, ui.renameText.trimmingCharacters(in: .whitespacesAndNewlines))
                 ui.renamingId = nil
             },
-            onRenameCancel: { ui.renamingId = nil }
+            onRenameCancel: { ui.renamingId = nil },
+            editingNote: ui.editingNoteId == row.id,
+            noteText: ui.editingNoteId == row.id ? $ui.noteText : nil,
+            onNoteCommit: {
+                onCommitNote(row.id, ui.noteText.trimmingCharacters(in: .whitespacesAndNewlines))
+                ui.editingNoteId = nil
+            },
+            onNoteCancel: { ui.editingNoteId = nil }
         )
             .contentShape(Rectangle())
-            .onTapGesture { if ui.renamingId != row.id { onTap(row.id) } }   // 编辑中不跳转
+            .onTapGesture { if ui.renamingId != row.id && ui.editingNoteId != row.id { onTap(row.id) } }   // 编辑中不跳转
             .contextMenu { rowMenuItems(row) }
     }
 
@@ -396,6 +408,11 @@ struct SessionPanel: View {
                     ui.summaryRowId = nil; ui.summaryOutcome = nil
                 } label: { hitPad(Image(systemName: "square.and.pencil").font(.system(size: 10))) }
                     .buttonStyle(.plain).foregroundStyle(.secondary).help("设为会话名称")
+                Button {
+                    onCommitNote(row.id, String(t.prefix(200)))
+                    ui.summaryRowId = nil; ui.summaryOutcome = nil
+                } label: { hitPad(Image(systemName: "text.badge.plus").font(.system(size: 10))) }
+                    .buttonStyle(.plain).foregroundStyle(.secondary).help("存为手动摘要(显示在副标题)")
                 Button { copyText(t) } label: { hitPad(Image(systemName: "doc.on.doc").font(.system(size: 10))) }
                     .buttonStyle(.plain).foregroundStyle(.secondary).help("复制摘要")
             }
@@ -489,8 +506,13 @@ private struct SessionRowCell: View {
     var renameText: Binding<String>? = nil
     var onRenameCommit: () -> Void = {}
     var onRenameCancel: () -> Void = {}
+    var editingNote: Bool = false
+    var noteText: Binding<String>? = nil
+    var onNoteCommit: () -> Void = {}
+    var onNoteCancel: () -> Void = {}
     @State private var hovering = false
     @FocusState private var renameFocused: Bool
+    @FocusState private var noteFocused: Bool
 
     var body: some View {
         HStack(alignment: .center, spacing: 7) {
@@ -569,7 +591,27 @@ private struct SessionRowCell: View {
                     }
                 }
 
-                if !row.subtitle.isEmpty {
+                if editingNote, let nt = noteText {
+                    // 手动摘要行内编辑(与重命名同交互:回车存/Esc 取消;存空=清除)。
+                    TextField("一句话摘要(留空清除)", text: nt)
+                        .textFieldStyle(.plain)
+                        .font(.system(size: 11))
+                        .focused($noteFocused)
+                        .onSubmit { onNoteCommit() }
+                        .onExitCommand { onNoteCancel() }
+                        .onAppear { DispatchQueue.main.async { noteFocused = true } }
+                        .padding(.horizontal, 3).padding(.vertical, 1)
+                        .background(Color.accentColor.opacity(0.08))
+                        .overlay(RoundedRectangle(cornerRadius: 4)
+                            .strokeBorder(Color.accentColor, lineWidth: 1))
+                        .cornerRadius(4)
+                } else if let note = row.note, !note.isEmpty {
+                    Text("✎ \(note)")
+                        .font(.system(size: 11))
+                        .foregroundStyle(.secondary)
+                        .lineLimit(1)
+                        .help(row.subtitle.isEmpty ? note : "\(note)\n\(row.subtitle)")   // 路径退居 tooltip
+                } else if !row.subtitle.isEmpty {
                     Text(row.subtitle)
                         .font(.system(size: 11))
                         .foregroundStyle(.secondary)

@@ -44,6 +44,7 @@ final class PetWindowController: NSObject {
     var onToggleFavorite: ((SessionKey) -> Void)?
     /// F7：重命名（nil=恢复默认名），由 AppCoordinator 注入。
     var onRenameSession: ((SessionKey, String?) -> Void)?
+    var onSetNote: ((SessionKey, String?) -> Void)?
     // M3-D-B/C:tab + 分组(AppCoordinator 注入,与菜单栏共用同一套闭包)。
     var selectedTabProvider: (() -> SessionTab)?
     var sessionGroupsProvider: (() -> [String])?
@@ -382,6 +383,7 @@ final class PetWindowController: NSObject {
         panelVC.onToggleGroup = { [weak self] key, g in self?.onToggleGroupMembership?(key, g) }
         panelVC.onCommitNewGroup = { [weak self] name, key in self?.onCommitNewGroupFor?(name, key) }
         panelVC.onCommitRename = { [weak self] key, name in self?.onRenameSession?(key, name.isEmpty ? nil : name) }
+        panelVC.onCommitNote = { [weak self] key, note in self?.onSetNote?(key, note.isEmpty ? nil : note) }
         panelVC.onDeleteGroup = { [weak self] g in self?.onDeleteGroup?(g) }
         let p = NSPopover()
         p.contentViewController = panelVC
@@ -510,6 +512,7 @@ private struct PetPanelRootView: View {
     var onCommitNewGroup: (String, String?) -> Void = { _, _ in }
     var onDeleteGroup: (String) -> Void = { _ in }
     var onCommitRename: (String, String) -> Void = { _, _ in }
+    var onCommitNote: (String, String) -> Void = { _, _ in }
 
     /// 是否存在未读 waiting 会话（红/橙点）。
     /// 避免全绿/全已读时按钮可见却点了无反应（产品评审 MAJOR-1）。
@@ -532,7 +535,7 @@ private struct PetPanelRootView: View {
                          selectedTab: selectedTab, onSelectTab: onSelectTab,
                          groups: groups, onToggleGroup: onToggleGroup,
                          onCommitNewGroup: onCommitNewGroup, onDeleteGroup: onDeleteGroup,
-                         onCommitRename: onCommitRename)
+                         onCommitRename: onCommitRename, onCommitNote: onCommitNote)
             Divider()
             // 紧凑操作行：已读常驻置灰(U3)/首选项/退出。
             HStack(spacing: 0) {
@@ -572,6 +575,7 @@ private final class SessionPanelHostController: NSViewController {
     var onToggleGroup: ((SessionKey, String) -> Void)?
     var onCommitNewGroup: ((String, SessionKey?) -> Void)?
     var onCommitRename: ((SessionKey, String) -> Void)?
+    var onCommitNote: ((SessionKey, String) -> Void)?
     var onDeleteGroup: ((String) -> Void)?
 
     init(
@@ -641,6 +645,10 @@ private final class SessionPanelHostController: NSViewController {
                          onCommitRename: { [weak self] id, name in
                              guard let self, let sess = self.petSessionForId(id) else { return }
                              self.onCommitRename?(sess.key, name)
+                         },
+                         onCommitNote: { [weak self] id, note in
+                             guard let self, let sess = self.petSessionForId(id) else { return }
+                             self.onCommitNote?(sess.key, note)
                          })
     }
 

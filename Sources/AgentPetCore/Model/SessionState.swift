@@ -26,6 +26,8 @@ public struct Session: Equatable {
     public var createdAt: Double?
     /// 所属自定义分组名（M3-D-C）。运行时镜像,真值在 SessionMeta.groups。
     public var groups: [String]
+    /// 手动摘要(SessionMeta.note 镜像,展示/搜索用)。
+    public var note: String?
 
     public init(key: SessionKey, state: SessionState, cwd: String? = nil, title: String? = nil,
                 terminal: TerminalRef? = nil, lastSeq: Int, lastActiveAt: Double,

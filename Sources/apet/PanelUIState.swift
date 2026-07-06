@@ -24,6 +24,9 @@ final class PanelUIState: ObservableObject {
     @Published var creatingGroupAttachId: String? = nil
     // 删组二段式确认
     @Published var confirmDeleteGroup: String? = nil
+    // 手动摘要行内编辑
+    @Published var editingNoteId: String? = nil
+    @Published var noteText = ""
     // 行内提示条(跳转失败等):取代全屏 NSAlert,零打断(UI/交互:优雅克制)。
     @Published var noticeRowId: String? = nil
     @Published var notice: RowNotice? = nil
@@ -34,6 +37,7 @@ final class PanelUIState: ObservableObject {
     func resetTransient() {
         summaryRowId = nil; summaryOutcome = nil
         renamingId = nil; renameText = ""
+        editingNoteId = nil; noteText = ""
         isCreatingGroup = false; newGroupText = ""; creatingGroupAttachId = nil
         confirmDeleteGroup = nil
         noticeRowId = nil; notice = nil; noticeCopied = false
