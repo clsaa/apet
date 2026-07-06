@@ -56,6 +56,8 @@ public struct SessionRowModel: Equatable, Identifiable {
     public let note: String?
     /// 系统摘要(ai-title/thread_name 原始值,独立于 customName——改名后系统摘要仍可见/可编辑)。
     public let systemSummary: String?
+    /// F10:时间 tooltip(创建于 + 最后活跃绝对时刻;无 createdAt 只显后者)。
+    public let timeHelp: String
 
     public init(
         id: String,
@@ -74,7 +76,8 @@ public struct SessionRowModel: Equatable, Identifiable {
         terminalBundleId: String? = nil,
         groups: [String] = [],
         note: String? = nil,
-        systemSummary: String? = nil
+        systemSummary: String? = nil,
+        timeHelp: String = ""
     ) {
         self.id = id
         self.title = title
@@ -93,6 +96,7 @@ public struct SessionRowModel: Equatable, Identifiable {
         self.groups = groups
         self.note = note
         self.systemSummary = systemSummary
+        self.timeHelp = timeHelp
     }
 }
 
@@ -165,6 +169,14 @@ public enum SessionRowMapper {
 
         let relativeText = now.map { RelativeTime.short(from: session.lastActiveAt, now: $0, tzOffset: tzOffset) } ?? ""
 
+        // F10:tooltip 补绝对时刻(创建 + 最后活跃)。
+        let df = DateFormatter()
+        df.dateFormat = "yyyy-MM-dd HH:mm"
+        var timeHelp = "最后活跃:\(df.string(from: Date(timeIntervalSince1970: session.lastActiveAt)))"
+        if let created = session.createdAt {
+            timeHelp = "创建于:\(df.string(from: Date(timeIntervalSince1970: created)))\n" + timeHelp
+        }
+
         return SessionRowModel(
             id: id,
             title: title,
@@ -185,7 +197,8 @@ public enum SessionRowMapper {
             systemSummary: session.title.flatMap { t in
                 let clean = DisplaySanitizer.sanitize(t)
                 return clean.isEmpty ? nil : clean
-            }
+            },
+            timeHelp: timeHelp
         )
     }
 }

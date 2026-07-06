@@ -58,6 +58,7 @@ final class PetWindowController: NSObject {
     // MARK: - Dependencies
 
     private let focusService: TerminalFocusService
+    private var hookHintThrottle = HookHintThrottle()
     private let customStore: CustomPetStore
 
     /// 用户点开一个会话（跳转终端）后回调，AppCoordinator 据此把会话标记为"已读"（红→黄）。
@@ -238,7 +239,12 @@ final class PetWindowController: NSObject {
                 // 跳转失败 → 行内提示条,面板留着(取代全屏 NSAlert;UI/交互:优雅克制)。
                 // panelUI 是 ObservableObject,设值即驱动重渲染。
                 if let host = self.popover?.contentViewController as? SessionPanelHostController {
-                    host.panelUI.notice = SessionRowActions.jumpFailureNotice(session, hookHint: false)
+                    // 与 menubar 同款引导(巩固评审 Minor:桌宠是默认模式,jsonl-claude 用户
+                    // 此前永远得不到「开启精确跳转」提示)。
+                    let hint = session.source == .jsonl
+                        && ["claude", "claude-code"].contains(session.key.agent)
+                        && self.hookHintThrottle.shouldHint(sessionKey: id)
+                    host.panelUI.notice = SessionRowActions.jumpFailureNotice(session, hookHint: hint)
                     host.panelUI.noticeRowId = id
                 }
             }

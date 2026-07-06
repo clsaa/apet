@@ -613,6 +613,7 @@ private struct SessionRowCell: View {
                     Spacer(minLength: 4)
                     if !row.relativeText.isEmpty {
                         Text(row.relativeText)
+                            .help(row.timeHelp)
                             .font(.system(size: 10))
                             .foregroundStyle(.tertiary)
                             .lineLimit(1)
