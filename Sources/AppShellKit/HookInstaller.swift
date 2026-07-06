@@ -158,8 +158,12 @@ public struct HookInstaller {
     /// - Returns: A shell command string safe to embed in `settings.json`.
     public static func hookCommand(scriptPath: String, eventsPath: String, rootPath: String,
                                    agent: String? = nil) -> String {
-        func q(_ s: String) -> String { s.contains(" ") ? "\"\(s)\"" : s }
-        // agent=nil(claude)不带变量:向后兼容已装 hook,避免无谓 diff。
+        // 巩固评审 Minor:完整 shell 单引号引用('→'\''),路径含 "/$/` 也不产坏命令;
+        // 无特殊字符时保持裸值(向后兼容已装 hook 的字面形态,避免无谓 diff)。
+        func q(_ s: String) -> String {
+            let safe = s.allSatisfy { $0.isLetter || $0.isNumber || "/._-".contains($0) }
+            return safe ? s : "'" + s.replacingOccurrences(of: "'", with: "'\\''") + "'"
+        }
         let agentPart = agent.map { " AGENTPET_AGENT=\(q($0))" } ?? ""
         return "env AGENTPET_OUT=\(q(eventsPath)) AGENTPET_ROOT=\(q(rootPath))\(agentPart) \(q(scriptPath))"
     }

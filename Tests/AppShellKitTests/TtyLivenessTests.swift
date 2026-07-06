@@ -48,4 +48,17 @@ final class TtyLivenessTests: XCTestCase {
         XCTAssertFalse(TtyLiveness.isAlive(tty: "ttys001", pid: -5,
                                            processAlive: { _ in true }, fileExists: { _ in true }))
     }
+
+    func test_hugePid_fromUntrustedWire_noTrap() {
+        // Blocker(巩固评审①):wire pid 不可信,pid_t(Int) 溢出即 trap → 60s 崩溃循环。
+        // 必须走 exactly 转换,溢出判 dead/unknown 而非崩。
+        XCTAssertFalse(TtyLiveness.isAlive(tty: "ttys001", pid: 4_294_967_296,
+                                           fileExists: { _ in true }), "溢出 pid 不崩且判死")
+        XCTAssertEqual(TtyLiveness.classify(tty: "ttys001", pid: 4_294_967_296,
+                                            fileExists: { _ in true }), .unknown,
+                       "溢出 pid 无法判定 → unknown 正常窗口")
+        XCTAssertEqual(TtyLiveness.classify(tty: "ttys001", pid: Int(Int32.max),
+                                            processAlive: { _ in false },
+                                            fileExists: { _ in true }), .dead, "边界合法 pid 正常判定")
+    }
 }

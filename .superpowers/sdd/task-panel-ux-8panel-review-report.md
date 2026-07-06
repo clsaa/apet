@@ -42,3 +42,15 @@ E10 ⋯ 溢出入口未做(需实现或回写遗留)；CopyHUD 主屏正中离�
 **遗留(spec §9 已回写):** E10 悬停 ⋯ 溢出入口未做;hidesOnDeactivate 常驻取舍待用户定;桌宠侧不可缩放。
 
 **最终:752 测试全绿,build 通过,App 运行无崩溃。**
+
+---
+
+## 巩固评审(2026-07-06,架构+测试双视角,近期未审工作)
+
+Blocker①(已修):不可信 wire pid 经 pid_t(Int) 溢出 trap → 60s 崩溃循环;TtyLiveness.safeKill0 exactly 转换,classify 溢出判 unknown。
+Major②(已修):menubar 点击预关窗 → 跳转失败提示条永不可见+烧 hookHint 节流;改成功才 orderOut,失败留窗就地显示(与桌宠对齐)。
+Major③(已修):StaleDirPrefilter subagent 盲区(枚举器排除 agent-* 文件,折叠分支死代码)→ 改 subagents 目录存在性豁免。
+Major④(已修):dbBacked stop 预置已读打穿 OpenCode 插件红点 → guard source != .hook。
+Major⑤(已修):插件不过滤子会话 → session.created 记 parentID 过滤;附 busy 3s 去抖(洪泛)。
+Minor(已修):noticeCopied 收编 PanelUIState;resetTransient 开面板清半途态;收藏豁免 dead 快清;hookCommand 完整单引号引用;告知文案补 busy。
+Minor(记录未修):pid 复用+tty 占用的永久 alive(建议 sysctl 进程启动时间,已注释);pet 侧 hookHint 恒 false(pet 无 throttle 实例,待统一)。

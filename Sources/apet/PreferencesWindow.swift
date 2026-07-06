@@ -549,7 +549,7 @@ struct PreferencesView: View {
         VStack(alignment: .leading, spacing: 8) {
             Label("OpenCode 精确跳转/通知", systemImage: "bolt.badge.a")
                 .font(.headline)
-            Text("开启后 apet 在 ~/.config/opencode/plugins 放置一个插件(订阅 session.idle)——OpenCode 会话即可精确跳回终端、收到完成通知、终端开着不被清理。不改动任何既有文件,关闭即删除。")
+            Text("开启后 apet 在 ~/.config/opencode/plugins 放置一个插件(订阅 session.idle/question.asked/busy 状态)——OpenCode 会话即可精确跳回终端、收到完成通知、终端开着不被清理。不改动任何既有文件,关闭即删除。")
                 .font(.caption).foregroundStyle(.secondary)
                 .fixedSize(horizontal: false, vertical: true)
             HStack {

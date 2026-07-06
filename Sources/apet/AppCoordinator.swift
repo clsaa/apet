@@ -562,7 +562,17 @@ final class AppCoordinator {
                        // 存活三态:alive(pid活+tty在)保护;dead(pid已死)30分钟快清——
                        // 程序化批量测试会话/退出的claude不再占位8h(幂等清理);unknown 正常窗口。
                        deadAfter: 1800,
-                       liveness: { TtyLiveness.classify(tty: $0.terminal?.tty, pid: $0.terminal?.pid) })
+                       liveness: { [weak self] session in
+                           let lv = TtyLiveness.classify(tty: session.terminal?.tty, pid: session.terminal?.pid)
+                           // 收藏会话豁免 dead 快清(巩固评审 Minor:用户明示在意,别 30 分钟连
+                           // 「复制恢复命令」入口一起清掉)→ 降为 unknown 走正常窗口。
+                           if lv == .dead,
+                              let self,
+                              self.sessionMetas[SessionMetaMerger.metaKey(session.key)]?.favorite == true {
+                               return .unknown
+                           }
+                           return lv
+                       })
             let timerSessions = self.applyMetas(store.activeSessions())
             self.menuBar?.update(summary: store.summary(), sessions: timerSessions)
             self.petWindow?.update(summary: store.summary(), sessions: timerSessions)
@@ -777,7 +787,10 @@ final class AppCoordinator {
                 // 其 waitingStop 不代表真实「等你」——预置已读（黄点），不进「等你」置顶、
                 // 不污染未读徽标；真实 attention 语义只留给有内容信号的源。
                 // M3-C+ 评审 B2：集合判定取代 agent 字符串 if（别每接一源加一个分支）。
-                if AgentManifest.dbBackedAgents.contains(key.agent), kind == .stop {
+                // 巩固评审 Major④:hook 源(装了 OpenCode 插件)的 stop 是真「等你」,
+                // 不得被 DB 粗略态的预置已读打穿红点/通知(硬约束 #9 同精神)。
+                if AgentManifest.dbBackedAgents.contains(key.agent), kind == .stop,
+                   store.sessions[key]?.source != .hook {
                     _ = store.acknowledge(key: key)
                 }
 

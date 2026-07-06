@@ -18,10 +18,11 @@ public enum TtyLiveness {
     /// pid 已死 → .dead(短窗口快清:claude 确定退出,批量测试会话/退出的 claude 不再占位 8h)。
     public static func classify(
         tty: String?, pid: Int?,
-        processAlive: (Int) -> Bool = { kill(pid_t($0), 0) == 0 },
+        processAlive: (Int) -> Bool = { TtyLiveness.safeKill0($0) },
         fileExists: (String) -> Bool = { FileManager.default.fileExists(atPath: $0) }
     ) -> AgentPetCore.SessionLiveness {
-        guard let pid, pid > 0 else { return .unknown }
+        // 溢出/非法 pid(不可信 wire)→ unknown(正常窗口),绝不 trap。
+        guard let pid, pid > 0, pid_t(exactly: pid) != nil else { return .unknown }
         guard processAlive(pid) else { return .dead }
         return isAlive(tty: tty, pid: pid, processAlive: processAlive, fileExists: fileExists)
             ? .alive : .unknown   // pid 活但 tty 异常:保守按 unknown(正常窗口)
@@ -32,13 +33,20 @@ public enum TtyLiveness {
         return t.dropFirst(4).allSatisfy { $0.isASCII && $0.isNumber }
     }
 
+    /// wire pid 不可信:`pid_t(Int)` 溢出即 trap(巩固评审 Blocker——一行坏事件 60s 崩溃循环)。
+    /// 一律走 `exactly` 转换,溢出按无效处理。
+    public static func safeKill0(_ pid: Int) -> Bool {
+        guard let p = pid_t(exactly: pid), p > 0 else { return false }
+        return kill(p, 0) == 0
+    }
+
     public static func isAlive(
         tty: String?,
         pid: Int?,
-        processAlive: (Int) -> Bool = { kill(pid_t($0), 0) == 0 },
+        processAlive: (Int) -> Bool = { TtyLiveness.safeKill0($0) },
         fileExists: (String) -> Bool = { FileManager.default.fileExists(atPath: $0) }
     ) -> Bool {
-        guard let pid, pid > 0, processAlive(pid) else { return false }
+        guard let pid, pid_t(exactly: pid) != nil, pid > 0, processAlive(pid) else { return false }
         guard var t = tty, !t.isEmpty else { return false }
         if t.hasPrefix("/dev/") { t = String(t.dropFirst(5)) }
         guard isValidTtyName(t) else { return false }

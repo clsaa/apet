@@ -39,7 +39,7 @@ public enum OpenCodePluginInstaller {
 
     public static func previewLines(pluginPath: String, root: String) -> [String] {
         ["将写入:\(pluginPath)",
-         "订阅 session.idle/question.asked → 发 apet 事件(root=\(root))",
+         "订阅 session.idle/question.asked/session.status(busy) → 发 apet 事件(root=\(root))",
          "不改动任何既有文件;关闭 = 删除该文件。"]
     }
 

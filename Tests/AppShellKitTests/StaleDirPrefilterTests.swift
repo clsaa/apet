@@ -12,17 +12,17 @@ final class StaleDirPrefilterTests: XCTestCase {
         XCTAssertEqual(kept, ["/p/projA/s2.jsonl"], "同项目目录内按会话独立判定")
     }
 
-    func test_freshSubagent_keepsParentSession_realLayout() {
-        // 真实布局:<dir>/<sid>.jsonl + <dir>/<sid>/subagents/agent-*.jsonl(JSONLParse:165)
-        let paths = ["/p/projA/sid1.jsonl", "/p/projA/sid1/subagents/agent-x.jsonl",
-                     "/p/projA/sid2.jsonl"]
-        let mtimes = ["/p/projA/sid1.jsonl": 100.0,
-                      "/p/projA/sid1/subagents/agent-x.jsonl": 9_950.0,
-                      "/p/projA/sid2.jsonl": 200.0]
+    func test_sessionWithSubagentsDir_exemptFromPrefilter() {
+        // 巩固评审 Major③:DirectoryScanner 排除 subagent 文件,枚举里只有父文件——
+        // 靠折叠 subagent 路径分桶是死代码。改用**存在性豁免**:桶目录(<dir>/<sid>)下
+        // 有 subagents 子目录 → 保守保留交给 parse(scanner 会算 latestSubagentMtime)。
+        let paths = ["/p/projA/sid1.jsonl", "/p/projA/sid2.jsonl"]
+        let mtimes = ["/p/projA/sid1.jsonl": 100.0, "/p/projA/sid2.jsonl": 200.0]  // 都超窗
         let kept = StaleDirPrefilter.freshPaths(paths, now: 10_000, idleWindow: 1800,
-                                                mtime: { mtimes[$0] })
-        XCTAssertEqual(Set(kept), ["/p/projA/sid1.jsonl", "/p/projA/sid1/subagents/agent-x.jsonl"],
-                       "活跃 subagent 保住父会话;同目录的 sid2 独立跳过")
+                                                mtime: { mtimes[$0] },
+                                                hasSubagents: { $0 == "/p/projA/sid1" })
+        XCTAssertEqual(kept, ["/p/projA/sid1.jsonl"],
+                       "sid1 有 subagents 目录 → 豁免;sid2 无 → 正常跳过")
     }
 
     func test_boundary_exactlyIdleWindow_isStale() {

@@ -296,9 +296,18 @@ final class HookInstallerTests: XCTestCase {
 
         let cmd = HookInstaller.hookCommand(scriptPath: script, eventsPath: events, rootPath: root)
 
-        XCTAssertTrue(cmd.contains("\"\(script)\""), "Script path with spaces must be quoted")
-        XCTAssertTrue(cmd.contains("\"\(events)\""), "Events path with spaces must be quoted")
-        XCTAssertTrue(cmd.contains("\"\(root)\""), "Root path with spaces must be quoted")
+        // 巩固评审 Minor:改完整 shell 单引号引用("/$/` 也安全,不止空格)。
+        XCTAssertTrue(cmd.contains("'\(script)'"), "Script path with spaces must be quoted: \(cmd)")
+        XCTAssertTrue(cmd.contains("'\(events)'"), "Events path with spaces must be quoted")
+        XCTAssertTrue(cmd.contains("'\(root)'"), "Root path with spaces must be quoted")
+    }
+
+    func testHookCommandQuotesShellMetaChars() {
+        let cmd = HookInstaller.hookCommand(scriptPath: "/a/run.sh",
+                                            eventsPath: #"/x/$evil`touch pwn`/e.ndjson"#,
+                                            rootPath: "/r")
+        XCTAssertTrue(cmd.contains(#"'/x/$evil`touch pwn`/e.ndjson'"#), "元字符必须单引号包裹: \(cmd)")
+        XCTAssertFalse(cmd.contains(#" /x/$evil"#), "不得裸露")
     }
 
     // MARK: - Test 12: hookCommand does NOT quote paths without spaces

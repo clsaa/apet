@@ -27,6 +27,17 @@ final class PanelUIState: ObservableObject {
     // 行内提示条(跳转失败等):取代全屏 NSAlert,零打断(UI/交互:优雅克制)。
     @Published var noticeRowId: String? = nil
     @Published var notice: RowNotice? = nil
+    /// 提示条「已复制 ✓」瞬态(收编进对象:@State 的 asyncAfter 回退会写进废弃树,巩固评审 Minor)。
+    @Published var noticeCopied = false
+
+    /// 开面板时清一切半途瞬态(上次关面板残留的重命名/建组/删组确认/提示条)。
+    func resetTransient() {
+        summaryRowId = nil; summaryOutcome = nil
+        renamingId = nil; renameText = ""
+        isCreatingGroup = false; newGroupText = ""; creatingGroupAttachId = nil
+        confirmDeleteGroup = nil
+        noticeRowId = nil; notice = nil; noticeCopied = false
+    }
 }
 
 /// 行内提示条内容:一句话 + 可选动作(数据化,渲染层出按钮)。

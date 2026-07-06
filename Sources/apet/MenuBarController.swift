@@ -383,7 +383,7 @@ final class MenuBarController: NSObject {
             return
         }
 
-        panelUI.noticeRowId = nil; panelUI.notice = nil   // 开面板清旧提示条
+        panelUI.resetTransient()   // 开面板清旧提示条/半途重命名/删组确认等(巩固评审 Minor)
         let savedFrame = panelFrameProvider?()   // 已保存的完整 frame(位置+尺寸)
         let size = clampPanelSize(panelSizeProvider?() ?? CGSize(width: 360, height: 480))
         let win: PanelResizeWindow
@@ -513,8 +513,8 @@ final class MenuBarController: NSObject {
         let isClaude = ["claude", "claude-code"].contains(session.key.agent)
         let isOpenCode = (session.key.agent == "opencode")
         let fs = focusService
-        // Dismiss the panel before the off-main focus attempt.
-        panelWindow?.close()
+        // 巩固评审 Major②:不再预关窗——失败时提示条要就地可见(与桌宠侧对齐);
+        // 成功才关(未固定时焦点去终端也会 hidesOnDeactivate 自隐,双保险)。
 
         // Off-main — osascript blocks (Fix I-1 / B2 pattern).
         Task.detached { [weak self] in
@@ -522,7 +522,10 @@ final class MenuBarController: NSObject {
             // .focused/.activatedOnly = 用户确实到达了(至少 App 被激活)→ 标已读;
             // .targetGone/.unsupported = 没到达 → 保留未读(B1)。
             if result == .focused || result == .activatedOnly {   // 到达(含计划内仅激活)→标已读
-                await MainActor.run { [weak self] in self?.onAcknowledge?(sessionKey) }
+                await MainActor.run { [weak self] in
+                    self?.onAcknowledge?(sessionKey)
+                    self?.panelWindow?.orderOut(nil)   // 成功:面板让路
+                }
                 return
             }
             await MainActor.run { [weak self] in

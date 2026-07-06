@@ -54,13 +54,28 @@ export const ApetNotify = async ({ directory }) => {
     } catch {}
   }
 
+  // 子会话过滤(巩固评审 Major⑤):DB watcher 只投影顶层(parent_id IS NULL),
+  // 插件若给子代理会话发事件会造出无生命周期的幽灵行。session.created 带 info.parentID,记之。
+  const childSessions = new Set()
+  // busy 去抖(巩固评审 Minor):session.status busy 每轮多次,events.ndjson 无 rotation。
+  const lastBusy = new Map()
   return {
     event: async ({ event }) => {
-      if (event.type === "session.idle") emit("stop", event.properties?.sessionID)
-      else if (event.type === "question.asked") emit("attention", event.properties?.sessionID)
+      const sid = event.properties?.sessionID
+      if (event.type === "session.created") {
+        if (event.properties?.info?.parentID) childSessions.add(event.properties.info.id)
+        return
+      }
+      if (sid && childSessions.has(sid)) return
+      if (event.type === "session.idle") emit("stop", sid)
+      else if (event.type === "question.asked") emit("attention", sid)
       // 实测 1.17.13:session.status busy 事件流存在 → 实时 running(DB 轮询只有粗略态)
-      else if (event.type === "session.status" && event.properties?.status?.type === "busy")
-        emit("busy", event.properties?.sessionID)
+      else if (event.type === "session.status" && event.properties?.status?.type === "busy") {
+        const nowMs = Date.now()
+        if ((lastBusy.get(sid) || 0) > nowMs - 3000) return
+        lastBusy.set(sid, nowMs)
+        emit("busy", sid)
+      }
     },
   }
 }

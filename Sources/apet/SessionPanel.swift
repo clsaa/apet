@@ -408,7 +408,6 @@ struct SessionPanel: View {
     }
 
     /// 行内提示条(跳转失败等):一句话 + 行内动作,取代全屏 NSAlert(优雅克制)。
-    @State private var noticeCopied = false
     @ViewBuilder
     private func noticeBanner(_ n: RowNotice) -> some View {
         HStack(alignment: .center, spacing: 6) {
@@ -421,16 +420,16 @@ struct SessionPanel: View {
             if let c = n.copyAction {
                 Button {
                     copyText(c.payload)
-                    noticeCopied = true
-                    DispatchQueue.main.asyncAfter(deadline: .now() + 1.4) { noticeCopied = false }
+                    ui.noticeCopied = true
+                    DispatchQueue.main.asyncAfter(deadline: .now() + 1.4) { ui.noticeCopied = false }
                 } label: {
-                    Text(noticeCopied ? "已复制 ✓" : c.label)
+                    Text(ui.noticeCopied ? "已复制 ✓" : c.label)
                         .font(.system(size: 10, weight: .medium))
                         .padding(.horizontal, 4).frame(height: 22)
                         .contentShape(Rectangle())
                 }
                 .buttonStyle(.plain)
-                .foregroundStyle(noticeCopied ? Color.secondary : Color.accentColor)
+                .foregroundStyle(ui.noticeCopied ? Color.secondary : Color.accentColor)
             }
             if n.showHookHint {
                 Button { onOpenHookSetup() } label: {
@@ -446,7 +445,7 @@ struct SessionPanel: View {
         }
         .padding(.leading, 12).padding(.trailing, 8).padding(.vertical, 6)
         .background(Color.orange.opacity(0.08))
-        .onAppear { noticeCopied = false }
+        .onAppear { ui.noticeCopied = false }
     }
 
     /// banner 小图标按钮的可点热区:视觉 9-10pt 但命中 22pt(拇指法则,9pt 根本点不中)。
