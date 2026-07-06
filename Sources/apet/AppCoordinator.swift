@@ -574,7 +574,8 @@ final class AppCoordinator {
         timer.setEventHandler { [weak self] in
             guard let self, let store = self.store else { return }
             let now = Date().timeIntervalSince1970
-            _ = store.markStale(now: now, timeout: self.config.staleAfterSec)
+            _ = store.markStale(now: now, timeout: self.config.staleAfterSec,
+                                liveness: { TtyLiveness.classify(tty: $0.terminal?.tty, pid: $0.terminal?.pid) })
             _ = store.ageReadToStale(now: now, readGrayAfter: self.config.readGrayAfterSec)
             store.reap(now: now,
                        endedAfter: self.config.endedAfterSec,

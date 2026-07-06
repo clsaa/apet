@@ -183,4 +183,32 @@ final class SessionStoreReapTests: XCTestCase {
         let removed = store.reap(now: 700 + 3601, endedAfter: 3600, waitingEndedAfter: 86400)
         XCTAssertEqual(removed, [.removed(key)])
     }
+
+    /// 用户实锤(termarium 测试拉起的 claude 子进程):进程已死却挂绿点 10 分钟——
+    /// running + pid 已死 → 立即打灰(进程没了不可能还在跑)。
+    func test_runningWithDeadPid_staleImmediately() {
+        let store = SessionStore()
+        let key = SessionKey(agent: "a", root: "r", sessionId: "S")
+        _ = store.apply(AgentEvent(v: 1, eventId: "E", agent: "a", kind: .busy,
+                        sessionId: "S", root: "r",
+                        terminal: TerminalRef(kind: .warp, tty: "ttys001", pid: 42),
+                        ts: "t"), seq: 1, now: 0, replay: false)
+        XCTAssertEqual(store.sessions[key]?.state, .running)
+        // 刚活跃 10s(远未到 timeout 600)但 pid 已死 → 打灰
+        let changes = store.markStale(now: 10, timeout: 600, liveness: { _ in .dead })
+        XCTAssertEqual(changes, [.upserted(key)])
+        XCTAssertEqual(store.sessions[key]?.state, .stale)
+    }
+
+    func test_runningAliveOrUnknown_notStaleBeforeTimeout() {
+        let store = SessionStore()
+        let key = SessionKey(agent: "a", root: "r", sessionId: "S")
+        _ = store.apply(AgentEvent(v: 1, eventId: "E", agent: "a", kind: .busy,
+                        sessionId: "S", root: "r",
+                        terminal: TerminalRef(kind: .warp, tty: "ttys001", pid: 42),
+                        ts: "t"), seq: 1, now: 0, replay: false)
+        XCTAssertEqual(store.markStale(now: 10, timeout: 600, liveness: { _ in .alive }), [])
+        XCTAssertEqual(store.markStale(now: 10, timeout: 600, liveness: { _ in .unknown }), [])
+        XCTAssertEqual(store.sessions[key]?.state, .running, "活着/未知照旧等 timeout")
+    }
 }

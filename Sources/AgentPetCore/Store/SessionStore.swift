@@ -136,20 +136,24 @@ extension SessionStore {
 
     /// 把超过 timeout 秒没有事件的 RUNNING 会话标记为 stale（可复活；WAITING/ended/stale 不动）。
     /// WAITING 是"轮到用户"，本就无活动事件，不因超时降级（面板 B2）。
-    public func markStale(now: Double, timeout: Double) -> [StoreChange] {
-        let changes = markStaleInner(now: now, timeout: timeout)
+    /// `liveness`:running 且 pid 已死 → **立即**打灰(进程没了不可能还在跑;用户实锤:
+    /// 程序化拉起的 claude 子进程死后挂绿点 10 分钟是状态谎言)。默认 unknown = 旧行为。
+    public func markStale(now: Double, timeout: Double,
+                          liveness: (Session) -> SessionLiveness = { _ in .unknown }) -> [StoreChange] {
+        let changes = markStaleInner(now: now, timeout: timeout, liveness: liveness)
         emit(changes, replay: false)
         return changes
     }
 
-    private func markStaleInner(now: Double, timeout: Double) -> [StoreChange] {
+    private func markStaleInner(now: Double, timeout: Double,
+                                liveness: (Session) -> SessionLiveness) -> [StoreChange] {
         var changes: [StoreChange] = []
         for (key, var session) in sessions {
             switch session.state {
             case .running:
                 // jsonl 会话生命周期由后续 watcher 驱动，不被定时器打灰（架构-B3）
                 guard session.source != .jsonl else { break }
-                if now - session.lastActiveAt > timeout {
+                if now - session.lastActiveAt > timeout || liveness(session) == .dead {
                     session.state = .stale
                     sessions[key] = session
                     changes.append(.upserted(key))
