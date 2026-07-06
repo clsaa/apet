@@ -396,7 +396,15 @@ final class AppCoordinator {
             }
             mb.onSetNote = setNote
             pw.onSetNote = setNote
-            mb.historySessionsProvider = { [weak self] in self?.historyCache ?? [] }
+            mb.historySessionsProvider = { [weak self] in
+                guard let self else { return [] }
+                // 活跃会话也在磁盘索引里:历史 tab 用 store 真态覆盖同 id 的 ended 快照
+                //(自查①:否则当前在跑的会话在历史里显示灰色僵尸,状态自相矛盾)。
+                guard let store = self.store else { return self.historyCache }
+                let live = Dictionary(uniqueKeysWithValues:
+                    self.applyMetas(store.activeSessions()).map { ($0.key, $0) })
+                return self.historyCache.map { live[$0.key] ?? $0 }
+            }
             mb.onHistoryTabSelected = { [weak self] in self?.rebuildHistoryIfNeeded() }
 
             // M3-D-B/C:tab + 分组接线。
@@ -821,19 +829,21 @@ final class AppCoordinator {
             }
 
             let merged = HistoryIndexer.merged(groups)
-            // → Session(ended 态;meta 叠加让收藏/改名/note 生效)
-            let sessions: [Session] = merged.map { e in
-                var sess = Session(key: SessionKey(agent: e.agent, root: e.root, sessionId: e.sessionId),
-                                   state: .ended, cwd: e.cwd, title: e.title,
-                                   lastSeq: 0, lastActiveAt: e.lastTs, source: .jsonl)
-                if let meta = metas[SessionMetaMerger.metaKey(sess.key)] {
-                    sess = SessionMetaMerger.apply(into: sess, meta: meta)
-                }
-                return sess
+            _ = metas   // 快照仅供潜在扩展;meta 叠加移到主线程提交时刻(自查③:构建期用户改
+                        // meta 会被旧快照覆盖回填,改用当下 sessionMetas)
+            let bare: [Session] = merged.map { e in
+                Session(key: SessionKey(agent: e.agent, root: e.root, sessionId: e.sessionId),
+                        state: .ended, cwd: e.cwd, title: e.title,
+                        lastSeq: 0, lastActiveAt: e.lastTs, source: .jsonl)
             }
             DispatchQueue.main.async {
                 guard let self else { return }
-                self.historyCache = sessions
+                self.historyCache = bare.map { sess in
+                    if let meta = self.sessionMetas[SessionMetaMerger.metaKey(sess.key)] {
+                        return SessionMetaMerger.apply(into: sess, meta: meta)
+                    }
+                    return sess
+                }
                 self.historyBuiltAt = Date().timeIntervalSince1970
                 self.historyBuilding = false
                 self.refreshSessionUI()

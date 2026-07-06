@@ -8,10 +8,11 @@ public enum SessionTranscriptLocator {
         let projectsDir = (root as NSString).appendingPathComponent("projects")
         if let enumerator = FileManager.default.enumerator(atPath: projectsDir) {
             let target = "\(sessionId).jsonl"
+            let qoderIDE = "\(sessionId).session.execution.jsonl"   // qoder-ide 命名变体(自查⑥)
             while let relative = enumerator.nextObject() as? String {
-                guard relative.hasSuffix(target) else { continue }
                 let basename = (relative as NSString).lastPathComponent
-                guard basename == target, !relative.contains("/subagents/") else { continue }
+                guard basename == target || basename == qoderIDE,
+                      !relative.contains("/subagents/") else { continue }
                 return (projectsDir as NSString).appendingPathComponent(relative)
             }
         }

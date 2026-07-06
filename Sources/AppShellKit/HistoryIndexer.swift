@@ -73,6 +73,11 @@ public final class HistoryIndexer {
         return out
     }
 
+    /// 清掉本轮各源都未枚举到的缓存键(文件已删;自查②:纯内存卫生,不清也无功能影响)。
+    public func prune(keeping paths: Set<String>) {
+        cache = cache.filter { paths.contains($0.key) }
+    }
+
     /// 聚合去重(同 id 取 lastTs 最新)+ 时间倒序。
     public static func merged(_ groups: [[HistoryEntry]]) -> [HistoryEntry] {
         var byId: [String: HistoryEntry] = [:]

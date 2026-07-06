@@ -389,8 +389,15 @@ struct SessionPanel: View {
             editingNote: ui.editingNoteId == row.id,
             noteText: ui.editingNoteId == row.id ? $ui.noteText : nil,
             onNoteCommit: {
-                onCommitNote(row.id, ui.noteText.trimmingCharacters(in: .whitespacesAndNewlines))
-                ui.editingNoteId = nil
+                let text = ui.noteText.trimmingCharacters(in: .whitespacesAndNewlines)
+                // 底稿未改(=系统摘要)且原无手动摘要 → 视为取消,不把系统摘要固化成 note
+                //(自查⑤:固化后系统摘要更新会被冻结的旧拷贝遮住)。
+                if row.note == nil, text == (row.systemSummary ?? "") {
+                    ui.editingNoteId = nil
+                } else {
+                    onCommitNote(row.id, text)
+                    ui.editingNoteId = nil
+                }
             },
             onNoteCancel: { ui.editingNoteId = nil },
             onNoteEditRequest: {
@@ -651,6 +658,9 @@ private struct SessionRowCell: View {
                                 .lineLimit(1)
                                 .help("双击编辑摘要")
                                 .highPriorityGesture(TapGesture(count: 2).onEnded { onNoteEditRequest() })
+                                // 吞掉单击(自查④):否则双击的第一击先触发行跳转,面板都关了。
+                                // 代价:点摘要文字不跳转——行其余区域随便点,可接受。
+                                .onTapGesture { }
                         }
                         if !row.subtitle.isEmpty {
                             Text(summaryShown != nil ? "· \(row.subtitle)" : row.subtitle)
