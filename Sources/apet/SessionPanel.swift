@@ -418,17 +418,25 @@ struct SessionPanel: View {
             }
             Spacer(minLength: 4)
             if case .text(let t) = outcome {
+                // 文字按钮(图标含义猜不出,用户实锤):设为名称=替换标题;存为摘要=写进副标题 ✎ 位。
                 Button {
-                    // 一键把摘要设为会话名称(≤40 字,与重命名同上限)。
                     onCommitRename(row.id, String(t.prefix(40)))
                     ui.summaryRowId = nil; ui.summaryOutcome = nil
-                } label: { hitPad(Image(systemName: "square.and.pencil").font(.system(size: 10))) }
-                    .buttonStyle(.plain).foregroundStyle(.secondary).help("设为会话名称")
+                } label: {
+                    Text("设为名称").font(.system(size: 10, weight: .medium))
+                        .padding(.horizontal, 4).frame(height: 22).contentShape(Rectangle())
+                }
+                .buttonStyle(.plain).foregroundStyle(Color.accentColor)
+                .help("把这句摘要设为会话标题(≤40 字)")
                 Button {
                     onCommitNote(row.id, String(t.prefix(200)))
                     ui.summaryRowId = nil; ui.summaryOutcome = nil
-                } label: { hitPad(Image(systemName: "text.badge.plus").font(.system(size: 10))) }
-                    .buttonStyle(.plain).foregroundStyle(.secondary).help("存为手动摘要(显示在副标题)")
+                } label: {
+                    Text("存为摘要").font(.system(size: 10, weight: .medium))
+                        .padding(.horizontal, 4).frame(height: 22).contentShape(Rectangle())
+                }
+                .buttonStyle(.plain).foregroundStyle(Color.accentColor)
+                .help("保存为手动摘要,显示在副标题 ✎ 位,可搜索")
                 Button { copyText(t) } label: { hitPad(Image(systemName: "doc.on.doc").font(.system(size: 10))) }
                     .buttonStyle(.plain).foregroundStyle(.secondary).help("复制摘要")
             }

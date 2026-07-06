@@ -716,6 +716,11 @@ final class AppCoordinator {
         mutate(&meta)
         if meta == SessionMeta() { sessionMetas[mk] = nil } else { sessionMetas[mk] = meta }
         try? sessionMetaStore?.save(sessionMetas)
+        // 历史缓存是构建时快照——meta 变更(收藏/改名/摘要)就地回填,否则历史行上
+        // 的操作「写了但看不见」(用户实锤:点了好像没效果)。
+        if let i = historyCache.firstIndex(where: { $0.key == key }) {
+            historyCache[i] = SessionMetaMerger.apply(into: historyCache[i], meta: sessionMetas[mk])
+        }
         refreshSessionUI()
     }
 
