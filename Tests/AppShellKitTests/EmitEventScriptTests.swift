@@ -34,7 +34,8 @@ final class EmitEventScriptTests: XCTestCase {
         outURL: URL,
         itermSessionId: String? = nil,
         termProgram: String? = nil,
-        agentOverride: String? = nil
+        agentOverride: String? = nil,
+        parentComm: String = "zsh"   // 默认模拟用户 shell(真实 ps 在测试环境是 xctest)
     ) throws -> Int32 {
         let process = Process()
         process.executableURL = URL(fileURLWithPath: "/bin/bash")
@@ -49,6 +50,7 @@ final class EmitEventScriptTests: XCTestCase {
         if let s = itermSessionId { env["ITERM_SESSION_ID"] = s }
         if let t = termProgram    { env["TERM_PROGRAM"]     = t }
         if let a = agentOverride  { env["AGENTPET_AGENT"]   = a }
+        env["AGENTPET_PARENT_COMM"] = parentComm
         process.environment = env
 
         // Pipe hook payload to stdin; close write-end so bash's `cat` sees EOF
@@ -274,5 +276,32 @@ final class EmitEventScriptTests: XCTestCase {
         // 默认(claude)不带 agent 变量,向后兼容已有安装
         let plain = HookInstaller.hookCommand(scriptPath: "/s.sh", eventsPath: "/e.ndjson", rootPath: "/r")
         XCTAssertFalse(plain.contains("AGENTPET_AGENT"), plain)
+    }
+
+    /// 用户实锤:termarium node-pty 拉起的 claude 继承 Warp 环境变量,但不是 Warp tab——
+    /// 父进程非 shell → 终端降级 kind=other(去误导图标/激活),tty/pid 保留(存活判定不受损)。
+    func testSpawnedByNonShell_terminalDowngraded() throws {
+        let outURL = makeTempURL()
+        defer { try? FileManager.default.removeItem(at: outURL) }
+        let status = try runScript(
+            hookJSON: #"{"hook_event_name": "Stop", "session_id": "S1", "cwd": "/x"}"#,
+            outURL: outURL, termProgram: "WarpTerminal", parentComm: "node")
+        XCTAssertEqual(status, 0)
+        let content = try String(contentsOfFile: outURL.path, encoding: .utf8)
+        let event = AgentEvent.decode(line: Substring(content.split(separator: "\n").first ?? ""))
+        XCTAssertEqual(event?.terminal?.kind, .other, "程序化拉起 → 不冒充 Warp")
+        XCTAssertNil(event?.terminal?.bundleId, "无 bundleId(不误激活 App)")
+        XCTAssertNotNil(event?.terminal?.pid, "pid 保留(死进程快清仍工作)")
+    }
+
+    func testShellParent_keepsTerminalKind() throws {
+        let outURL = makeTempURL()
+        defer { try? FileManager.default.removeItem(at: outURL) }
+        _ = try runScript(
+            hookJSON: #"{"hook_event_name": "Stop", "session_id": "S1", "cwd": "/x"}"#,
+            outURL: outURL, termProgram: "WarpTerminal", parentComm: "-zsh")
+        let content = try String(contentsOfFile: outURL.path, encoding: .utf8)
+        let event = AgentEvent.decode(line: Substring(content.split(separator: "\n").first ?? ""))
+        XCTAssertEqual(event?.terminal?.kind, .warp, "用户 shell 下照常识别")
     }
 }

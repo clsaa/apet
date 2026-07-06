@@ -48,6 +48,7 @@ export _APET_PAYLOAD="$PAYLOAD"
 export _APET_OUT="$OUT"
 export _APET_TTY="$TTY_RAW"
 export _APET_PPID="$PPID"
+export _APET_PARENT_COMM="${AGENTPET_PARENT_COMM:-$(ps -o comm= -p "$PPID" 2>/dev/null | tr -d '[:space:]')}"
 export _APET_TERM_PROG="${TERM_PROGRAM:-}"
 export _APET_ITERM="${ITERM_SESSION_ID:-}"
 export _APET_CFBUNDLE="${__CFBundleIdentifier:-}"
@@ -76,6 +77,9 @@ except ValueError:
 term_prog = os.environ.get("_APET_TERM_PROG", "")
 iterm_id = os.environ.get("_APET_ITERM", "")
 real_bundle = os.environ.get("_APET_CFBUNDLE", "").strip()
+# 程序化拉起(父进程非 shell)→ 终端环境变量是继承的谎言,降级 kind=other(与 claude hook 同判别)。
+parent = os.path.basename(os.environ.get("_APET_PARENT_COMM", "")).lstrip("-")
+spawned = parent != "" and parent not in {"zsh","bash","fish","sh","dash","tcsh","ksh","nu","login"}
 
 # 终端识别(与 apet-emit-event.sh 同款矩阵)
 terminal = None
@@ -94,6 +98,8 @@ else:
     terminal = {"kind": "other"}
     if real_bundle:
         terminal["bundleId"] = real_bundle
+if spawned:
+    terminal = {"kind": "other"}
 if tty:
     terminal["tty"] = "/dev/" + tty
 if pid > 0:

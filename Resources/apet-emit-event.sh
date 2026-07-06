@@ -47,6 +47,9 @@ export _APET_CFBUNDLE="${__CFBundleIdentifier:-}"
 export _APET_TTY="$(ps -o tty= -p "$PPID" 2>/dev/null | tr -d '[:space:]')"
 # claude 进程 pid:存活探测用(pid 活着+tty 匹配 → 终端还开着;单靠 tty 会被编号复用误判)。
 export _APET_PPID="$PPID"
+# 父进程名:判别用户 tab(父=shell)vs 程序化拉起(父=node/termarium 等,继承终端环境变量
+# 却不是真 tab——图标/激活会撒谎)。AGENTPET_PARENT_COMM 供测试注入。
+export _APET_PARENT_COMM="${AGENTPET_PARENT_COMM:-$(ps -o comm= -p "$PPID" 2>/dev/null | tr -d '[:space:]')}"
 
 # python3 ships on macOS dev machines; use json.dumps for injection-safe JSON building
 # and fcntl.flock for atomic append under concurrent hook invocations.
@@ -68,6 +71,12 @@ def main():
     # macOS 给 GUI 启动的 app 设的真 bundleId——Cursor(vscode fork)/Warp-Preview 靠它区分,
     # 否则会被硬编码成 VS Code / Warp-Stable(AI 评审:错图标+错激活+错标已读)。
     real_bundle = os.environ.get("_APET_CFBUNDLE", "").strip()
+    # 程序化拉起判别:父进程非 shell → 终端环境变量是继承的谎言(用户实锤:termarium
+    # node-pty 拉起的会话顶着 Warp 图标,Warp 里却找不到)。降级 kind=other 去图标/激活,
+    # tty/pid 保留(存活/快清不受损)。
+    parent = os.path.basename(os.environ.get("_APET_PARENT_COMM", "")).lstrip("-")
+    shells = {"zsh", "bash", "fish", "sh", "dash", "tcsh", "ksh", "nu", "login"}
+    spawned = parent != "" and parent not in shells
 
     # Normalize tty: "ttys001" → "/dev/ttys001"; only accept /dev/tty + alnum.
     tty = ""
@@ -139,6 +148,8 @@ def main():
         # kind 仍归 vscode(能力分级同档:activate-only + 手动切标签)。
         terminal = {"kind": "vscode", "bundleId": real_bundle or "com.microsoft.VSCode"}
 
+    if terminal is not None and spawned:
+        terminal = {"kind": "other"}   # 降级:不冒充宿主终端
     if terminal is not None:
         # tty enables Terminal.app window-level focus; harmless extra field for others.
         if tty:
