@@ -106,7 +106,7 @@ enum SessionRowActions {
     static func jumpFailureNotice(_ s: Session, hookHint: Bool) -> RowNotice {
         let agent = s.key.agent
         let resumeCmd = ResumeCommand.display(agent: agent, sessionId: s.key.sessionId,
-                                              directory: agent == "opencode" ? s.cwd : nil)
+                                              directory: s.cwd)   // 全员带 cd(用户实锤)
         let text: String
         if agent == "opencode" {
             text = "OpenCode 在终端中运行,无法定位其窗口;终端已关时可用恢复命令重开。"

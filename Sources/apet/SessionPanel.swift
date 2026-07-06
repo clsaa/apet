@@ -313,7 +313,7 @@ struct SessionPanel: View {
             ui.renameText = row.title; ui.renamingId = row.id
         }
         Button("编辑摘要…") {
-            ui.noteText = row.note ?? ""; ui.editingNoteId = row.id
+            ui.noteText = row.note ?? row.systemSummary ?? ""; ui.editingNoteId = row.id
         }
         Menu("加入分组") {
             ForEach(groups, id: \.self) { g in
@@ -394,7 +394,7 @@ struct SessionPanel: View {
             },
             onNoteCancel: { ui.editingNoteId = nil },
             onNoteEditRequest: {
-                ui.noteText = row.note ?? ""
+                ui.noteText = row.note ?? row.systemSummary ?? ""   // 系统摘要作底稿可改
                 ui.editingNoteId = row.id
             }
         )
@@ -634,18 +634,32 @@ private struct SessionRowCell: View {
                         .overlay(RoundedRectangle(cornerRadius: 4)
                             .strokeBorder(Color.accentColor, lineWidth: 1))
                         .cornerRadius(4)
-                } else if let note = row.note, !note.isEmpty {
-                    Text("✎ \(note)")
-                        .font(.system(size: 11))
-                        .foregroundStyle(.secondary)
-                        .lineLimit(1)
-                        .help("双击编辑摘要\n\(row.subtitle.isEmpty ? note : note + "\n" + row.subtitle)")
-                        .highPriorityGesture(TapGesture(count: 2).onEnded { onNoteEditRequest() })
-                } else if !row.subtitle.isEmpty {
-                    Text(row.subtitle)
-                        .font(.system(size: 11))
-                        .foregroundStyle(.secondary)
-                        .lineLimit(1)
+                } else {
+                    // 第二行:摘要(手动 ✎ > 系统摘要,与标题重复时省略)· 路径 同行共存。
+                    // 双击摘要段编辑(默认显示系统摘要且可改——改完即手动摘要)。
+                    let summaryShown: String? = {
+                        if let n = row.note, !n.isEmpty { return n }
+                        if let sys = row.systemSummary, !sys.isEmpty, sys != row.title { return sys }
+                        return nil
+                    }()
+                    HStack(spacing: 4) {
+                        if let sum = summaryShown {
+                            Text("\(row.note != nil ? "✎ " : "")\(sum)")
+                                .font(.system(size: 11))
+                                .foregroundStyle(.secondary)
+                                .lineLimit(1)
+                                .help("双击编辑摘要")
+                                .highPriorityGesture(TapGesture(count: 2).onEnded { onNoteEditRequest() })
+                        }
+                        if !row.subtitle.isEmpty {
+                            Text(summaryShown != nil ? "· \(row.subtitle)" : row.subtitle)
+                                .font(.system(size: 11))
+                                .foregroundStyle(summaryShown != nil ? .tertiary : .secondary)
+                                .lineLimit(1)
+                                .layoutPriority(-1)   // 空间不足先截路径,保摘要
+                        }
+                        if summaryShown == nil && row.subtitle.isEmpty { EmptyView() }
+                    }
                 }
             }
 

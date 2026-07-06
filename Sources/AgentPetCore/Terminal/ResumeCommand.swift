@@ -43,7 +43,13 @@ public enum ResumeCommand {
     /// 含空格目录否则产出坏命令。argv 本身单元素传递无注入面，引用只为 display。
     public static func display(agent: String, sessionId: String, directory: String? = nil) -> String? {
         guard let parts = argv(agent: agent, sessionId: sessionId, directory: directory) else { return nil }
-        return parts.map(shellQuote).joined(separator: " ")
+        let cmd = parts.map(shellQuote).joined(separator: " ")
+        // 目录已知 → 前缀 cd(用户实锤:claude/qodercli 按项目目录归档,别处 resume 找不到会话;
+        // codex 全局 id 但工作上下文也在原目录;opencode 位置参数保留,cd 双保险)。
+        if let dir = directory, !dir.isEmpty {
+            return "cd \(shellQuote(dir)) && \(cmd)"
+        }
+        return cmd
     }
 
     /// 单引号 shell 引用；纯安全字符原样（命令名/flag/合法 id 均不受影响）。
